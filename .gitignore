@@ -1,0 +1,6 @@
+.idea
+*.pyc
+py_test
+client_files
+.DS_Store
+.trae
