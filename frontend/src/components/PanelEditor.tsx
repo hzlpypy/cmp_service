@@ -107,15 +107,15 @@ export default function PanelEditor({ panel, datasources, onSave, onClose }: Pan
           <div className="form-group">
             <label>布局 (X / Y / 宽 / 高 - 24格栅格)</label>
             <div className="form-row" style={{ gap: 6 }}>
-              <input type="number" value={p.gridPos.x} onChange={(e) => updateGrid('x', Number(e.target.value))} style={{ width: 56 }} title="X" />
-              <input type="number" value={p.gridPos.y} onChange={(e) => updateGrid('y', Number(e.target.value))} style={{ width: 56 }} title="Y" />
-              <input type="number" value={p.gridPos.w} onChange={(e) => updateGrid('w', Number(e.target.value))} style={{ width: 56 }} title="宽" min={1} max={24} />
-              <input type="number" value={p.gridPos.h} onChange={(e) => updateGrid('h', Number(e.target.value))} style={{ width: 56 }} title="高" min={1} />
+              <input type="number" value={p.gridPos?.x ?? 0} onChange={(e) => updateGrid('x', Number(e.target.value))} style={{ width: 56 }} title="X" />
+              <input type="number" value={p.gridPos?.y ?? 0} onChange={(e) => updateGrid('y', Number(e.target.value))} style={{ width: 56 }} title="Y" />
+              <input type="number" value={p.gridPos?.w ?? 24} onChange={(e) => updateGrid('w', Number(e.target.value))} style={{ width: 56 }} title="宽" min={1} max={24} />
+              <input type="number" value={p.gridPos?.h ?? 8} onChange={(e) => updateGrid('h', Number(e.target.value))} style={{ width: 56 }} title="高" min={1} />
             </div>
           </div>
 
           {/* 多查询提示 */}
-          {isMultiQuery && p.targets.length > 1 && (
+          {isMultiQuery && (p.targets || []).length > 1 && (
             <div style={{ fontSize: 11, color: 'var(--info)', marginBottom: 4, background: 'rgba(137,180,250,0.08)', padding: '4px 8px', borderRadius: 3 }}>
               多个查询分别对应图表中的不同数据系列，请为每个查询设置图例名称。
             </div>

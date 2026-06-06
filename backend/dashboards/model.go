@@ -74,6 +74,13 @@ type DashboardListReq struct {
 type DashboardDataReq struct {
 	// ID 仪表板主键ID
 	ID string `json:"id"`
+	// From 数据起始时间（RFC3339格式，可选，用于时间范围过滤）
+	From string `json:"from,omitempty"`
+	// To 数据结束时间（RFC3339格式，可选，用于时间范围过滤）
+	To string `json:"to,omitempty"`
+	// DashboardJSON 可选，前端传入的草稿 dashboard_json。
+	// 不为 nil 时直接使用此 JSON 配置查询，不从数据库读取。
+	DashboardJSON map[string]interface{} `json:"dashboard_json,omitempty"`
 }
 
 // PanelData 单个面板的数据查询结果。

@@ -181,8 +181,12 @@ export async function deleteDashboard(id: string): Promise<void> {
   return request('/api/v1/dashboards/delete', { method: 'POST', body: JSON.stringify({ id }) })
 }
 
-export async function getDashboardData(id: string, from?: string, to?: string): Promise<DashboardDataRes> {
-  return request('/api/v1/dashboards/data', { method: 'POST', body: JSON.stringify({ id, ...(from ? { from } : {}), ...(to ? { to } : {}) }) })
+export async function getDashboardData(id: string, from?: string, to?: string, dashboardJson?: DashboardJSON): Promise<DashboardDataRes> {
+  const body: any = { id }
+  if (from) body.from = from
+  if (to) body.to = to
+  if (dashboardJson) body.dashboard_json = dashboardJson
+  return request('/api/v1/dashboards/data', { method: 'POST', body: JSON.stringify(body) })
 }
 
 // ---- Datasources API ----

@@ -234,24 +234,38 @@ func generatePanelID() string {
 
 // GetDashboardData 根据仪表板JSON中的面板配置，查询 network_metrics 表的实际数据。
 // 流程：
-//  1. 从数据库加载仪表板的 dashboard_json
+//  1. 若请求中传入了 dashboard_json 则直接使用（前端草稿模式），否则从数据库加载
 //  2. 遍历每个 panel，解析其 targets 配置
-//  3. 根据 targets 中的 category 和 metricName 过滤 network_metrics 数据
+//  3. 根据 targets 查数据并应用时间范围过滤
 //  4. 返回每个面板的查询结果
 func (s *Server) GetDashboardData(ctx *gin.Context, req *DashboardDataReq) (*DashboardDataRes, error) {
-	// 加载仪表板
-	var dashboard model.Dashboard
-	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&dashboard).Error; err != nil {
-		return nil, fmt.Errorf("仪表板不存在: %v", err)
+	var dashJSON map[string]interface{}
+	var dashTitle string
+	var dashID string
+
+	if req.DashboardJSON != nil && len(req.DashboardJSON) > 0 {
+		// 前端传入草稿 dashboard_json，直接使用
+		dashJSON = req.DashboardJSON
+		dashTitle = ""
+		dashID = req.ID
+	} else {
+		// 从数据库加载仪表板
+		var dashboard model.Dashboard
+		if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&dashboard).Error; err != nil {
+			return nil, fmt.Errorf("仪表板不存在: %v", err)
+		}
+		dashJSON = dashboard.DashboardJSON
+		dashTitle = dashboard.Title
+		dashID = dashboard.ID
 	}
 
 	// 解析 dashboard_json 中的 panels
-	panelsRaw, ok := dashboard.DashboardJSON["panels"]
+	panelsRaw, ok := dashJSON["panels"]
 	if !ok {
 		return &DashboardDataRes{
-			DashboardID:    dashboard.ID,
-			DashboardTitle: dashboard.Title,
-			DashboardJSON:  dashboard.DashboardJSON,
+			DashboardID:    dashID,
+			DashboardTitle: dashTitle,
+			DashboardJSON:  dashJSON,
 			PanelsData:     []PanelData{},
 		}, nil
 	}
@@ -267,14 +281,14 @@ func (s *Server) GetDashboardData(ctx *gin.Context, req *DashboardDataReq) (*Das
 		if !ok {
 			continue
 		}
-		panelData := s.queryPanelData(pMap)
+		panelData := s.queryPanelData(pMap, req.From, req.To)
 		panelsData = append(panelsData, panelData)
 	}
 
 	return &DashboardDataRes{
-		DashboardID:    dashboard.ID,
-		DashboardTitle: dashboard.Title,
-		DashboardJSON:  dashboard.DashboardJSON,
+		DashboardID:    dashID,
+		DashboardTitle: dashTitle,
+		DashboardJSON:  dashJSON,
 		PanelsData:     panelsData,
 	}, nil
 }
@@ -282,7 +296,7 @@ func (s *Server) GetDashboardData(ctx *gin.Context, req *DashboardDataReq) (*Das
 // queryPanelData 根据单个面板配置查询 network_metrics 数据。
 // 每个 target 查询一组数据，返回按 target 分组的结果。
 // 面板可指定 datasource_id，不同面板可使用不同数据源获取数据。
-func (s *Server) queryPanelData(panelMap map[string]interface{}) PanelData {
+func (s *Server) queryPanelData(panelMap map[string]interface{}, from, to string) PanelData {
 	panelID := getStringField(panelMap, "id")
 	panelTitle := getStringField(panelMap, "title")
 	panelType := getStringField(panelMap, "type")
@@ -319,7 +333,7 @@ func (s *Server) queryPanelData(panelMap map[string]interface{}) PanelData {
 		}
 
 		// 读取 target 配置
-		rows, err := s.queryTargetFromMap(tMap)
+		rows, err := s.queryTargetFromMap(tMap, from, to)
 		if err != nil {
 			s.log.Warnf("查询 panel %s target 数据失败: %v", panelID, err)
 			continue
@@ -341,7 +355,7 @@ func (s *Server) queryPanelData(panelMap map[string]interface{}) PanelData {
 //   - rawSql 模式：执行用户自定义 SQL 语句
 //   - table 模式：指定 table + fields 查询（向后兼容）
 //   - 默认模式：查询 net_work_metrics 表
-func (s *Server) queryTargetFromMap(tMap map[string]interface{}) ([]map[string]interface{}, error) {
+func (s *Server) queryTargetFromMap(tMap map[string]interface{}, from, to string) ([]map[string]interface{}, error) {
 	rawSQL := getStringField(tMap, "rawSql")
 
 	// 模式1: 用户自定义 SQL
@@ -359,7 +373,7 @@ func (s *Server) queryTargetFromMap(tMap map[string]interface{}) ([]map[string]i
 	// 模式3: 默认 net_work_metrics
 	category := getStringField(tMap, "category")
 	metricName := getStringField(tMap, "metricName")
-	return s.queryNetworkMetrics(category, metricName)
+	return s.queryNetworkMetrics(category, metricName, from, to)
 }
 
 // queryWithRawSQL 执行用户自定义 SQL 并应用别名映射。
@@ -488,7 +502,7 @@ func (s *Server) queryCustomTable(table, fields string, _ map[string]interface{}
 }
 
 // queryNetworkMetrics 查询 net_work_metrics 表（默认模式，保持向后兼容）。
-func (s *Server) queryNetworkMetrics(category, metricName string) ([]map[string]interface{}, error) {
+func (s *Server) queryNetworkMetrics(category, metricName, from, to string) ([]map[string]interface{}, error) {
 	var metrics []model.NetWorkMetrics
 	query := s.db.Model(&model.NetWorkMetrics{})
 
@@ -497,6 +511,13 @@ func (s *Server) queryNetworkMetrics(category, metricName string) ([]map[string]
 	}
 	if metricName != "" {
 		query = query.Where("metrics LIKE ?", "%"+metricName+"%")
+	}
+	// 时间范围过滤
+	if from != "" {
+		query = query.Where("created_at >= ?", from)
+	}
+	if to != "" {
+		query = query.Where("created_at <= ?", to)
 	}
 
 	if err := query.Order("id ASC").Limit(500).Find(&metrics).Error; err != nil {
