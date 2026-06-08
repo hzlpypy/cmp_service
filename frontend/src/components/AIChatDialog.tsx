@@ -105,7 +105,7 @@ function mergePanels(draftJson: any, newPanels: any[]) {
   return dj
 }
 
-const DEFAULT_WS_URL = 'ws://127.0.0.1:8765'
+const DEFAULT_WS_URL = 'ws://127.0.0.1:8764'
 
 export default function AIChatDialog({
   dashboardId,
@@ -171,7 +171,7 @@ export default function AIChatDialog({
         setLoading(false)
         setMessages((prev) => [...prev, {
           role: 'system',
-          content: 'WebSocket 连接异常，请确认后端已启动 (ws://127.0.0.1:8765)',
+          content: 'WebSocket 连接异常，请确认后端已启动 (ws://127.0.0.1:8764)',
         }])
       }
 
@@ -276,6 +276,17 @@ export default function AIChatDialog({
     s.msgIndex = -1
   }
 
+  // 对话框打开时展示系统上下文提示
+  useEffect(() => {
+    const panelList = (draftJson?.panels || panelsSummary).map((p: any) =>
+      `  - [${p.type || '?'}] ${p.title || p.id} (${p.id})`
+    ).join('\n')
+    setMessages([{
+      role: 'system',
+      content: `当前仪表盘: ${dashboardTitle} (${dashboardId})\n包含 ${panelsSummary.length} 个面板:\n${panelList}\n\n你可以让我修改面板的标题、类型、SQL 查询等，或新增面板。`,
+    }])
+  }, [dashboardId])
+
   useEffect(() => {
     connect()
     return () => {
@@ -307,6 +318,20 @@ export default function AIChatDialog({
       `---`,
       `【用户指令】${userText}`,
     ].join('\n')
+  }
+
+  /** 快捷提问示例 */
+  const quickPrompts: Array<{ label: string; text: string }> = [
+    { label: '改标题', text: `把 ${panelsSummary[0]?.title || '面板'} 标题改为 "测试"` },
+    { label: '改图表类型', text: `把 ${panelsSummary[0]?.title || '面板'} 改为折线图` },
+    { label: '新增面板', text: '新增一个柱状图叫 "新增测试"' },
+    { label: '修改SQL', text: `修改 ${panelsSummary[0]?.title || '面板'} 的 SQL 为 SELECT 1` },
+    { label: '切换数据源', text: `把 ${panelsSummary[0]?.title || '面板'} 的数据源切换为 API` },
+  ]
+
+  /** 点击快捷提示填入输入框 */
+  const handleQuickPrompt = (text: string) => {
+    setInput(text)
   }
 
   const handleSend = () => {
@@ -366,14 +391,42 @@ export default function AIChatDialog({
         flex: 1, overflow: 'auto', padding: '10px 14px',
         display: 'flex', flexDirection: 'column', gap: 8,
       }}>
-        {messages.length === 0 && (
+        {messages.length <= 1 && messages[0]?.role === 'system' && (
           <div style={{
             color: 'var(--text-muted)', fontSize: 12,
-            textAlign: 'center', padding: '40px 0',
+            padding: '4px 0',
           }}>
-            向 AI 描述你想要的修改，例如：
-            <div style={{ marginTop: 8, fontStyle: 'italic' }}>
-              "把测试改为折线图，再新增一个柱状图叫新增测试"
+            <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--text-secondary)' }}>
+              试试对我说：
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {quickPrompts.map((qp, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleQuickPrompt(qp.text)}
+                  disabled={!connected || loading}
+                  title={qp.text}
+                  style={{
+                    padding: '4px 10px', fontSize: 11,
+                    background: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 12, cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.target as HTMLButtonElement).style.background = 'var(--primary)'
+                    ;(e.target as HTMLButtonElement).style.color = '#fff'
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.target as HTMLButtonElement).style.background = 'var(--bg-input)'
+                    ;(e.target as HTMLButtonElement).style.color = 'var(--text-primary)'
+                  }}
+                >
+                  {qp.label}
+                </button>
+              ))}
             </div>
           </div>
         )}

@@ -103,3 +103,19 @@ func (cont *Controller) GetDashboardDataController(ctx *gin.Context) {
 	}
 	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
 }
+
+// GetPanelDataController 查询指定仪表盘中单个面板的实际数据。
+// POST /api/v1/panels/data
+func (cont *Controller) GetPanelDataController(ctx *gin.Context) {
+	var req PanelDataReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
+		return
+	}
+	resp, err := cont.GetPanelData(ctx, &req)
+	if err != nil {
+		ctx.JSON(500, gin.H{"errorCode": "50000", "errorMessage": err.Error(), "success": false})
+		return
+	}
+	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
+}

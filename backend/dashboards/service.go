@@ -35,6 +35,8 @@ type Interface interface {
 	DeleteDashboard(ctx *gin.Context, req *DashboardReq) error
 	// GetDashboardData 根据仪表板JSON中的面板配置查询实际数据
 	GetDashboardData(ctx *gin.Context, req *DashboardDataReq) (*DashboardDataRes, error)
+	// GetPanelData 根据仪表板ID和面板ID查询单个面板的实际数据
+	GetPanelData(ctx *gin.Context, req *PanelDataReq) (*PanelData, error)
 }
 
 // NewServer 创建仪表板业务服务实例。
@@ -291,6 +293,46 @@ func (s *Server) GetDashboardData(ctx *gin.Context, req *DashboardDataReq) (*Das
 		DashboardJSON:  dashJSON,
 		PanelsData:     panelsData,
 	}, nil
+}
+
+// GetPanelData 查询指定仪表盘中单个面板的实际数据。
+// 与 GetDashboardData 不同，此接口只查询一个面板，减少数据传输量和处理开销。
+// 流程：
+//  1. 从数据库加载仪表板的 dashboard_json
+//  2. 遍历 panels 找到匹配 panel_id 的面板
+//  3. 只查询该面板的 targets，返回结果
+func (s *Server) GetPanelData(ctx *gin.Context, req *PanelDataReq) (*PanelData, error) {
+	// 从数据库加载仪表板
+	var dashboard model.Dashboard
+	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.DashboardID).First(&dashboard).Error; err != nil {
+		return nil, fmt.Errorf("仪表板不存在: %v", err)
+	}
+
+	// 解析 dashboard_json 中的 panels
+	dashJSON := dashboard.DashboardJSON
+	panelsRaw, ok := dashJSON["panels"]
+	if !ok {
+		return nil, fmt.Errorf("仪表板中没有面板")
+	}
+
+	panelsList, ok := panelsRaw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("panels 格式错误")
+	}
+
+	// 查找匹配的面板
+	for _, pRaw := range panelsList {
+		pMap, ok := pRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if getStringField(pMap, "id") == req.PanelID {
+			panelData := s.queryPanelData(pMap, req.From, req.To)
+			return &panelData, nil
+		}
+	}
+
+	return nil, fmt.Errorf("面板 %s 不存在", req.PanelID)
 }
 
 // queryPanelData 根据单个面板配置查询 network_metrics 数据。

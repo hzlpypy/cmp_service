@@ -168,7 +168,7 @@ export default function DashboardEditor({ title, json, onSave, onClose }: Dashbo
                   <div className="form-row">
                     <div className="form-group" style={{ flex: 1 }}>
                       <label>数据源</label>
-                      <select value={panel.datasource_id || ''} onChange={(e) => updatePanel(pi, { datasource_id: e.target.value || undefined })}>
+                      <select value={panel.datasource_id || ''} onChange={(e) => updatePanel(pi, { datasource_id: e.target.value || undefined, datasource: undefined } as any)}>
                         {datasources.map((d) => (<option key={d.id} value={d.id}>{d.name} ({d.type === 'mysql' ? 'MySQL' : 'HTTP'})</option>))}
                       </select>
                     </div>

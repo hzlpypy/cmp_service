@@ -83,6 +83,19 @@ type DashboardDataReq struct {
 	DashboardJSON map[string]interface{} `json:"dashboard_json,omitempty"`
 }
 
+// PanelDataReq 单个面板数据查询请求。
+// 指定仪表盘ID和面板ID，返回该面板的查询结果。
+type PanelDataReq struct {
+	// DashboardID 仪表盘主键ID（必填）
+	DashboardID string `json:"dashboard_id" binding:"required"`
+	// PanelID 面板主键ID（必填）
+	PanelID string `json:"panel_id" binding:"required"`
+	// From 数据起始时间（RFC3339格式，可选）
+	From string `json:"from,omitempty"`
+	// To 数据结束时间（RFC3339格式，可选）
+	To string `json:"to,omitempty"`
+}
+
 // PanelData 单个面板的数据查询结果。
 type PanelData struct {
 	// PanelID 面板ID

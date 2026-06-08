@@ -24,4 +24,6 @@ func RegisterDashboardsRouter(e *gin.Engine, c *Controller) {
 		api.POST("/delete", c.DeleteDashboardController)
 		api.POST("/data", c.GetDashboardDataController)
 	}
+	// 面板独立路由：查询单个面板数据
+	e.POST("/api/v1/panels/data", c.GetPanelDataController)
 }

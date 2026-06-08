@@ -82,7 +82,7 @@ export default function PanelEditor({ panel, datasources, onSave, onClose }: Pan
         <div className="modal-body" style={{ maxHeight: '60vh', overflow: 'auto' }}>
           <div className="form-group">
             <label>数据源</label>
-            <select value={p.datasource_id || ''} onChange={(e) => update({ datasource_id: e.target.value || undefined })}>
+            <select value={p.datasource_id || ''} onChange={(e) => update({ datasource_id: e.target.value || undefined, datasource: undefined } as any)}>
               {datasources.map((ds) => (<option key={ds.id} value={ds.id}>{ds.name} ({ds.type === 'mysql' ? 'MySQL' : 'HTTP'})</option>))}
             </select>
           </div>
