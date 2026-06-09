@@ -22,8 +22,10 @@ import (
 	"cmp_service_backend/dashboards"
 	"cmp_service_backend/datasources"
 	"cmp_service_backend/folders"
+	"cmp_service_backend/model"
 	"cmp_service_backend/network_metrics"
 	"cmp_service_backend/panels"
+	"cmp_service_backend/snapshots"
 	"fmt"
 	"time"
 
@@ -115,6 +117,18 @@ func main() {
 	panelSvc := panels.NewServer(db, l)
 	panelCtrl := panels.NewController(panelSvc)
 	panels.RegisterPanelsRouter(e, panelCtrl)
+
+	// 快照管理：/api/v1/snapshots/*
+	snapSvc := snapshots.NewServer(db, l)
+	snapCtrl := snapshots.NewController(snapSvc)
+	snapshots.RegisterSnapshotsRouter(e, snapCtrl)
+
+	// Auto-migrate new tables
+	db.AutoMigrate(&model.Snapshot{})
+
+	// 确保 snapshots 表的 panel_id 和 dashboard_id 字段长度足够
+	db.Exec("ALTER TABLE snapshots MODIFY COLUMN dashboard_id VARCHAR(64) NOT NULL")
+	db.Exec("ALTER TABLE snapshots MODIFY COLUMN panel_id VARCHAR(64) DEFAULT ''")
 
 	// CORS 中间件：允许跨域请求（开发阶段开放所有来源）
 	e.Use(func(ctx *gin.Context) {

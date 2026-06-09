@@ -1036,3 +1036,798 @@ body {
   min-width: 28px;
   text-align: center;
 }
+
+/* ===== Panel Edit Page (Grafana-style) ===== */
+
+/* ── Root ── */
+.pe-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary);
+}
+
+/* ── Toolbar ── */
+.pe-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  height: 44px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.pe-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pe-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pe-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 10px;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.pe-toolbar-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.pe-toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pe-btn-discard {
+  color: var(--text-muted);
+  border-color: transparent;
+  font-size: 12px;
+}
+
+.pe-btn-discard:hover {
+  color: var(--red) !important;
+  border-color: var(--red) !important;
+  background: rgba(226, 77, 77, 0.08) !important;
+}
+
+.pe-btn-save {
+  padding: 6px 20px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.pe-btn-save:hover {
+  background: var(--accent-hover);
+}
+
+.pe-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.pe-breadcrumb-link {
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+  white-space: nowrap;
+}
+
+.pe-breadcrumb-link:hover {
+  color: var(--accent);
+}
+
+.pe-breadcrumb-sep {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.pe-breadcrumb-current {
+  color: var(--text-primary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pe-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: pe-spin 0.6s linear infinite;
+}
+
+@keyframes pe-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Body: Left Preview + Right Sidebar ── */
+.pe-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Preview Area ── */
+.pe-preview {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-right: 1px solid var(--border-color);
+}
+
+.pe-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.pe-preview-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  background: rgba(56, 113, 220, 0.12);
+  color: var(--accent);
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.pe-preview-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pe-preview-canvas {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  overflow: auto;
+  background: var(--bg-primary);
+}
+
+/* ── Sidebar ── */
+.pe-sidebar {
+  width: 420px;
+  min-width: 320px;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.pe-sidebar-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.pe-sidebar-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 8px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.pe-sidebar-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.pe-sidebar-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.pe-sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+/* ── Collapsible Section ── */
+.pe-section {
+  border-bottom: 1px solid var(--border-light);
+}
+
+.pe-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  user-select: none;
+  transition: background 0.1s;
+}
+
+.pe-section-header:hover {
+  background: var(--bg-hover);
+}
+
+.pe-section-body {
+  padding: 4px 16px 14px;
+}
+
+.pe-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.pe-section-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+
+/* ── Form Fields ── */
+.pe-field {
+  margin-bottom: 8px;
+}
+
+.pe-input {
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.pe-input:focus {
+  border-color: var(--accent);
+}
+
+.pe-input::placeholder {
+  color: var(--text-muted);
+}
+
+.pe-input-sm {
+  width: 100%;
+  padding: 5px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.pe-input-sm:focus {
+  border-color: var(--accent);
+}
+
+.pe-input-sm::placeholder {
+  color: var(--text-muted);
+}
+
+.pe-input-xs {
+  width: 100%;
+  padding: 4px 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.pe-input-xs:focus {
+  border-color: var(--accent);
+}
+
+.pe-input-xs::placeholder {
+  color: var(--text-muted);
+}
+
+.pe-select {
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.pe-select:focus {
+  border-color: var(--accent);
+}
+
+.pe-select option {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+.pe-label-sm {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+/* ── SQL Editor ── */
+.pe-sql-editor {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px;
+  background: #1a1b26;
+  color: #a9b1d6;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s;
+  tab-size: 2;
+}
+
+.pe-sql-editor:focus {
+  border-color: var(--accent);
+}
+
+.pe-sql-editor::placeholder {
+  color: #4a5068;
+}
+
+/* ── Query Block ── */
+.pe-query-block {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.pe-query-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.pe-query-ref {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.pe-query-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.pe-query-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.15s;
+}
+
+.pe-query-remove:hover {
+  color: var(--red);
+  background: rgba(226, 77, 77, 0.1);
+}
+
+/* ── Alias Section ── */
+.pe-alias-section {
+  margin-top: 8px;
+}
+
+.pe-alias-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.pe-alias-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pe-alias-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pe-alias-arrow {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.pe-alias-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 2px;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.pe-alias-remove:hover {
+  color: var(--red);
+  background: rgba(226, 77, 77, 0.1);
+}
+
+/* ── Add Query Button ── */
+.pe-add-query-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px;
+  background: none;
+  border: 1px dashed var(--border-color);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.pe-add-query-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(56, 113, 220, 0.05);
+}
+
+/* ── Link Button ── */
+.pe-link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  padding: 0;
+  transition: color 0.15s;
+}
+
+.pe-link-btn:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+/* ── Primary Small Button ── */
+.pe-btn-primary-sm {
+  padding: 6px 16px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.pe-btn-primary-sm:hover {
+  background: var(--accent-hover);
+}
+
+/* ── Chart Type Grid ── */
+.pe-chart-type-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.pe-chart-type-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 4px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.pe-chart-type-card:hover {
+  border-color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.pe-chart-type-card.active {
+  border-color: var(--accent);
+  background: rgba(56, 113, 220, 0.1);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.pe-chart-type-icon {
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+
+.pe-chart-type-card.active .pe-chart-type-icon {
+  color: var(--accent);
+}
+
+.pe-chart-type-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: inherit;
+}
+
+.pe-chart-type-card.active .pe-chart-type-label {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* ── Grid Layout Fields ── */
+.pe-grid-fields {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+/* ── Toggle Switch ── */
+.pe-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pe-toggle input[type="checkbox"] {
+  display: none;
+}
+
+.pe-toggle-slider {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.pe-toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+
+.pe-toggle input:checked + .pe-toggle-slider {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.pe-toggle input:checked + .pe-toggle-slider::after {
+  left: 18px;
+  background: #fff;
+}
+
+.pe-toggle-label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* ── Hint Text ── */
+.pe-hint-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 4px;
+  line-height: 1.4;
+}
+
+.pe-hint-block {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  padding: 6px 10px;
+  border-radius: 4px;
+  line-height: 1.5;
+}
+
+/* ── Empty State ── */
+.pe-empty-state {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ── Snapshot List ── */
+.pe-snapshot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pe-snapshot-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  transition: border-color 0.15s;
+}
+
+.pe-snapshot-item:hover {
+  border-color: var(--text-secondary);
+}
+
+.pe-snapshot-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pe-snapshot-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pe-snapshot-link {
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+}
+
+.pe-snapshot-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* ── Icon Buttons ── */
+.pe-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.pe-icon-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.pe-icon-btn-danger:hover {
+  color: var(--red);
+  background: rgba(226, 77, 77, 0.1);
+}

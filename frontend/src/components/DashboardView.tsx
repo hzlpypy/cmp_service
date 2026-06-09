@@ -1,20 +1,28 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import html2canvas from 'html2canvas'
 import ChartPanel from './ChartPanel'
-import PanelEditor from './PanelEditor'
 import AIChatDialog from './AIChatDialog'
 import * as api from '../api'
-import type { DashboardRes, DashboardDataRes, DashboardJSON, MetricRow, PanelDef, DatasourceRes } from '../api'
+import type { DashboardRes, DashboardDataRes, DashboardJSON, MetricRow, PanelDef, PanelDataRes, DatasourceRes } from '../api'
 
 interface DashboardViewProps {
   dashboardId: string
   onBack: () => void
+  onEditPanel?: (ctx: {
+    panel: PanelDef
+    dashboardId: string
+    datasources: DatasourceRes[]
+    draftJson: any
+    panelsData?: PanelDataRes[]
+    onSave: (updated: PanelDef) => void
+  }) => void
 }
 
 function uid(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 }
 
-export default function DashboardView({ dashboardId, onBack }: DashboardViewProps) {
+export default function DashboardView({ dashboardId, onBack, onEditPanel }: DashboardViewProps) {
   const [dashboard, setDashboard] = useState<DashboardRes | null>(null)
   const [dataRes, setDataRes] = useState<DashboardDataRes | null>(null)
   const [loading, setLoading] = useState(true)
@@ -33,6 +41,115 @@ export default function DashboardView({ dashboardId, onBack }: DashboardViewProp
   // AI 对话面板
   const [chatOpen, setChatOpen] = useState(false)
 
+  // 创建仪表盘快照
+  const [snapModalOpen, setSnapModalOpen] = useState(false)
+  const [snapName, setSnapName] = useState('')
+  const [snapping, setSnapping] = useState(false)
+  const [snapshots, setSnapshots] = useState<api.SnapshotRes[]>([])
+  const [snapLoading, setSnapLoading] = useState(false)
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const shareLink = `${window.location.origin}/snapshot/`
+
+  const loadSnapshots = async () => {
+    setSnapLoading(true)
+    try { setSnapshots(await api.listSnapshots(dashboardId, '')) } catch {}
+    finally { setSnapLoading(false) }
+  }
+
+  const handleCreateDashboardSnapshot = async () => {
+    if (!draftJson || !dataRes) return
+    setSnapping(true)
+    try {
+      const panelDataList: api.PanelDataRes[] = (dataRes.panels_data || []).map((pd) => ({
+        panel_id: pd.panel_id,
+        panel_title: pd.panel_title,
+        panel_type: pd.panel_type,
+        datasource_id: pd.datasource_id,
+        target: pd.target,
+      }))
+      const snap = await api.createSnapshot({
+        dashboard_id: dashboardId,
+        panel_id: '',
+        name: snapName || `${displayTitle || '仪表盘'} 快照`,
+        dashboard_json: draftJson as DashboardJSON,
+        panels_data: panelDataList,
+      })
+      setSnapshots((prev) => [snap, ...prev])
+      setSnapName('')
+    } catch (e: any) {
+      alert('创建快照失败: ' + (e.message || '未知错误'))
+    } finally {
+      setSnapping(false)
+    }
+  }
+
+  const handleDeleteSnapshot = async (key: string) => {
+    if (!confirm('确认删除该快照？')) return
+    try {
+      await api.deleteSnapshot(key)
+      setSnapshots((prev) => prev.filter((s) => s.snapshot_key !== key))
+    } catch (e: any) { alert('删除失败: ' + (e.message || '未知错误')) }
+  }
+
+  // 导出为图像
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const [exporting, setExporting] = useState(false)
+  const handleExportImage = async () => {
+    if (!canvasRef.current) return
+    setExporting(true)
+
+    const canvasEl = canvasRef.current
+    const wrapperEl = wrapperRef.current
+
+    // 保存原始样式
+    const origCanvasStyle = canvasEl.style.cssText
+    const origWrapperStyle = wrapperEl?.style.cssText || ''
+    // 保存 dashboard-view 根节点的 overflow 样式
+    const viewRoot = canvasEl.closest('.dashboard-view') as HTMLElement
+    const origRootOverflow = viewRoot?.style.overflow || ''
+
+    try {
+      // 临时展开整个仪表盘面板区域，确保所有内容可见
+      if (wrapperEl) {
+        wrapperEl.style.height = 'auto'
+        wrapperEl.style.flex = 'none'
+        wrapperEl.style.overflow = 'visible'
+      }
+      canvasEl.style.height = 'auto'
+      canvasEl.style.flex = 'none'
+      canvasEl.style.overflow = 'visible'
+      canvasEl.style.maxHeight = 'none'
+      if (viewRoot) {
+        viewRoot.style.overflow = 'visible'
+      }
+
+      // 等待一帧让浏览器重新布局
+      await new Promise((r) => requestAnimationFrame(r))
+
+      const canvas = await html2canvas(canvasEl, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        windowWidth: canvasEl.scrollWidth,
+        windowHeight: canvasEl.scrollHeight,
+      })
+      const link = document.createElement('a')
+      link.download = `${displayTitle || 'dashboard'}_${new Date().toISOString().slice(0, 10)}.png`
+      link.href = canvas.toDataURL('image/png')
+      link.click()
+    } catch (e: any) {
+      alert('导出失败: ' + (e.message || e))
+    } finally {
+      // 恢复原始样式
+      canvasEl.style.cssText = origCanvasStyle
+      if (wrapperEl) wrapperEl.style.cssText = origWrapperStyle
+      if (viewRoot) viewRoot.style.overflow = origRootOverflow
+      setExporting(false)
+    }
+  }
+
   /** AI 通过 onDraftUpdate 回调传入修改后的 dashboard_json，立即生效 */
   const handleDraftUpdate = (newDashboardJson: any) => {
     if (!newDashboardJson) return
@@ -42,7 +159,6 @@ export default function DashboardView({ dashboardId, onBack }: DashboardViewProp
   }
 
   // 单面板编辑器
-  const [editingPanel, setEditingPanel] = useState<PanelDef | null>(null)
   // 仪表板元信息编辑器
   const [showMetaEdit, setShowMetaEdit] = useState(false)
   const [metaTitle, setMetaTitle] = useState('')
@@ -135,24 +251,30 @@ export default function DashboardView({ dashboardId, onBack }: DashboardViewProp
     }
   }
 
-  // ---- 单面板编辑（仅修改本地草稿） ----
+  // ---- 单面板编辑：导航到全屏编辑页面 ----
   const handleEditPanel = (panelId: string) => {
     setOpenMenuId(null)
     const panels: any[] = draftJson?.panels || []
     const panel = panels.find((p: any) => p.id === panelId)
-    if (panel) setEditingPanel(panel as PanelDef)
-  }
-
-  const handleSavePanel = (updated: PanelDef) => {
-    // 仅更新本地草稿，不调 API
-    const panels: any[] = [...(draftJson?.panels || [])]
-    const idx = panels.findIndex((p: any) => p.id === updated.id)
-    if (idx >= 0) panels[idx] = updated
-    const newDraft = { ...draftJson, panels }
-    setDraftJson(newDraft)
-    setEditingPanel(null)
-    // 用新草稿 JSON 立即查询面板数据，实现预览
-    reloadDataWithDraft(newDraft)
+    if (panel && onEditPanel) {
+      onEditPanel({
+        panel: panel as PanelDef,
+        dashboardId,
+        datasources,
+        draftJson,
+        panelsData: dataRes?.panels_data,
+        onSave: (updated: PanelDef) => {
+          // 更新本地草稿
+          const newPanels: any[] = [...(draftJson?.panels || [])]
+          const idx = newPanels.findIndex((p: any) => p.id === updated.id)
+          if (idx >= 0) newPanels[idx] = updated
+          const newDraft = { ...draftJson, panels: newPanels }
+          setDraftJson(newDraft)
+          // 用新草稿 JSON 立即查询面板数据，实现预览
+          reloadDataWithDraft(newDraft)
+        },
+      })
+    }
   }
 
   // ---- 仪表板元信息编辑（仅修改本地草稿） ----
@@ -302,6 +424,12 @@ export default function DashboardView({ dashboardId, onBack }: DashboardViewProp
           <button className="btn-sm" onClick={() => setShowNewPanel(true)}>+ 添加面板</button>
           <button className="btn-sm" onClick={handleOpenMetaEdit} title="编辑仪表板信息">&#x270E; 设置</button>
           <button className="btn-sm" onClick={() => setShowJson(true)} title="查看仪表板JSON">{'{ }'} 查看JSON</button>
+          <button className="btn-sm" onClick={handleExportImage} disabled={exporting} title="导出仪表板为PNG图像">
+            {exporting ? '导出中...' : '📷 导出图像'}
+          </button>
+          <button className="btn-sm" onClick={() => { setSnapName(''); setSnapModalOpen(true); loadSnapshots() }} title="创建仪表盘快照">
+            📸 创建快照
+          </button>
           <button className="btn-sm" onClick={loadData} title="刷新数据">&#x1F504; 刷新</button>
           <button className="btn-sm" onClick={() => setChatOpen(!chatOpen)} title="AI 智能助手"
             style={chatOpen ? { background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' } : undefined}
@@ -349,6 +477,81 @@ export default function DashboardView({ dashboardId, onBack }: DashboardViewProp
         </div>
       )}
 
+      {/* ---- 创建快照 Modal ---- */}
+      {snapModalOpen && (
+        <div className="modal-overlay" onClick={() => setSnapModalOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ width: 480 }}>
+            <div className="modal-header">
+              <h2>创建仪表盘快照</h2>
+              <button className="modal-close" onClick={() => setSnapModalOpen(false)}>&times;</button>
+            </div>
+            <div className="modal-body" style={{ maxHeight: '60vh', overflow: 'auto' }}>
+              <div className="form-group">
+                <label>快照名称（可选）</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input value={snapName} onChange={(e) => setSnapName(e.target.value)} placeholder={`${displayTitle || '仪表盘'} 快照`} autoFocus style={{ flex: 1 }} />
+                  <button className="btn-primary" onClick={handleCreateDashboardSnapshot} disabled={snapping} style={{ whiteSpace: 'nowrap' }}>
+                    {snapping ? '创建中...' : '创建快照'}
+                  </button>
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 16 }}>
+                快照将保存当前仪表盘中所有面板的数据和配置。
+              </div>
+
+              <div>
+                <h4 style={{ marginBottom: 8, fontSize: 14 }}>
+                  已有快照 {snapshots.length > 0 && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({snapshots.length})</span>}
+                </h4>
+                {snapLoading ? (
+                  <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>加载中...</div>
+                ) : snapshots.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
+                    暂无快照，输入名称后点击"创建快照"保存当前状态
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {snapshots.map((snap) => (
+                      <div key={snap.snapshot_key} style={{
+                        border: '1px solid var(--border-color)', borderRadius: 6, padding: '10px 12px',
+                        display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-card)',
+                      }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {snap.name || '未命名快照'}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {shareLink}{snap.snapshot_key}
+                          </div>
+                        </div>
+                        <button className="btn-sm"
+                          onClick={() => window.open(`/snapshot/${snap.snapshot_key}`, '_blank')}
+                          style={{ fontSize: 11, whiteSpace: 'nowrap', padding: '4px 10px' }}>
+                          查看
+                        </button>
+                        <button className="btn-sm"
+                          onClick={() => { navigator.clipboard.writeText(`${shareLink}${snap.snapshot_key}`); setCopiedKey(snap.snapshot_key); setTimeout(() => setCopiedKey(null), 2000) }}
+                          style={{ fontSize: 11, whiteSpace: 'nowrap', padding: '4px 10px' }}>
+                          {copiedKey === snap.snapshot_key ? '已复制' : '复制链接'}
+                        </button>
+                        <button className="btn-sm"
+                          onClick={() => handleDeleteSnapshot(snap.snapshot_key)}
+                          style={{ fontSize: 11, color: 'var(--red)', borderColor: 'transparent', padding: '4px 8px' }}>
+                          删除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setSnapModalOpen(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ---- 添加面板确认 ---- */}
       {showNewPanel && (
         <div className="modal-overlay" onClick={() => setShowNewPanel(false)}>
@@ -368,16 +571,6 @@ export default function DashboardView({ dashboardId, onBack }: DashboardViewProp
             </div>
           </div>
         </div>
-      )}
-
-      {/* ---- 单面板编辑 ---- */}
-      {editingPanel && (
-        <PanelEditor
-          panel={editingPanel}
-          datasources={datasources}
-          onSave={handleSavePanel}
-          onClose={() => setEditingPanel(null)}
-        />
       )}
 
       {/* ---- JSON Viewer ---- */}
@@ -401,8 +594,8 @@ export default function DashboardView({ dashboardId, onBack }: DashboardViewProp
       )}
 
       {/* ---- Canvas ---- */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <div className="dashboard-canvas" style={{ flex: 1, overflow: 'auto' }}>
+      <div ref={wrapperRef} style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <div className="dashboard-canvas" ref={canvasRef} style={{ flex: 1, overflow: 'auto' }}>
           {panelRows.map((row, rowIdx) => (
             <div key={rowIdx} className="panel-row">
               {row.map((panel: any) => {
@@ -415,6 +608,7 @@ export default function DashboardView({ dashboardId, onBack }: DashboardViewProp
                       title={panel.title || '未命名'}
                       data={panelData}
                       targets={panel.targets || []}
+                      options={panel.options}
                       menuOpen={openMenuId === panel.id}
                       onToggleMenu={() => toggleMenu(panel.id)}
                       onEdit={() => handleEditPanel(panel.id)}

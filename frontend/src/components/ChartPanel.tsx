@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo } from 'react'
+import { useRef, useEffect, useMemo, useState } from 'react'
 import * as echarts from 'echarts'
 import type { MetricRow, TargetDef } from '../api'
 
@@ -13,6 +13,12 @@ interface ChartPanelProps {
   onToggleMenu: () => void
   onEdit: () => void
   onRemove: () => void
+  /** 是否显示右上角菜单按钮，默认 true */
+  showMenu?: boolean
+  /** 面板选项，如 { enableColumnFilter: true } */
+  options?: Record<string, unknown>
+  /** 面板 key（用于强制重新挂载） */
+  panelKey?: string
 }
 
 /**
@@ -70,11 +76,15 @@ function shortName(name: string): string {
 
 const SERIES_COLORS = ['#5794f2', '#e24d4d', '#55bd6a', '#ff9830', '#b877d9', '#eca846']
 
-export default function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove }: ChartPanelProps) {
+export default function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, panelKey }: ChartPanelProps) {
   const chartRef = useRef<HTMLDivElement>(null)
+  const chartInstanceRef = useRef<echarts.ECharts | null>(null)
+  const [chartError, setChartError] = useState<string | null>(null)
 
   // 合并所有 target 数据为扁平数组（用于表格和列探测）
-  const allData = useMemo(() => data.flat(), [data])
+  const allData = useMemo(() => {
+    try { return data.flat() } catch { return [] }
+  }, [data])
 
   const { nameCol, valueCols } = useMemo(() => {
     // 用第一个 target 的数据探测列结构
@@ -83,116 +93,144 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
 
   useEffect(() => {
     if (!chartRef.current || type === 'table') return
-    const chart = echarts.init(chartRef.current, undefined, { renderer: 'canvas' })
 
-    // X 轴名称：从第一个 target 数据中取
-    const firstRows = data[0] || []
-    const names = nameCol ? firstRows.map((m) => {
-      const v = m[nameCol!] || ''
-      return v.length > 15 ? shortName(v) : v
-    }) : []
+    try {
+      setChartError(null)
 
-    let option: echarts.EChartsOption
+      // 如果已有实例，先 dispose
+      if (chartInstanceRef.current) {
+        chartInstanceRef.current.dispose()
+        chartInstanceRef.current = null
+      }
 
-    switch (type) {
-      case 'bar':
-      case 'line': {
-        // 多 target 模式：每个 target 作为一个独立的 series
-        const isMultiTarget = data.length > 1
-        const series: echarts.SeriesOption[] = []
+      // 确保容器有尺寸
+      const el = chartRef.current
+      if (el.offsetWidth === 0 || el.offsetHeight === 0) return
 
-        data.forEach((targetRows, ti) => {
-          const tdef = targets[ti]
-          const { valueCols: tValCols } = detectColumns(targetRows, type)
-          // series 名称：优先 metricName > refId > valueCol
-          const seriesBaseName = tdef?.metricName || tdef?.refId || (tValCols[0] || `查询${ti + 1}`)
+      const chart = echarts.init(el, undefined, { renderer: 'canvas' })
+      chartInstanceRef.current = chart
 
-          tValCols.forEach((col, ci) => {
-            const seriesName = tValCols.length > 1 ? `${seriesBaseName}-${col}` : seriesBaseName
-            series.push({
-              name: seriesName,
-              type: type as 'bar' | 'line',
-              data: targetRows.map((m) => parseFloat(m[col]) || 0),
-              ...(type === 'bar'
-                ? {
-                    itemStyle: { color: SERIES_COLORS[(ti * tValCols.length + ci) % SERIES_COLORS.length], borderRadius: [3, 3, 0, 0] },
-                    barMaxWidth: 30,
-                  }
-                : {
-                    smooth: true,
-                    itemStyle: { color: SERIES_COLORS[(ti * tValCols.length + ci) % SERIES_COLORS.length] },
-                    symbol: 'circle', symbolSize: 6,
-                  }),
+      // X 轴名称：从第一个 target 数据中取
+      const firstRows = data[0] || []
+      const names = nameCol ? firstRows.map((m) => {
+        const v = m[nameCol!] || ''
+        return v.length > 15 ? shortName(v) : v
+      }) : []
+
+      let option: echarts.EChartsOption
+
+      switch (type) {
+        case 'bar':
+        case 'line': {
+          // 多 target 模式：每个 target 作为一个独立的 series
+          const isMultiTarget = data.length > 1
+          const series: echarts.SeriesOption[] = []
+
+          data.forEach((targetRows, ti) => {
+            const tdef = targets[ti]
+            const { valueCols: tValCols } = detectColumns(targetRows, type)
+            const seriesBaseName = tdef?.metricName || tdef?.refId || (tValCols[0] || `查询${ti + 1}`)
+
+            tValCols.forEach((col, ci) => {
+              series.push({
+                name: tValCols.length > 1 ? `${seriesBaseName}-${col}` : seriesBaseName,
+                type: type as 'bar' | 'line',
+                data: targetRows.map((m) => parseFloat(m[col]) || 0),
+                ...(type === 'bar'
+                  ? {
+                      itemStyle: { color: SERIES_COLORS[(ti * tValCols.length + ci) % SERIES_COLORS.length], borderRadius: [3, 3, 0, 0] },
+                      barMaxWidth: 30,
+                    }
+                  : {
+                      smooth: true,
+                      itemStyle: { color: SERIES_COLORS[(ti * tValCols.length + ci) % SERIES_COLORS.length] },
+                      symbol: 'circle', symbolSize: 6,
+                    }),
+              })
             })
           })
-        })
 
-        // legend data
-        const legendData = series.map((s) => s.name as string)
+          const legendData = series.map((s) => s.name as string)
 
-        option = {
-          backgroundColor: 'transparent',
-          tooltip: { trigger: 'axis', ...(type === 'bar' ? { axisPointer: { type: 'shadow' } } : {}), backgroundColor: '#22252b', borderColor: '#33363d', textStyle: { color: '#d8d9da' } },
-          legend: (isMultiTarget || valueCols.length > 1 || data.some((r, i) => (targets[i]?.metricName || '').length > 0))
-            ? { data: legendData, bottom: 0, textStyle: { color: '#a0a3a8', fontSize: 11 } }
-            : undefined,
-          grid: { left: '3%', right: '4%', bottom: legendData.length > 1 ? '15%' : '8%', top: '8%', containLabel: true },
-          xAxis: { type: 'category', data: names, ...(type === 'line' ? { boundaryGap: false } : {}), axisLabel: { rotate: names.length > 8 ? 30 : 0, fontSize: 10, color: '#a0a3a8' }, axisLine: { lineStyle: { color: '#33363d' } }, axisTick: { show: false } },
-          yAxis: { type: 'value', name: valueCols[0] || '', nameTextStyle: { color: '#6e7178' }, axisLabel: { color: '#6e7178' }, splitLine: { lineStyle: { color: '#2c2f36' } } },
-          series,
+          option = {
+            backgroundColor: 'transparent',
+            tooltip: { trigger: 'axis', ...(type === 'bar' ? { axisPointer: { type: 'shadow' } } : {}), backgroundColor: '#22252b', borderColor: '#33363d', textStyle: { color: '#d8d9da' } },
+            legend: (isMultiTarget || valueCols.length > 1 || data.some((r, i) => (targets[i]?.metricName || '').length > 0))
+              ? { data: legendData, bottom: 0, textStyle: { color: '#a0a3a8', fontSize: 11 } }
+              : undefined,
+            grid: { left: '3%', right: '4%', bottom: legendData.length > 1 ? '15%' : '8%', top: '8%', containLabel: true },
+            xAxis: { type: 'category', data: names, ...(type === 'line' ? { boundaryGap: false } : {}), axisLabel: { rotate: names.length > 8 ? 30 : 0, fontSize: 10, color: '#a0a3a8' }, axisLine: { lineStyle: { color: '#33363d' } }, axisTick: { show: false } },
+            yAxis: { type: 'value', name: valueCols[0] || '', nameTextStyle: { color: '#6e7178' }, axisLabel: { color: '#6e7178' }, splitLine: { lineStyle: { color: '#2c2f36' } } },
+            series,
+          }
+          break
         }
-        break
+
+        case 'pie': {
+          const primaryValues = valueCols.length > 0
+            ? firstRows.map((m) => parseFloat(m[valueCols[0]]) || 0)
+            : []
+          option = {
+            backgroundColor: 'transparent',
+            tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)', backgroundColor: '#22252b', borderColor: '#33363d', textStyle: { color: '#d8d9da' } },
+            legend: { orient: 'vertical', left: 'left', top: 'middle', textStyle: { color: '#a0a3a8', fontSize: 11 } },
+            series: [{
+              type: 'pie', radius: ['45%', '70%'], center: ['55%', '50%'],
+              data: names.map((n, i) => ({ name: n, value: primaryValues[i] || 0 })),
+              emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.5)' } },
+              label: { color: '#a0a3a8', fontSize: 10 },
+            }],
+          }
+          break
+        }
+
+        case 'gauge': {
+          const primaryValues = valueCols.length > 0
+            ? firstRows.map((m) => parseFloat(m[valueCols[0]]) || 0)
+            : []
+          const gaugeValue = primaryValues.length > 0 ? primaryValues[0] : 0
+          const gaugeName = names.length > 0 ? names[0] : '使用率'
+          option = {
+            backgroundColor: 'transparent',
+            series: [{
+              type: 'gauge', min: 0, max: 100, startAngle: 210, endAngle: -30,
+              center: ['50%', '60%'], radius: '85%',
+              progress: { show: true, width: 14, itemStyle: { color: gaugeValue > 80 ? '#e24d4d' : gaugeValue > 60 ? '#ff9830' : '#55bd6a' } },
+              axisLine: { lineStyle: { width: 14, color: [[0.6, '#55bd6a'], [0.8, '#ff9830'], [1, '#e24d4d']] } },
+              axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
+              detail: { valueAnimation: true, fontSize: 26, offsetCenter: [0, '60%'], formatter: '{value}%', color: '#d8d9da' },
+              data: [{ value: gaugeValue, name: shortName(gaugeName) }],
+            }],
+          }
+          break
+        }
+
+        default:
+          option = {}
       }
 
-      case 'pie': {
-        const primaryValues = valueCols.length > 0
-          ? firstRows.map((m) => parseFloat(m[valueCols[0]]) || 0)
-          : []
-        option = {
-          backgroundColor: 'transparent',
-          tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)', backgroundColor: '#22252b', borderColor: '#33363d', textStyle: { color: '#d8d9da' } },
-          legend: { orient: 'vertical', left: 'left', top: 'middle', textStyle: { color: '#a0a3a8', fontSize: 11 } },
-          series: [{
-            type: 'pie', radius: ['45%', '70%'], center: ['55%', '50%'],
-            data: names.map((n, i) => ({ name: n, value: primaryValues[i] || 0 })),
-            emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.5)' } },
-            label: { color: '#a0a3a8', fontSize: 10 },
-          }],
-        }
-        break
+      chart.setOption(option)
+      const handleResize = () => {
+        try { chart.resize() } catch {}
       }
-
-      case 'gauge': {
-        const primaryValues = valueCols.length > 0
-          ? firstRows.map((m) => parseFloat(m[valueCols[0]]) || 0)
-          : []
-        const gaugeValue = primaryValues.length > 0 ? primaryValues[0] : 0
-        const gaugeName = names.length > 0 ? names[0] : '使用率'
-        option = {
-          backgroundColor: 'transparent',
-          series: [{
-            type: 'gauge', min: 0, max: 100, startAngle: 210, endAngle: -30,
-            center: ['50%', '60%'], radius: '85%',
-            progress: { show: true, width: 14, itemStyle: { color: gaugeValue > 80 ? '#e24d4d' : gaugeValue > 60 ? '#ff9830' : '#55bd6a' } },
-            axisLine: { lineStyle: { width: 14, color: [[0.6, '#55bd6a'], [0.8, '#ff9830'], [1, '#e24d4d']] } },
-            axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
-            detail: { valueAnimation: true, fontSize: 26, offsetCenter: [0, '60%'], formatter: '{value}%', color: '#d8d9da' },
-            data: [{ value: gaugeValue, name: shortName(gaugeName) }],
-          }],
-        }
-        break
+      window.addEventListener('resize', handleResize)
+      return () => {
+        window.removeEventListener('resize', handleResize)
+        try {
+          chart.dispose()
+          chartInstanceRef.current = null
+        } catch {}
       }
-
-      default:
-        option = {}
-    }
-
-    chart.setOption(option)
-    const handleResize = () => chart.resize()
-    window.addEventListener('resize', handleResize)
-    return () => {
-      window.removeEventListener('resize', handleResize)
-      chart.dispose()
+    } catch (err: any) {
+      console.error('ChartPanel init error:', err)
+      setChartError(err.message || '图表初始化失败')
+      // 清理可能的残留实例
+      try {
+        if (chartInstanceRef.current) {
+          chartInstanceRef.current.dispose()
+          chartInstanceRef.current = null
+        }
+      } catch {}
     }
   }, [type, data, nameCol, valueCols, targets])
 
@@ -202,21 +240,88 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
     return Object.keys(allData[0])
   }, [allData])
 
+  // 表格排序与列筛选
+  const [sortColumn, setSortColumn] = useState<string | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  // 每列的筛选文本: Map<列名, 筛选词>
+  const [colFilters, setColFilters] = useState<Record<string, string>>({})
+  // 当前打开筛选弹窗的列
+  const [filterOpenCol, setFilterOpenCol] = useState<string | null>(null)
+
+  const enableColFilter = options?.enableColumnFilter === true && type === 'table'
+
+  const filteredSortedData = useMemo(() => {
+    let rows = allData
+
+    // 每列筛选：逐列过滤
+    if (enableColFilter) {
+      Object.entries(colFilters).forEach(([col, text]) => {
+        if (!text.trim()) return
+        const q = text.trim().toLowerCase()
+        rows = rows.filter((row) => {
+          const v = row[col]
+          return v != null && String(v).toLowerCase().includes(q)
+        })
+      })
+    }
+
+    // 排序
+    if (sortColumn) {
+      rows = [...rows].sort((a, b) => {
+        const va = a[sortColumn]
+        const vb = b[sortColumn]
+        const na = parseFloat(va as string)
+        const nb = parseFloat(vb as string)
+        if (!isNaN(na) && !isNaN(nb)) {
+          return sortDir === 'asc' ? na - nb : nb - na
+        }
+        const sa = va != null ? String(va) : ''
+        const sb = vb != null ? String(vb) : ''
+        const cmp = sa.localeCompare(sb, 'zh-CN')
+        return sortDir === 'asc' ? cmp : -cmp
+      })
+    }
+
+    return rows
+  }, [allData, colFilters, sortColumn, sortDir, tableHeaders, enableColFilter])
+
+  const handleSort = (col: string) => {
+    if (sortColumn === col) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortColumn(col)
+      setSortDir('asc')
+    }
+  }
+
+  const setColFilter = (col: string, val: string) => {
+    setColFilters((prev) => {
+      const next = { ...prev }
+      if (val.trim()) next[col] = val
+      else delete next[col]
+      return next
+    })
+  }
+
+  const hasAnyFilter = Object.values(colFilters).some((v) => v.trim())
+
   return (
     <div className="chart-panel">
       <div className="panel-title">
         <span className="panel-title-dot" />
         {title}
         <div style={{ flex: 1 }} />
+        {showMenu && (
         <span
           style={{ cursor: 'pointer', padding: '2px 6px', borderRadius: 2, fontSize: 16, color: 'var(--text-muted)' }}
           onClick={(e) => { e.stopPropagation(); onToggleMenu() }}
         >
           &#x22EE;
         </span>
+        )}
       </div>
 
-      {menuOpen && (
+      {showMenu && menuOpen && (
         <div className="panel-menu-dropdown" onClick={(e) => e.stopPropagation()}>
           <button className="panel-menu-item" onClick={onEdit}>编辑</button>
           <button className="panel-menu-item danger" onClick={onRemove}>删除</button>
@@ -228,23 +333,98 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
           <table className="data-table">
             <thead>
               <tr>
-                {tableHeaders.map((h) => <th key={h}>{h}</th>)}
+                {tableHeaders.map((h) => (
+                  <th
+                    key={h}
+                    style={{ position: 'relative', userSelect: 'none' }}
+                  >
+                    <span
+                      onClick={() => handleSort(h)}
+                      style={{ cursor: 'pointer' }}
+                      title={`点击按 ${h} 排序`}
+                    >
+                      {h}
+                      {sortColumn === h && (
+                        <span style={{ marginLeft: 4, fontSize: 10 }}>
+                          {sortDir === 'asc' ? '▲' : '▼'}
+                        </span>
+                      )}
+                    </span>
+                    {enableColFilter && (
+                      <>
+                        <span
+                          onClick={(e) => { e.stopPropagation(); setFilterOpenCol(filterOpenCol === h ? null : h) }}
+                          style={{
+                            cursor: 'pointer', marginLeft: 6, display: 'inline-flex', alignItems: 'center',
+                            color: colFilters[h] ? 'var(--primary)' : 'var(--text-muted)',
+                            padding: '1px 3px', borderRadius: 2,
+                          }}
+                          title="列筛选"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M1.5 1.5A.5.5 0 012 1h12a.5.5 0 01.5.5v2a.5.5 0 01-.128.334L10 8.692V13.5a.5.5 0 01-.342.474l-3 1A.5.5 0 016 14.5V8.692L1.628 3.834A.5.5 0 011.5 3.5v-2z"/>
+                          </svg>
+                        </span>
+                        {filterOpenCol === h && (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              position: 'absolute', top: '100%', left: 0, zIndex: 10,
+                              background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                              borderRadius: 4, padding: 6, minWidth: 150, boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                            }}
+                          >
+                            <input
+                              type="text"
+                              value={colFilters[h] || ''}
+                              onChange={(e) => setColFilter(h, e.target.value)}
+                              placeholder={`筛选 ${h}...`}
+                              autoFocus
+                              style={{
+                                width: '100%', fontSize: 11, padding: '4px 8px',
+                                background: 'var(--bg-input)', color: 'var(--text-primary)',
+                                border: '1px solid var(--border-color)', borderRadius: 3, outline: 'none',
+                                boxSizing: 'border-box',
+                              }}
+                            />
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {allData.map((m, i) => (
+              {filteredSortedData.map((m, i) => (
                 <tr key={i}>
-                  {tableHeaders.map((h) => <td key={h}>{m[h] || ''}</td>)}
+                  {tableHeaders.map((h) => <td key={h}>{m[h] != null ? String(m[h]) : ''}</td>)}
                 </tr>
               ))}
-              {allData.length === 0 && (
-                <tr><td colSpan={tableHeaders.length || 1} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20 }}>暂无数据</td></tr>
+              {filteredSortedData.length === 0 && (
+                <tr><td colSpan={tableHeaders.length || 1} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20 }}>
+                  {hasAnyFilter ? '无匹配结果' : '暂无数据'}
+                </td></tr>
               )}
             </tbody>
           </table>
         </div>
       ) : (
-        <div ref={chartRef} style={{ width: '100%', flex: 1 }} />
+        <div ref={chartRef} style={{ width: '100%', flex: 1, minHeight: 0 }}>
+          {chartError && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              height: '100%', color: 'var(--text-muted)', fontSize: 12,
+              padding: 16, textAlign: 'center',
+            }}>
+              <div>
+                <div style={{ marginBottom: 8, color: 'var(--red)', fontSize: 20 }}>!</div>
+                <div>图表渲染失败</div>
+                <div style={{ fontSize: 10, marginTop: 4, opacity: 0.7 }}>{chartError}</div>
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

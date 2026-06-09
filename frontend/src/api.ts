@@ -222,3 +222,44 @@ export async function deleteDatasource(id: string): Promise<void> {
 export async function testDatasource(id: string): Promise<string> {
   return request('/api/v1/datasources/test', { method: 'POST', body: JSON.stringify({ id }) })
 }
+
+// ---- Snapshots API ----
+
+export interface SnapshotRes {
+  id: string
+  dashboard_id: string
+  panel_id: string
+  snapshot_key: string
+  name: string
+  dashboard_json: DashboardJSON
+  panels_data?: PanelDataRes[]
+  created_at: string
+  expires_at?: string
+}
+
+export interface SnapshotCreateReq {
+  dashboard_id: string
+  panel_id?: string
+  name?: string
+  dashboard_json: DashboardJSON
+  panels_data?: PanelDataRes[]
+}
+
+export async function createSnapshot(req: SnapshotCreateReq): Promise<SnapshotRes> {
+  return request('/api/v1/snapshots/create', { method: 'POST', body: JSON.stringify(req) })
+}
+
+export async function getSnapshot(key: string): Promise<SnapshotRes> {
+  const res = await fetch(`/api/v1/snapshots/${key}`)
+  const json = await res.json()
+  if (!json.success) throw new Error(json.errorMessage || 'Unknown error')
+  return json.data
+}
+
+export async function listSnapshots(dashboardId: string, panelId?: string): Promise<SnapshotRes[]> {
+  return request('/api/v1/snapshots/list', { method: 'POST', body: JSON.stringify({ dashboard_id: dashboardId, panel_id: panelId || '' }) })
+}
+
+export async function deleteSnapshot(key: string): Promise<void> {
+  return request('/api/v1/snapshots/delete', { method: 'POST', body: JSON.stringify({ snapshot_key: key }) })
+}
