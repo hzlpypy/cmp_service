@@ -80,6 +80,9 @@ export default function PanelEditor({ panel, datasources, dashboardId, draftJson
         panel_type: p.type,
         datasource_id: p.datasource_id || '',
         target: latestData,
+        columns: panelsData
+          ?.find((d: any) => d.panel_id === panel.id)
+          ?.columns,
       }
 
       const snap = await api.createSnapshot({
@@ -189,6 +192,41 @@ export default function PanelEditor({ panel, datasources, dashboardId, draftJson
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, background: 'var(--bg-input)', padding: '4px 8px', borderRadius: 3 }}>
             {CHART_TYPES.find((c) => c.value === p.type)?.hint}
           </div>
+
+          {p.type === 'table' && (
+            <div style={{ marginBottom: 12, padding: '10px 12px', background: 'var(--bg-input)', borderRadius: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, marginBottom: 6, display: 'block' }}>表格选项</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12, marginBottom: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={!!p.options?.enableCellMerge}
+                  onChange={(e) => {
+                    const checked = e.target.checked
+                    update({ options: { ...p.options, enableCellMerge: checked, mergeColumns: checked ? (p.options?.mergeColumns || '') : undefined } } as any)
+                  }}
+                />
+                合并单元格
+              </label>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                同一列中连续相同的值自动合并（类似 Excel 合并单元格）。
+              </div>
+              {p.options?.enableCellMerge && (
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>合并列名（逗号分隔）</label>
+                  <input
+                    type="text"
+                    value={(p.options?.mergeColumns as string) || ''}
+                    onChange={(e) => update({ options: { ...p.options, mergeColumns: e.target.value } } as any)}
+                    placeholder="如：category,node"
+                    style={{ width: '100%', fontSize: 12, padding: '6px 8px', boxSizing: 'border-box' }}
+                  />
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                    仅对指定的列进行合并，留空则不合并任何列。
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="form-group">
             <label>布局 (X / Y / 宽 / 高 - 24格栅格)</label>

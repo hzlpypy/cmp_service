@@ -66,6 +66,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         panel_type: pd.panel_type,
         datasource_id: pd.datasource_id,
         target: pd.target,
+        columns: pd.columns,
       }))
       const snap = await api.createSnapshot({
         dashboard_id: dashboardId,
@@ -350,6 +351,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   panels.forEach((p: any) => { if (p.id) panelTypeMap.set(p.id, p.type) })
 
   const dataMap = new Map<string, MetricRow[][]>()
+  const columnMap = new Map<string, string[]>()
   if (dataRes?.panels_data) {
     const tr = getTimeRange()
     const fromMs = tr ? new Date(tr.from).getTime() : 0
@@ -378,6 +380,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         : (pd.target || [])
 
       dataMap.set(pd.panel_id, filtered)
+      columnMap.set(pd.panel_id, pd.columns || [])
     })
   }
   const panelRows = groupPanelsIntoRows(panels)
@@ -609,6 +612,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                       data={panelData}
                       targets={panel.targets || []}
                       options={panel.options}
+                      columns={columnMap.get(panel.id)}
                       menuOpen={openMenuId === panel.id}
                       onToggleMenu={() => toggleMenu(panel.id)}
                       onEdit={() => handleEditPanel(panel.id)}

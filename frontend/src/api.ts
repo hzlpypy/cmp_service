@@ -112,6 +112,7 @@ export interface PanelDataRes {
   panel_title: string
   panel_type: string
   datasource_id: string
+  columns?: string[]
   target: MetricRow[][]
 }
 

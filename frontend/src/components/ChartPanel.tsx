@@ -19,6 +19,8 @@ interface ChartPanelProps {
   options?: Record<string, unknown>
   /** 面板 key（用于强制重新挂载） */
   panelKey?: string
+  /** 后端返回的列名顺序，用于保持表头与 SQL 查询一致 */
+  columns?: string[]
 }
 
 /**
@@ -76,7 +78,7 @@ function shortName(name: string): string {
 
 const SERIES_COLORS = ['#5794f2', '#e24d4d', '#55bd6a', '#ff9830', '#b877d9', '#eca846']
 
-export default function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, panelKey }: ChartPanelProps) {
+export default function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, panelKey, columns }: ChartPanelProps) {
   const chartRef = useRef<HTMLDivElement>(null)
   const chartInstanceRef = useRef<echarts.ECharts | null>(null)
   const [chartError, setChartError] = useState<string | null>(null)
@@ -235,32 +237,114 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
   }, [type, data, nameCol, valueCols, targets])
 
   // 表格：合并所有 target 数据
+  // 优先使用后端返回的列顺序（columns），保证与 SQL 查询一致
   const tableHeaders = useMemo(() => {
     if (allData.length === 0) return []
+    if (columns && columns.length > 0) return columns
     return Object.keys(allData[0])
-  }, [allData])
+  }, [allData, columns])
 
   // 表格排序与列筛选
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  // 每列的筛选文本: Map<列名, 筛选词>
-  const [colFilters, setColFilters] = useState<Record<string, string>>({})
+  // 每列筛选条件: 操作符 + 值
+  interface ColFilter { op: '=' | '!=' | '>' | '>=' | '<' | '<=' | 'contains'; value: string }
+  const [colFilters, setColFilters] = useState<Record<string, ColFilter>>({})
   // 当前打开筛选弹窗的列
   const [filterOpenCol, setFilterOpenCol] = useState<string | null>(null)
 
   const enableColFilter = options?.enableColumnFilter === true && type === 'table'
+
+  // 条件告警
+  interface CellAlertRule { column: string; op: '>' | '>=' | '<' | '<=' | '=' | '!='; value: number; color: string }
+  const cellAlertRules: CellAlertRule[] = (() => {
+    if (type !== 'table') return []
+    const raw = options?.cellAlerts
+    if (!Array.isArray(raw)) return []
+    return raw.filter((r: any) => r && typeof r.column === 'string' && typeof r.op === 'string' && typeof r.value === 'number' && typeof r.color === 'string')
+  })()
+  const alertMode = (options?.alertMode === 'percentage' ? 'percentage' : 'absolute') as 'absolute' | 'percentage'
+  // 百分比模式下预计算每列最大值
+  const columnMax = useMemo(() => {
+    if (alertMode !== 'percentage' || cellAlertRules.length === 0) return {} as Record<string, number>
+    const max: Record<string, number> = {}
+    for (const rule of cellAlertRules) {
+      if (max[rule.column] !== undefined) continue
+      let m = -Infinity
+      for (const row of allData) {
+        const v = parseFloat(String(row[rule.column] ?? ''))
+        if (!isNaN(v) && v > m) m = v
+      }
+      max[rule.column] = isFinite(m) ? m : 0
+    }
+    return max
+  }, [alertMode, cellAlertRules, allData])
+  // 获取某单元格的告警颜色（规则列表中的最后匹配项优先）
+  const getCellAlertColor = (col: string, cellValue: unknown): string | undefined => {
+    if (cellAlertRules.length === 0) return undefined
+    const cellNum = parseFloat(String(cellValue ?? ''))
+    if (isNaN(cellNum)) return undefined
+    let matchColor: string | undefined
+    for (const rule of cellAlertRules) {
+      if (rule.column !== col) continue
+      let compareVal = cellNum
+      if (alertMode === 'percentage' && columnMax[col] && columnMax[col] > 0) {
+        compareVal = (cellNum / columnMax[col]) * 100
+      }
+      let matched = false
+      switch (rule.op) {
+        case '>': matched = compareVal > rule.value; break
+        case '>=': matched = compareVal >= rule.value; break
+        case '<': matched = compareVal < rule.value; break
+        case '<=': matched = compareVal <= rule.value; break
+        case '=': matched = compareVal === rule.value; break
+        case '!=': matched = compareVal !== rule.value; break
+      }
+      if (matched) matchColor = rule.color
+    }
+    return matchColor
+  }
+  const enableCellMerge = options?.enableCellMerge === true && type === 'table'
+  const mergeColumns = useMemo(() => {
+    if (!enableCellMerge) return new Set<string>()
+    const raw = options?.mergeColumns
+    if (typeof raw === 'string' && raw.trim()) {
+      return new Set(raw.split(',').map((s: string) => s.trim()).filter(Boolean))
+    }
+    return new Set<string>()
+  }, [enableCellMerge, options?.mergeColumns])
 
   const filteredSortedData = useMemo(() => {
     let rows = allData
 
     // 每列筛选：逐列过滤
     if (enableColFilter) {
-      Object.entries(colFilters).forEach(([col, text]) => {
-        if (!text.trim()) return
-        const q = text.trim().toLowerCase()
+      Object.entries(colFilters).forEach(([col, f]) => {
+        if (!f.value.trim()) return
+        const val = f.value.trim()
+        const op = f.op
         rows = rows.filter((row) => {
-          const v = row[col]
-          return v != null && String(v).toLowerCase().includes(q)
+          const cellVal = row[col]
+          if (cellVal == null) return false
+          const cellStr = String(cellVal)
+          switch (op) {
+            case '=': return cellStr.toLowerCase() === val.toLowerCase()
+            case '!=': return cellStr.toLowerCase() !== val.toLowerCase()
+            case 'contains': return cellStr.toLowerCase().includes(val.toLowerCase())
+            case '>': case '>=': case '<': case '<=': {
+              const nCell = parseFloat(cellStr)
+              const nVal = parseFloat(val)
+              if (isNaN(nCell) || isNaN(nVal)) return false
+              switch (op) {
+                case '>': return nCell > nVal
+                case '>=': return nCell >= nVal
+                case '<': return nCell < nVal
+                case '<=': return nCell <= nVal
+              }
+              return false
+            }
+            default: return true
+          }
         })
       })
     }
@@ -285,6 +369,61 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
     return rows
   }, [allData, colFilters, sortColumn, sortDir, tableHeaders, enableColFilter])
 
+  // 预计算单元格合并信息：层级合并（类似 Excel）
+  // 后续列的合并范围限制在前面列的合并范围内，不会跨组
+  const cellMergeInfo = useMemo(() => {
+    if (!enableCellMerge || filteredSortedData.length === 0 || mergeColumns.size === 0) return null
+    const info: { rowSpan: number; skip: boolean }[][] = filteredSortedData.map(() =>
+      tableHeaders.map(() => ({ rowSpan: 1, skip: false }))
+    )
+
+    // 先收集所有参与合并的列索引（按表头顺序）
+    const mergeColIndices: number[] = []
+    for (let ci = 0; ci < tableHeaders.length; ci++) {
+      if (mergeColumns.has(tableHeaders[ci])) {
+        mergeColIndices.push(ci)
+      }
+    }
+    if (mergeColIndices.length === 0) return info
+
+    // 对每个合并列，在当前列及之前所有合并列的值都相同的范围内查找连续相同行
+    for (let colRank = 0; colRank < mergeColIndices.length; colRank++) {
+      const ci = mergeColIndices[colRank]
+      // 当前列之前的所有合并列索引（用于约束范围）
+      const prevMergeIndices = mergeColIndices.slice(0, colRank)
+
+      let i = 0
+      while (i < filteredSortedData.length) {
+        let j = i + 1
+        while (j < filteredSortedData.length) {
+          // 当前列值不同则停止
+          const curCol = tableHeaders[ci]
+          if (String(filteredSortedData[j][curCol] ?? '') !== String(filteredSortedData[i][curCol] ?? '')) break
+          // 前面任一合并列的值不同也停止（保证不跨组）
+          let crossGroup = false
+          for (const pc of prevMergeIndices) {
+            const prevCol = tableHeaders[pc]
+            if (String(filteredSortedData[j][prevCol] ?? '') !== String(filteredSortedData[i][prevCol] ?? '')) {
+              crossGroup = true
+              break
+            }
+          }
+          if (crossGroup) break
+          j++
+        }
+        const span = j - i
+        if (span > 1) {
+          info[i][ci].rowSpan = span
+          for (let k = i + 1; k < j; k++) {
+            info[k][ci].skip = true
+          }
+        }
+        i = j
+      }
+    }
+    return info
+  }, [enableCellMerge, filteredSortedData, tableHeaders, mergeColumns])
+
   const handleSort = (col: string) => {
     if (sortColumn === col) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -294,16 +433,11 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
     }
   }
 
-  const setColFilter = (col: string, val: string) => {
-    setColFilters((prev) => {
-      const next = { ...prev }
-      if (val.trim()) next[col] = val
-      else delete next[col]
-      return next
-    })
+  const setColFilter = (col: string, f: ColFilter) => {
+    setColFilters((prev) => ({ ...prev, [col]: f }))
   }
 
-  const hasAnyFilter = Object.values(colFilters).some((v) => v.trim())
+  const hasAnyFilter = Object.values(colFilters).some((v) => v.value.trim())
 
   return (
     <div className="chart-panel">
@@ -356,7 +490,7 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
                           onClick={(e) => { e.stopPropagation(); setFilterOpenCol(filterOpenCol === h ? null : h) }}
                           style={{
                             cursor: 'pointer', marginLeft: 6, display: 'inline-flex', alignItems: 'center',
-                            color: colFilters[h] ? 'var(--primary)' : 'var(--text-muted)',
+                            color: colFilters[h]?.value ? 'var(--primary)' : 'var(--text-muted)',
                             padding: '1px 3px', borderRadius: 2,
                           }}
                           title="列筛选"
@@ -371,13 +505,40 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
                             style={{
                               position: 'absolute', top: '100%', left: 0, zIndex: 10,
                               background: 'var(--bg-card)', border: '1px solid var(--border-color)',
-                              borderRadius: 4, padding: 6, minWidth: 150, boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                              borderRadius: 4, padding: 6, minWidth: 200, boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                              display: 'flex', flexDirection: 'column', gap: 4,
                             }}
                           >
+                            {/* 操作符选择 */}
+                            <select
+                              value={colFilters[h]?.op || 'contains'}
+                              onChange={(e) => {
+                                const op = e.target.value as ColFilter['op']
+                                const curVal = colFilters[h]?.value || ''
+                                setColFilter(h, { op, value: curVal })
+                              }}
+                              style={{
+                                width: '100%', fontSize: 11, padding: '4px 6px',
+                                background: 'var(--bg-input)', color: 'var(--text-primary)',
+                                border: '1px solid var(--border-color)', borderRadius: 3, outline: 'none',
+                              }}
+                            >
+                              <option value="=">=</option>
+                              <option value="!=">!=</option>
+                              <option value=">">&gt;</option>
+                              <option value=">=">&gt;=</option>
+                              <option value="<">&lt;</option>
+                              <option value="<=">&lt;=</option>
+                              <option value="contains">包含</option>
+                            </select>
+                            {/* 筛选值输入 */}
                             <input
                               type="text"
-                              value={colFilters[h] || ''}
-                              onChange={(e) => setColFilter(h, e.target.value)}
+                              value={colFilters[h]?.value || ''}
+                              onChange={(e) => {
+                                const op = colFilters[h]?.op || 'contains'
+                                setColFilter(h, { op, value: e.target.value })
+                              }}
                               placeholder={`筛选 ${h}...`}
                               autoFocus
                               style={{
@@ -398,7 +559,18 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
             <tbody>
               {filteredSortedData.map((m, i) => (
                 <tr key={i}>
-                  {tableHeaders.map((h) => <td key={h}>{m[h] != null ? String(m[h]) : ''}</td>)}
+                  {tableHeaders.map((h, ci) => {
+                    if (cellMergeInfo && cellMergeInfo[i][ci].skip) return null
+                    const rowSpan = cellMergeInfo ? cellMergeInfo[i][ci].rowSpan : 1
+                    const alertColor = getCellAlertColor(h, m[h])
+                    return (
+                      <td key={h} rowSpan={rowSpan > 1 ? rowSpan : undefined}
+                        style={alertColor ? { color: alertColor, fontWeight: 600 } : undefined}
+                      >
+                        {m[h] != null ? String(m[h]) : ''}
+                      </td>
+                    )
+                  })}
                 </tr>
               ))}
               {filteredSortedData.length === 0 && (

@@ -66,9 +66,11 @@ export default function SnapshotView({ snapshotKey, onClose }: SnapshotViewProps
     : panels
 
   const dataMap = new Map<string, any[][]>()
+  const columnMap = new Map<string, string[]>()
   if (snap.panels_data) {
     snap.panels_data.forEach((pd: any) => {
       dataMap.set(pd.panel_id, pd.target || [])
+      columnMap.set(pd.panel_id, pd.columns || [])
     })
   }
 
@@ -118,11 +120,13 @@ export default function SnapshotView({ snapshotKey, onClose }: SnapshotViewProps
                   title={panel.title || '未命名'}
                   data={panelData}
                   targets={panel.targets || []}
+                  options={panel.options}
                   menuOpen={false}
                   onToggleMenu={() => {}}
                   onEdit={() => {}}
                   onRemove={() => {}}
                   showMenu={false}
+                  columns={columnMap.get(panel.id)}
                 />
               </div>
             )
@@ -155,6 +159,7 @@ export default function SnapshotView({ snapshotKey, onClose }: SnapshotViewProps
                         onEdit={() => {}}
                         onRemove={() => {}}
                         showMenu={false}
+                        columns={columnMap.get(panel.id)}
                       />
                     </div>
                   )

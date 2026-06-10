@@ -106,6 +106,8 @@ type PanelData struct {
 	PanelType string `json:"panel_type"`
 	// DatasourceID 面板使用的数据源ID
 	DatasourceID string `json:"datasource_id"`
+	// Columns 列名顺序（保持 SQL 查询返回的顺序）
+	Columns []string `json:"columns"`
 	// Target 数据查询结果列表，每个元素对应一个 target
 	Target [][]map[string]interface{} `json:"target"`
 }
