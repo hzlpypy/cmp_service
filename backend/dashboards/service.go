@@ -368,6 +368,7 @@ func (s *Server) queryPanelData(panelMap map[string]interface{}, from, to string
 
 	// 为每个 target 查询数据
 	targetResults := make([][]map[string]interface{}, 0, len(targetsList))
+	var columns []string
 	for _, tRaw := range targetsList {
 		tMap, ok := tRaw.(map[string]interface{})
 		if !ok {
@@ -375,10 +376,14 @@ func (s *Server) queryPanelData(panelMap map[string]interface{}, from, to string
 		}
 
 		// 读取 target 配置
-		rows, err := s.queryTargetFromMap(tMap, from, to)
+		cols, rows, err := s.queryTargetFromMap(tMap, from, to)
 		if err != nil {
 			s.log.Warnf("查询 panel %s target 数据失败: %v", panelID, err)
 			continue
+		}
+		// 取第一个 target 的列顺序作为面板整体的列顺序
+		if columns == nil {
+			columns = cols
 		}
 		targetResults = append(targetResults, rows)
 	}
@@ -388,6 +393,7 @@ func (s *Server) queryPanelData(panelMap map[string]interface{}, from, to string
 		PanelTitle:   panelTitle,
 		PanelType:    panelType,
 		DatasourceID: datasourceID,
+		Columns:      columns,
 		Target:       targetResults,
 	}
 }
@@ -397,7 +403,7 @@ func (s *Server) queryPanelData(panelMap map[string]interface{}, from, to string
 //   - rawSql 模式：执行用户自定义 SQL 语句
 //   - table 模式：指定 table + fields 查询（向后兼容）
 //   - 默认模式：查询 net_work_metrics 表
-func (s *Server) queryTargetFromMap(tMap map[string]interface{}, from, to string) ([]map[string]interface{}, error) {
+func (s *Server) queryTargetFromMap(tMap map[string]interface{}, from, to string) ([]string, []map[string]interface{}, error) {
 	rawSQL := getStringField(tMap, "rawSql")
 
 	// 模式1: 用户自定义 SQL
@@ -420,18 +426,18 @@ func (s *Server) queryTargetFromMap(tMap map[string]interface{}, from, to string
 
 // queryWithRawSQL 执行用户自定义 SQL 并应用别名映射。
 // tMap["aliasMap"] 格式: {"col_name": "别名", ...}，用于将查询返回的列名重命名为中文别名。
-func (s *Server) queryWithRawSQL(rawSQL string, tMap map[string]interface{}) ([]map[string]interface{}, error) {
+func (s *Server) queryWithRawSQL(rawSQL string, tMap map[string]interface{}) ([]string, []map[string]interface{}, error) {
 	// 安全检查：只允许 SELECT 开头的语句
 	trimmed := strings.TrimSpace(rawSQL)
 	upper := strings.ToUpper(trimmed)
 	if !strings.HasPrefix(upper, "SELECT") {
-		return nil, fmt.Errorf("只允许 SELECT 查询")
+		return nil, nil, fmt.Errorf("只允许 SELECT 查询")
 	}
 
 	// 执行 SQL
 	rows, err := s.db.Raw(trimmed).Rows()
 	if err != nil {
-		return nil, fmt.Errorf("SQL 执行失败: %w", err)
+		return nil, nil, fmt.Errorf("SQL 执行失败: %w", err)
 	}
 	defer rows.Close()
 
@@ -446,6 +452,16 @@ func (s *Server) queryWithRawSQL(rawSQL string, tMap map[string]interface{}) ([]
 					aliasMap[k] = vs
 				}
 			}
+		}
+	}
+
+	// 应用别名映射生成最终列名
+	finalColumns := make([]string, 0, len(columns))
+	for _, col := range columns {
+		if alias, ok := aliasMap[col]; ok {
+			finalColumns = append(finalColumns, alias)
+		} else {
+			finalColumns = append(finalColumns, col)
 		}
 	}
 
@@ -476,16 +492,16 @@ func (s *Server) queryWithRawSQL(rawSQL string, tMap map[string]interface{}) ([]
 		result = append(result, row)
 	}
 
-	return result, nil
+	return finalColumns, result, nil
 }
 
 // queryCustomTable 通过 raw SQL 查询自定义表，返回指定字段。
 // table: 表名
 // fields: 逗号分隔的字段列表，如 "market,date,weekday"；为空则查所有字段
-func (s *Server) queryCustomTable(table, fields string, _ map[string]interface{}) ([]map[string]interface{}, error) {
+func (s *Server) queryCustomTable(table, fields string, _ map[string]interface{}) ([]string, []map[string]interface{}, error) {
 	// 构建 SQL，防止 SQL 注入：检查 table 名是否合法（只允许字母数字下划线）
 	if !regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`).MatchString(table) {
-		return nil, fmt.Errorf("无效的表名: %s", table)
+		return nil, nil, fmt.Errorf("无效的表名: %s", table)
 	}
 
 	selectClause := "*"
@@ -507,7 +523,7 @@ func (s *Server) queryCustomTable(table, fields string, _ map[string]interface{}
 	// 执行查询
 	rows, err := s.db.Raw(fmt.Sprintf("SELECT %s FROM %s LIMIT 500", selectClause, table)).Rows()
 	if err != nil {
-		return nil, fmt.Errorf("查询表 %s 失败: %w", table, err)
+		return nil, nil, fmt.Errorf("查询表 %s 失败: %w", table, err)
 	}
 	defer rows.Close()
 
@@ -540,11 +556,11 @@ func (s *Server) queryCustomTable(table, fields string, _ map[string]interface{}
 		result = append(result, row)
 	}
 
-	return result, nil
+	return columns, result, nil
 }
 
 // queryNetworkMetrics 查询 net_work_metrics 表（默认模式，保持向后兼容）。
-func (s *Server) queryNetworkMetrics(category, metricName, from, to string) ([]map[string]interface{}, error) {
+func (s *Server) queryNetworkMetrics(category, metricName, from, to string) ([]string, []map[string]interface{}, error) {
 	var metrics []model.NetWorkMetrics
 	query := s.db.Model(&model.NetWorkMetrics{})
 
@@ -563,8 +579,11 @@ func (s *Server) queryNetworkMetrics(category, metricName, from, to string) ([]m
 	}
 
 	if err := query.Order("id ASC").Limit(500).Find(&metrics).Error; err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	// 保持一致的列顺序
+	columns := []string{"id", "created_at", "metric_category", "metric_name", "node_type", "current_value", "historical_peak", "mom_change", "yoy_change", "unit"}
 
 	rows := make([]map[string]interface{}, 0, len(metrics))
 	for _, m := range metrics {
@@ -581,7 +600,7 @@ func (s *Server) queryNetworkMetrics(category, metricName, from, to string) ([]m
 			"unit":             m.Unit,
 		})
 	}
-	return rows, nil
+	return columns, rows, nil
 }
 
 // generateDBID 生成仪表板的唯一ID（最多19字符）。

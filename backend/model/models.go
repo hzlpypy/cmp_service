@@ -71,6 +71,7 @@ type BusinessSystems struct {
 // JSONMap 是自定义的 JSON 字段类型，用于在 GORM 中存储和读取 JSON 数据。
 // 实现了 sql.Scanner 和 driver.Valuer 接口，支持与 MySQL JSON 类型的双向转换。
 type JSONMap map[string]interface{}
+type JSONArray []map[string]interface{}
 
 // Value 实现 driver.Valuer 接口，将 Go map 序列化为 JSON 字符串写入数据库。
 func (j JSONMap) Value() (driver.Value, error) {
@@ -100,6 +101,47 @@ func (j *JSONMap) Scan(value interface{}) error {
 		return errors.New(fmt.Sprint("failed to unmarshal JSONMap value:", value))
 	}
 	return json.Unmarshal(bytes, j)
+}
+
+// Value 实现 driver.Valuer 接口，将 JSONArray 序列化为 JSON 字符串。
+func (j JSONArray) Value() (driver.Value, error) {
+	if j == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal(j)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
+}
+
+// Scan 实现 sql.Scanner 接口，从数据库读取 JSON 字符串并反序列化为 JSONArray。
+func (j *JSONArray) Scan(value interface{}) error {
+	if value == nil {
+		*j = JSONArray{}
+		return nil
+	}
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return errors.New(fmt.Sprint("failed to unmarshal JSONArray value:", value))
+	}
+	// 先尝试数组，再尝试对象（兼容旧数据），都不行返回空数组
+	err := json.Unmarshal(bytes, j)
+	if err != nil {
+		// 兼容旧格式：panels_data 可能以 {} 存储，当作空数组
+		var m map[string]interface{}
+		if json.Unmarshal(bytes, &m) == nil {
+			*j = JSONArray{}
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // Folder 文件夹表，用于组织仪表板的层级结构。
@@ -190,3 +232,18 @@ type Panel struct {
 
 // TableName 指定面板表名。
 func (Panel) TableName() string { return "panels" }
+
+// Snapshot 快照表，存储仪表板或面板的即时快照，用于共享链接。
+type Snapshot struct {
+	Base
+	DashboardID   string    `gorm:"column:dashboard_id;type:varchar(64);not null" json:"dashboard_id"`
+	PanelID       string    `gorm:"column:panel_id;type:varchar(64);default:''" json:"panel_id"`
+	Key           string    `gorm:"column:snapshot_key;type:varchar(64);uniqueIndex;not null" json:"snapshot_key"`
+	Name          string    `gorm:"type:varchar(256);default:''" json:"name"`
+	DashboardJSON JSONMap   `gorm:"column:dashboard_json;type:json" json:"dashboard_json"`
+	PanelsData    JSONArray  `gorm:"column:panels_data;type:json" json:"panels_data"`
+	ExpiresAt     *time.Time `gorm:"column:expires_at" json:"expires_at,omitempty"`
+}
+
+// TableName 指定快照表名。
+func (Snapshot) TableName() string { return "snapshots" }

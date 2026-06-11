@@ -2,20 +2,48 @@ import { useState } from 'react'
 import DashboardView from './components/DashboardView'
 import BrowsePage from './components/BrowsePage'
 import DataSourcesPage from './components/DataSourcesPage'
+import SnapshotView from './components/SnapshotView'
+import SnapshotList from './components/SnapshotList'
+import PanelEditPage from './components/PanelEditPage'
+import type { PanelDef, DatasourceRes, PanelDataRes } from './api'
 import './App.css'
 
-type Page = 'browse' | 'datasources'
+type Page = 'browse' | 'snapshots' | 'datasources'
+
+interface EditingPanelCtx {
+  panel: PanelDef
+  dashboardId: string
+  datasources: DatasourceRes[]
+  draftJson: any
+  panelsData?: PanelDataRes[]
+  onSave: (updated: PanelDef) => void
+}
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('browse')
   const [selectedDashboardId, setSelectedDashboardId] = useState<string | null>(null)
+  const [snapshotKey, setSnapshotKey] = useState<string | null>(null)
+  const [editingPanel, setEditingPanel] = useState<EditingPanelCtx | null>(null)
+  const [snapshotListKey, setSnapshotListKey] = useState(0)
+  const isInSnapshot = window.location.pathname.startsWith('/snapshot/') || snapshotKey !== null
+
+  if (!snapshotKey && window.location.pathname.startsWith('/snapshot/')) {
+    const key = window.location.pathname.split('/snapshot/')[1]
+    if (key) { setSnapshotKey(key); return null }
+  }
+
   const isInDashboard = selectedDashboardId !== null
 
   const handleOpenDashboard = (id: string) => setSelectedDashboardId(id)
   const handleBack = () => setSelectedDashboardId(null)
+  const handleCloseSnapshot = () => {
+    setSnapshotKey(null)
+    window.history.pushState({}, '', '/')
+  }
 
   return (
     <div className="app">
+      {!isInSnapshot && !editingPanel && (
       <aside className="sidebar">
         <div
           className="sidebar-logo"
@@ -38,6 +66,16 @@ function App() {
             <span className="nav-label">仪表板</span>
           </div>
           <div
+            className={`nav-item ${currentPage === 'snapshots' && !isInDashboard ? 'active' : ''}`}
+            onClick={() => { setCurrentPage('snapshots'); setSelectedDashboardId(null); setSnapshotListKey(k => k + 1) }}
+            title="快照"
+          >
+            <span className="nav-icon">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M5 2a1 1 0 00-1 1v14a1 1 0 001 1h10a1 1 0 001-1V7l-5-5H5z" /><path d="M13 2v5h5" fill="none" stroke="currentColor" strokeWidth="1.5" /><circle cx="10" cy="11" r="3" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>
+            </span>
+            <span className="nav-label">快照</span>
+          </div>
+          <div
             className={`nav-item ${currentPage === 'datasources' && !isInDashboard ? 'active' : ''}`}
             onClick={() => { setCurrentPage('datasources'); setSelectedDashboardId(null) }}
             title="数据源"
@@ -56,13 +94,40 @@ function App() {
           </div>
         </div>
       </aside>
+      )}
 
       <div className="main-wrapper">
-        <main className="main-content">
-          {isInDashboard ? (
-            <DashboardView dashboardId={selectedDashboardId!} onBack={handleBack} />
+        <main className="main-content" style={{ padding: (isInSnapshot || editingPanel) ? 0 : undefined }}>
+          {isInSnapshot ? (
+            <SnapshotView snapshotKey={snapshotKey!} onClose={handleCloseSnapshot} />
+          ) : isInDashboard ? (
+            <>
+              <div style={{ display: editingPanel ? 'none' : undefined, height: '100%' }}>
+                <DashboardView
+                  dashboardId={selectedDashboardId!}
+                  onBack={handleBack}
+                  onEditPanel={(ctx) => setEditingPanel(ctx)}
+                />
+              </div>
+              {editingPanel && (
+                <PanelEditPage
+                  panel={editingPanel.panel}
+                  datasources={editingPanel.datasources}
+                  dashboardId={editingPanel.dashboardId}
+                  draftJson={editingPanel.draftJson}
+                  panelsData={editingPanel.panelsData}
+                  onSave={(updated) => {
+                    editingPanel.onSave(updated)
+                    setEditingPanel(null)
+                  }}
+                  onBack={() => setEditingPanel(null)}
+                />
+              )}
+            </>
           ) : currentPage === 'browse' ? (
             <BrowsePage onOpenDashboard={handleOpenDashboard} />
+          ) : currentPage === 'snapshots' ? (
+            <SnapshotList key={snapshotListKey} />
           ) : (
             <DataSourcesPage />
           )}
