@@ -2,29 +2,11 @@ import { useState, useEffect } from 'react'
 import * as api from '../api'
 import type { SnapshotRes } from '../api'
 import ChartPanel from './ChartPanel'
+import GridLayout from './GridLayout'
 
 interface SnapshotViewProps {
   snapshotKey: string
   onClose: () => void
-}
-
-function groupPanelsIntoRows(panels: any[]) {
-  const sorted = [...panels].sort((a, b) => {
-    const ay = a.gridPos?.y ?? 0
-    const by = b.gridPos?.y ?? 0
-    return ay - by || (a.gridPos?.x ?? 0) - (b.gridPos?.x ?? 0)
-  })
-  const rows: any[][] = []
-  let currentRow: any[] = []
-  let currentY = -1
-  sorted.forEach((p) => {
-    const y = p.gridPos?.y ?? 0
-    if (y !== currentY && currentRow.length > 0) { rows.push(currentRow); currentRow = [] }
-    currentY = y
-    currentRow.push(p)
-  })
-  if (currentRow.length > 0) rows.push(currentRow)
-  return rows
 }
 
 export default function SnapshotView({ snapshotKey, onClose }: SnapshotViewProps) {
@@ -73,8 +55,6 @@ export default function SnapshotView({ snapshotKey, onClose }: SnapshotViewProps
       columnMap.set(pd.panel_id, pd.columns || [])
     })
   }
-
-  const panelRows = groupPanelsIntoRows(displayPanels)
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -140,33 +120,36 @@ export default function SnapshotView({ snapshotKey, onClose }: SnapshotViewProps
       ) : (
         /* 仪表盘快照：与详情页布局一致 */
         <div style={{ flex: 1, overflow: 'auto' }}>
-          <div className="dashboard-canvas" style={{ padding: 16 }}>
-            {panelRows.map((row, rowIdx) => (
-              <div key={rowIdx} className="panel-row">
-                {row.map((panel: any) => {
-                  const panelWidth = panel.gridPos?.w || 12
+          <div className="dashboard-canvas" style={{ padding: '16px 20px 32px' }}>
+            {displayPanels.length > 0 ? (
+              <GridLayout
+                panels={displayPanels}
+                onChange={() => {}}
+                rowHeight={30}
+                cols={24}
+                gap={8}
+                editable={false}
+              >
+                {(panel, style) => {
                   const panelData = dataMap.get(panel.id) || []
                   return (
-                    <div key={panel.id} className="panel-col" style={{ flex: panelWidth / 24 }}>
-                      <ChartPanel
-                        type={panel.type || 'table'}
-                        title={panel.title || '未命名'}
-                        data={panelData}
-                        targets={panel.targets || []}
-                        options={panel.options}
-                        menuOpen={false}
-                        onToggleMenu={() => {}}
-                        onEdit={() => {}}
-                        onRemove={() => {}}
-                        showMenu={false}
-                        columns={columnMap.get(panel.id)}
-                      />
-                    </div>
+                    <ChartPanel
+                      type={panel.type || 'table'}
+                      title={panel.title || '未命名'}
+                      data={panelData}
+                      targets={panel.targets || []}
+                      options={panel.options}
+                      menuOpen={false}
+                      onToggleMenu={() => {}}
+                      onEdit={() => {}}
+                      onRemove={() => {}}
+                      showMenu={false}
+                      columns={columnMap.get(panel.id)}
+                    />
                   )
-                })}
-              </div>
-            ))}
-            {displayPanels.length === 0 && (
+                }}
+              </GridLayout>
+            ) : (
               <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)', fontSize: 14 }}>
                 此快照中无面板数据
               </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import html2canvas from 'html2canvas'
 import ChartPanel from './ChartPanel'
+import GridLayout from './GridLayout'
 import AIChatDialog from './AIChatDialog'
 import * as api from '../api'
 import type { DashboardRes, DashboardDataRes, DashboardJSON, MetricRow, PanelDef, PanelDataRes, DatasourceRes } from '../api'
@@ -99,6 +100,14 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   const handleExportImage = async () => {
     if (!canvasRef.current) return
     setExporting(true)
+
+    // 等待静态布局渲染完成，ECharts 需要足够时间
+    await new Promise((r) => requestAnimationFrame(r))
+    await new Promise((r) => setTimeout(r, 500))
+
+    // 触发所有 ECharts 图表 resize
+    window.dispatchEvent(new Event('resize'))
+    await new Promise((r) => setTimeout(r, 300))
 
     const canvasEl = canvasRef.current
     const wrapperEl = wrapperRef.current
@@ -319,6 +328,11 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     setOpenMenuId(null)
   }
 
+  // ---- 处理布局变化（拖拽/调整大小） ----
+  const handleLayoutChange = (updatedPanels: any[]) => {
+    setDraftJson({ ...draftJson, panels: updatedPanels })
+  }
+
   if (loading) {
     return (
       <div className="dashboard-view">
@@ -383,7 +397,6 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       columnMap.set(pd.panel_id, pd.columns || [])
     })
   }
-  const panelRows = groupPanelsIntoRows(panels)
 
   return (
     <div className="dashboard-view">
@@ -598,14 +611,62 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
       {/* ---- Canvas ---- */}
       <div ref={wrapperRef} style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <div className="dashboard-canvas" ref={canvasRef} style={{ flex: 1, overflow: 'auto' }}>
-          {panelRows.map((row, rowIdx) => (
-            <div key={rowIdx} className="panel-row">
-              {row.map((panel: any) => {
-                const panelWidth = panel.gridPos?.w || 12
-                const panelData = dataMap.get(panel.id) || []
-                return (
-                  <div key={panel.id} className="panel-col" style={{ flex: panelWidth / 24 }}>
+        <div className="dashboard-canvas" ref={canvasRef} style={{ flex: 1, overflow: 'auto', padding: '16px 20px 32px' }}>
+          {panels.length > 0 ? (
+            exporting ? (
+              /* 导出时使用静态布局（CSS Grid），html2canvas 对绝对定位渲染有问题 */
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(24, 1fr)',
+                gap: 8,
+                gridAutoRows: 'minmax(30px, auto)',
+              }}>
+                {panels.map((panel: any) => {
+                  const pos = panel.gridPos || { x: 0, y: 0, w: 12, h: 8 }
+                  const panelData = dataMap.get(panel.id) || []
+                  // 计算面板高度：h 行 * 30px + (h-1) * 8px gap
+                  const panelHeight = pos.h * 30 + (pos.h - 1) * 8
+                  return (
+                    <div key={panel.id} style={{
+                      gridColumn: `${pos.x + 1} / span ${pos.w}`,
+                      gridRow: `${pos.y + 1} / span ${pos.h}`,
+                      background: 'var(--bg-panel)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 3,
+                      overflow: 'hidden',
+                      height: panelHeight,
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}>
+                      <ChartPanel
+                        type={panel.type || 'table'}
+                        title={panel.title || '未命名'}
+                        data={panelData}
+                        targets={panel.targets || []}
+                        options={panel.options}
+                        columns={columnMap.get(panel.id)}
+                        menuOpen={false}
+                        onToggleMenu={() => {}}
+                        onEdit={() => {}}
+                        onRemove={() => {}}
+                        showMenu={false}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <GridLayout
+                panels={panels}
+                onChange={handleLayoutChange}
+                rowHeight={30}
+                cols={24}
+                gap={8}
+                editable={true}
+              >
+                {(panel, _style) => {
+                  const panelData = dataMap.get(panel.id) || []
+                  return (
                     <ChartPanel
                       type={panel.type || 'table'}
                       title={panel.title || '未命名'}
@@ -618,12 +679,11 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                       onEdit={() => handleEditPanel(panel.id)}
                       onRemove={() => handleRemovePanel(panel.id)}
                     />
-                  </div>
-                )
-              })}
-            </div>
-          ))}
-          {panels.length === 0 && (
+                  )
+                }}
+              </GridLayout>
+            )
+          ) : (
             <div className="add-panel-zone">
               <span style={{ color: 'var(--text-muted)' }}>此仪表板暂无面板，点击"+ 添加面板"开始创建</span>
             </div>
@@ -653,23 +713,4 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       </div>
     </div>
   )
-}
-
-function groupPanelsIntoRows(panels: any[]) {
-  const sorted = [...panels].sort((a, b) => {
-    const ay = a.gridPos?.y ?? 0
-    const by = b.gridPos?.y ?? 0
-    return ay - by || (a.gridPos?.x ?? 0) - (b.gridPos?.x ?? 0)
-  })
-  const rows: any[][] = []
-  let currentRow: any[] = []
-  let currentY = -1
-  sorted.forEach((p) => {
-    const y = p.gridPos?.y ?? 0
-    if (y !== currentY && currentRow.length > 0) { rows.push(currentRow); currentRow = [] }
-    currentY = y
-    currentRow.push(p)
-  })
-  if (currentRow.length > 0) rows.push(currentRow)
-  return rows
 }
