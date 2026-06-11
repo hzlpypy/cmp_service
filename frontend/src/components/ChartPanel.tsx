@@ -513,10 +513,13 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
                             <select
                               value={colFilters[h]?.op || 'contains'}
                               onChange={(e) => {
+                                e.stopPropagation()
                                 const op = e.target.value as ColFilter['op']
                                 const curVal = colFilters[h]?.value || ''
                                 setColFilter(h, { op, value: curVal })
                               }}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
                               style={{
                                 width: '100%', fontSize: 11, padding: '4px 6px',
                                 background: 'var(--bg-input)', color: 'var(--text-primary)',
@@ -539,6 +542,8 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
                                 const op = colFilters[h]?.op || 'contains'
                                 setColFilter(h, { op, value: e.target.value })
                               }}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
                               placeholder={`筛选 ${h}...`}
                               autoFocus
                               style={{

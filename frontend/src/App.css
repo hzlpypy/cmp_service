@@ -898,7 +898,8 @@ body {
 /* ===== Table in dark theme ===== */
 .data-table-wrap {
   overflow: auto;
-  max-height: 280px;
+  flex: 1;
+  min-height: 0;
 }
 
 .data-table {
@@ -1830,4 +1831,68 @@ body {
 .pe-icon-btn-danger:hover {
   color: var(--red);
   background: rgba(226, 77, 77, 0.1);
+}
+
+/* ===== Theme Grid ===== */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.theme-card {
+  transition: all 0.15s;
+}
+
+.theme-card:hover:not(.selected) {
+  border-color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.theme-card.selected {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* ===== Grid Layout (Draggable) ===== */
+.grid-layout-container {
+  position: relative;
+  width: 100%;
+}
+
+.grid-layout-item {
+  position: absolute;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.grid-layout-item.dragging {
+  opacity: 0.85;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  border: 2px solid var(--accent);
+}
+
+.grid-resize-handle {
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.grid-resize-handle:hover {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+.grid-resize-handle.right:hover {
+  border-radius: 2px 0 0 2px;
+}
+
+.grid-resize-handle.bottom:hover {
+  border-radius: 2px 2px 0 0;
+}
+
+.grid-resize-handle.bottom-right:hover {
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.8;
 }
