@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import ChartPanel from './ChartPanel'
-import type { PanelDef, TargetDef, DatasourceRes, DashboardJSON, PanelDataRes, MetricRow } from '../api'
+import QueryInspector from './QueryInspector'
+import type { PanelDef, TargetDef, DatasourceRes, DashboardJSON, PanelDataRes, MetricRow, VariableRes } from '../api'
 import * as api from '../api'
 
 export interface PanelEditPageProps {
@@ -54,8 +55,14 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
   const [liveColumns, setLiveColumns] = useState<string[]>([])
   const [queryLoading, setQueryLoading] = useState(false)
   const [hasUnsaved, setHasUnsaved] = useState(false)
+  const [variables, setVariables] = useState<VariableRes[]>([])
 
   useEffect(() => { setP(clonePanel(panel)) }, [panel])
+
+  // 加载变量列表
+  useEffect(() => {
+    api.listVariables(dashboardId).then((list) => setVariables(list.sort((a, b) => a.sort_order - b.sort_order))).catch(() => {})
+  }, [dashboardId])
 
   // 从 panelsData 中获取当前面板的数据用于预览
   useEffect(() => {
@@ -394,6 +401,13 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                           <span className="pe-hint-text">暂未配置别名</span>
                         )}
                       </div>
+
+                      {/* Query Inspector */}
+                      <QueryInspector
+                        dashboardId={dashboardId}
+                        rawSql={target.rawSql || ''}
+                        variables={variables}
+                      />
                     </div>
                   ))}
 
@@ -473,6 +487,21 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                     </label>
                     <div className="pe-hint-text" style={{ marginTop: 4, marginLeft: 0 }}>
                       开启后，表格每列表头旁会出现筛选按钮，点击可按该列值过滤行。
+                    </div>
+                    <div style={{ marginTop: 12 }}>
+                      <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>每页显示条数</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={typeof p.options?.pageSize === 'number' ? p.options.pageSize : 5}
+                        onChange={(e) => {
+                          const v = Math.max(1, Math.min(500, parseInt(e.target.value) || 5))
+                          update({ options: { ...p.options, pageSize: v } })
+                        }}
+                        style={{ width: 80, fontSize: 12, padding: '4px 8px' }}
+                      />
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 8 }}>范围 1-500，默认 5</span>
                     </div>
                     <label className="pe-toggle" style={{ marginTop: 12 }}>
                       <input

@@ -81,6 +81,9 @@ type DashboardDataReq struct {
 	// DashboardJSON 可选，前端传入的草稿 dashboard_json。
 	// 不为 nil 时直接使用此 JSON 配置查询，不从数据库读取。
 	DashboardJSON map[string]interface{} `json:"dashboard_json,omitempty"`
+	// Variables 可选，前端传入的变量值映射。
+	// key 为变量名，value 为变量值（字符串或字符串数组）
+	Variables map[string]interface{} `json:"variables,omitempty"`
 }
 
 // PanelDataReq 单个面板数据查询请求。
@@ -94,6 +97,33 @@ type PanelDataReq struct {
 	From string `json:"from,omitempty"`
 	// To 数据结束时间（RFC3339格式，可选）
 	To string `json:"to,omitempty"`
+	// Variables 可选，前端传入的变量值映射
+	Variables map[string]interface{} `json:"variables,omitempty"`
+}
+
+// QueryInspectReq 查询检查器请求。
+// 用于 Grafana 风格的 Query Inspector 功能，展示实际执行的 SQL 和查询结果。
+type QueryInspectReq struct {
+	// RawSQL 用户输入的原始 SQL（含 $var 变量引用）
+	RawSQL string `json:"raw_sql" binding:"required"`
+	// DashboardID 仪表盘 ID，用于获取变量值
+	DashboardID string `json:"dashboard_id" binding:"required"`
+	// Variables 可选，前端传入的变量值映射（优先级高于数据库中的变量值）
+	Variables map[string]interface{} `json:"variables,omitempty"`
+}
+
+// QueryInspectRes 查询检查器响应。
+type QueryInspectRes struct {
+	// ProcessedSQL 变量替换后的实际 SQL 语句
+	ProcessedSQL string `json:"processed_sql"`
+	// Columns 列名顺序
+	Columns []string `json:"columns"`
+	// Rows 查询结果行数据
+	Rows []map[string]interface{} `json:"rows"`
+	// RowCount 返回行数
+	RowCount int `json:"row_count"`
+	// Error 查询错误信息（如有）
+	Error string `json:"error,omitempty"`
 }
 
 // PanelData 单个面板的数据查询结果。

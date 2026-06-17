@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 
 interface GridPos { x: number; y: number; w: number; h: number }
 interface PanelItem { id: string; gridPos: GridPos; [key: string]: any }
@@ -44,8 +44,6 @@ export default function GridLayout({
       }
     }
     updateWidth()
-    // 使用 setTimeout 确保 DOM 已渲染
-    setTimeout(updateWidth, 100)
     window.addEventListener('resize', updateWidth)
     return () => window.removeEventListener('resize', updateWidth)
   }, [])
@@ -128,41 +126,31 @@ export default function GridLayout({
     if (!panel) return
 
     if (dragging.type === 'move') {
-      // 计算移动距离
       const deltaX = e.clientX - dragging.startX
       const deltaY = e.clientY - dragging.startY
-      // 计算新网格位置
       const gridDeltaX = Math.round(deltaX / (cellWidth + gap))
       const gridDeltaY = Math.round(deltaY / (rowHeight + gap))
       let newX = dragging.startPos.x + gridDeltaX
       let newY = dragging.startPos.y + gridDeltaY
-      // 边界检查
       newX = Math.max(0, Math.min(cols - panel.gridPos.w, newX))
       newY = Math.max(0, newY)
-      
+
       const newPos = { ...panel.gridPos, x: newX, y: newY }
-      
-      // 检查是否有碰撞
       const collisionPanel = findCollisionPanel(dragging.panelId, newPos, panels)
-      
       if (collisionPanel) {
-        // 有碰撞，记录碰撞面板ID，用于拖拽结束时交换
         setSwapTargetId(collisionPanel.id)
         setTempPos(newPos)
       } else {
-        // 没有碰撞
         setSwapTargetId(null)
         setTempPos(newPos)
       }
     } else if (dragging.type === 'resize') {
-      // 计算调整大小
       const deltaX = e.clientX - dragging.startX
       const deltaY = e.clientY - dragging.startY
       const gridDeltaW = Math.round(deltaX / (cellWidth + gap))
       const gridDeltaH = Math.round(deltaY / (rowHeight + gap))
       let newW = dragging.startPos.w + gridDeltaW
       let newH = dragging.startPos.h + gridDeltaH
-      // 边界检查
       newW = Math.max(2, Math.min(cols - panel.gridPos.x, newW))
       newH = Math.max(2, newH)
       setTempPos({ ...panel.gridPos, w: newW, h: newH })
@@ -268,8 +256,10 @@ export default function GridLayout({
   }, [dragging, handleMouseMove, handleMouseUp])
 
   // 计算容器高度
-  const maxY = panels.reduce((max, p) => Math.max(max, p.gridPos.y + p.gridPos.h), 0)
-  const containerHeight = (maxY + 1) * rowHeight + maxY * gap + 20
+  const containerHeight = useMemo(() => {
+    const maxY = panels.reduce((max, p) => Math.max(max, p.gridPos.y + p.gridPos.h), 0)
+    return (maxY + 1) * rowHeight + maxY * gap + 20
+  }, [panels, rowHeight, gap])
 
   return (
     <div

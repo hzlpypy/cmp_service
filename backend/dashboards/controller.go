@@ -119,3 +119,19 @@ func (cont *Controller) GetPanelDataController(ctx *gin.Context) {
 	}
 	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
 }
+
+// QueryInspectController 查询检查器：返回替换后的 SQL 和查询结果。
+// POST /api/v1/panels/inspect
+func (cont *Controller) QueryInspectController(ctx *gin.Context) {
+	var req QueryInspectReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
+		return
+	}
+	resp, err := cont.QueryInspect(ctx, &req)
+	if err != nil {
+		ctx.JSON(500, gin.H{"errorCode": "50000", "errorMessage": err.Error(), "success": false})
+		return
+	}
+	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
+}

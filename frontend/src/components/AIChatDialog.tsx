@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import * as api from '../api'
 
 interface AIChatDialogProps {
   /** 当前仪表板 ID */
@@ -21,6 +22,8 @@ interface ChatMessage {
   content: string
   /** 是否在执行 update_draft 指令 */
   applied?: boolean
+  /** 附件列表 */
+  attachments?: Array<{ name: string; path: string }>
 }
 
 /**
@@ -60,38 +63,42 @@ function tryExtractCommand(text: string): { panels?: any[]; dashboard_json?: any
   return null
 }
 
-/** 生成唯一面板 ID */
-function generatePanelId(): string {
-  return `panel-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+/** 生成确定性面板 ID（基于标题） */
+function generateDeterministicId(title: string): string {
+  let hash = 0
+  for (let i = 0; i < title.length; i++) {
+    const c = title.charCodeAt(i)
+    hash = ((hash << 5) - hash) + c
+    hash |= 0
+  }
+  return `panel-gen-${Math.abs(hash)}`
 }
 
 /**
  * 将 agent 返回的 panels 合并到当前 draftJson 中。
  * - 已有 id 的面板：按 id 替换
- * - 无 id 的面板：生成新 id 并追加
+ * - 无 id 的面板：基于 title 生成确定性 id，若已存在则替换，否则追加
  */
 function mergePanels(draftJson: any, newPanels: any[]) {
   const dj = JSON.parse(JSON.stringify(draftJson)) // 深拷贝
   const existingPanels: any[] = dj.panels || []
 
   for (const np of newPanels) {
-    if (np.id) {
-      // 修改已有面板：合并 agent 变更到原面板（保留原面板缺失的字段）
-      const idx = existingPanels.findIndex((p: any) => p.id === np.id)
-      if (idx >= 0) {
-        existingPanels[idx] = {
-          ...existingPanels[idx],
-          ...np,
-          // targets 完全替换（因为 agent 会返回完整 targets）
-          targets: np.targets || existingPanels[idx].targets,
-        }
-      } else {
-        existingPanels.push(np)
+    const panelId = np.id || generateDeterministicId(np.title || '')
+    const idx = existingPanels.findIndex((p: any) => p.id === panelId)
+
+    if (idx >= 0) {
+      // 已存在 → 合并更新
+      existingPanels[idx] = {
+        ...existingPanels[idx],
+        ...np,
+        id: panelId,
+        // targets 完全替换（agent 返回完整 targets）
+        targets: np.targets || existingPanels[idx].targets,
       }
     } else {
-      // 新增面板：生成 id
-      const newPanel = { ...np, id: generatePanelId() }
-      // 如果没有 gridPos，自动计算位置
+      // 新面板
+      const newPanel = { ...np, id: panelId }
       if (!newPanel.gridPos) {
         const maxY = existingPanels.reduce((max: number, p: any) =>
           Math.max(max, (p.gridPos?.y || 0) + (p.gridPos?.h || 8)), 0)
@@ -106,6 +113,8 @@ function mergePanels(draftJson: any, newPanels: any[]) {
 }
 
 const DEFAULT_WS_URL = 'ws://127.0.0.1:8764'
+
+const ALLOWED_EXTENSIONS = ['.txt', '.md', '.pdf', '.docx', '.xlsx', '.jpg', '.jpeg', '.png']
 
 export default function AIChatDialog({
   dashboardId,
@@ -122,13 +131,18 @@ export default function AIChatDialog({
   const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // 附件上传状态
+  const [attachments, setAttachments] = useState<Array<{ name: string; path: string; uploading: boolean }>>([])
 
   // 流式消息累积
   const streamRef = useRef<{
     currentTokenId: string | null
     content: string
     msgIndex: number
-  }>({ currentTokenId: null, content: '', msgIndex: -1 })
+    draftApplied: boolean  // 当前 token 段是否已应用过 update_draft
+  }>({ currentTokenId: null, content: '', msgIndex: -1, draftApplied: false })
 
   // 始终保持最新的 draftJson 引用，避免 WebSocket 回调中使用过期闭包值
   const draftRef = useRef(draftJson)
@@ -191,15 +205,21 @@ export default function AIChatDialog({
    * 不依赖 token_id 变化或 WS 关闭，每收到 chunk 就尝试检测。
    */
   const tryApplyDraft = (content: string, msgIdx: number) => {
+    // 去重：当前 token 段已应用过则跳过
+    if (streamRef.current.draftApplied) return false
     if (!content.includes('update_draft')) return false
 
     const cmd = tryExtractCommand(content)
     if (!cmd) return false
 
+    streamRef.current.draftApplied = true
+
     if (cmd.panels) {
       const updated = mergePanels(draftRef.current, cmd.panels)
+      draftRef.current = updated // 同步更新 ref，避免陈旧闭包
       onDraftUpdate(updated)
     } else if (cmd.dashboard_json) {
+      draftRef.current = cmd.dashboard_json
       onDraftUpdate(cmd.dashboard_json)
     }
 
@@ -243,6 +263,7 @@ export default function AIChatDialog({
     if (!s.currentTokenId || tokenId !== s.currentTokenId) {
       s.currentTokenId = tokenId
       s.content = chunk
+      s.draftApplied = false
       setMessages((prev) => {
         s.msgIndex = prev.length
         return [...prev, { role: 'assistant' as const, content: chunk }]
@@ -276,15 +297,8 @@ export default function AIChatDialog({
     s.msgIndex = -1
   }
 
-  // 对话框打开时展示系统上下文提示
   useEffect(() => {
-    const panelList = (draftJson?.panels || panelsSummary).map((p: any) =>
-      `  - [${p.type || '?'}] ${p.title || p.id} (${p.id})`
-    ).join('\n')
-    setMessages([{
-      role: 'system',
-      content: `当前仪表盘: ${dashboardTitle} (${dashboardId})\n包含 ${panelsSummary.length} 个面板:\n${panelList}\n\n你可以让我修改面板的标题、类型、SQL 查询等，或新增面板。`,
-    }])
+    setMessages([])
   }, [dashboardId])
 
   useEffect(() => {
@@ -298,54 +312,97 @@ export default function AIChatDialog({
   /** 构建带完整面板上下文的消息 */
   const buildContextMessage = (userText: string) => {
     const panels = draftRef.current?.panels || panelsSummary
-    const panelList = panels.map((p: any) => ({
+    // 只发送面板摘要（id + 标题 + 类型），不发送完整 targets 避免上下文过大
+    const panelList = panels.map((p: any, i: number) => ({
+      idx: i,
       id: p.id || '',
       title: p.title || '',
       type: p.type || '',
-      ds: p.datasource_id || '',
-      targets: (p.targets || []).map((t: any) => ({
-        refId: t.refId,
-        rawSql: t.rawSql || '',
-        metricName: t.metricName || '',
-      })),
     }))
+    const count = panelList.length
+    const summary = count > 8
+      ? `${count} 个面板（已折叠，仅显示前8个）: ${JSON.stringify(panelList.slice(0, 8))}`
+      : `${count} 个面板: ${JSON.stringify(panelList)}`
 
     return [
       `【仪表盘上下文】`,
       `仪表盘ID: ${dashboardId}`,
       `标题: ${dashboardTitle}`,
-      `面板列表: ${JSON.stringify(panelList, null, 2)}`,
+      summary,
       `---`,
       `【用户指令】${userText}`,
     ].join('\n')
   }
 
-  /** 快捷提问示例 */
-  const quickPrompts: Array<{ label: string; text: string }> = [
-    { label: '改标题', text: `把 ${panelsSummary[0]?.title || '面板'} 标题改为 "测试"` },
-    { label: '改图表类型', text: `把 ${panelsSummary[0]?.title || '面板'} 改为折线图` },
-    { label: '新增面板', text: '新增一个柱状图叫 "新增测试"' },
-    { label: '修改SQL', text: `修改 ${panelsSummary[0]?.title || '面板'} 的 SQL 为 SELECT 1` },
-    { label: '切换数据源', text: `把 ${panelsSummary[0]?.title || '面板'} 的数据源切换为 API` },
-  ]
+  // ---- 文件上传 ----
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
 
-  /** 点击快捷提示填入输入框 */
-  const handleQuickPrompt = (text: string) => {
-    setInput(text)
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      const ext = '.' + file.name.split('.').pop()?.toLowerCase()
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        setMessages((prev) => [...prev, {
+          role: 'system',
+          content: `不支持的文件类型: ${file.name}。支持的类型: ${ALLOWED_EXTENSIONS.join(', ')}`,
+        }])
+        continue
+      }
+
+      // 添加文件到附件列表（上传中状态）
+      setAttachments((prev) => [...prev, { name: file.name, path: '', uploading: true }])
+
+      try {
+        const res = await api.uploadFile(file)
+        setAttachments((prev) => prev.map((a) =>
+          a.name === file.name && a.uploading ? { name: file.name, path: res.file_path, uploading: false } : a
+        ))
+      } catch (err: any) {
+        setAttachments((prev) => prev.filter((a) => a.name !== file.name || !a.uploading))
+        setMessages((prev) => [...prev, {
+          role: 'system',
+          content: `文件 ${file.name} 上传失败: ${err.message}`,
+        }])
+      }
+    }
+
+    // 重置 input 以支持重新选择同一文件
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const removeAttachment = (name: string) => {
+    setAttachments((prev) => prev.filter((a) => a.name !== name))
   }
 
   const handleSend = () => {
     const text = input.trim()
     if (!text || !connected || loading) return
 
-    setMessages((prev) => [...prev, { role: 'user', content: text }])
+    // 收集已上传完成的文件路径
+    const uploadedPaths = attachments.filter((a) => !a.uploading && a.path).map((a) => a.path)
+    const uploadedFiles = attachments.filter((a) => !a.uploading && a.path).map((a) => ({ name: a.name, path: a.path }))
+
+    setMessages((prev) => [...prev, {
+      role: 'user',
+      content: text,
+      attachments: uploadedFiles.length > 0 ? uploadedFiles : undefined,
+    }])
     setInput('')
     setLoading(true)
 
-    wsRef.current?.send(JSON.stringify({
+    const contextMsg = buildContextMessage(text)
+    const payload: any = {
       type: 'chat',
-      message: buildContextMessage(text),
-    }))
+      message: contextMsg,
+    }
+    if (uploadedPaths.length > 0) {
+      payload.files = uploadedPaths
+    }
+    wsRef.current?.send(JSON.stringify(payload))
+
+    // 发送后清空附件
+    setAttachments([])
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -391,46 +448,6 @@ export default function AIChatDialog({
         flex: 1, overflow: 'auto', padding: '10px 14px',
         display: 'flex', flexDirection: 'column', gap: 8,
       }}>
-        {messages.length <= 1 && messages[0]?.role === 'system' && (
-          <div style={{
-            color: 'var(--text-muted)', fontSize: 12,
-            padding: '4px 0',
-          }}>
-            <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--text-secondary)' }}>
-              试试对我说：
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {quickPrompts.map((qp, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleQuickPrompt(qp.text)}
-                  disabled={!connected || loading}
-                  title={qp.text}
-                  style={{
-                    padding: '4px 10px', fontSize: 11,
-                    background: 'var(--bg-input)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: 12, cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    transition: 'background 0.15s',
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.target as HTMLButtonElement).style.background = 'var(--primary)'
-                    ;(e.target as HTMLButtonElement).style.color = '#fff'
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.target as HTMLButtonElement).style.background = 'var(--bg-input)'
-                    ;(e.target as HTMLButtonElement).style.color = 'var(--text-primary)'
-                  }}
-                >
-                  {qp.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {messages.map((msg, i) => (
           <div key={i} style={{
             alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
@@ -455,6 +472,24 @@ export default function AIChatDialog({
                 background: 'var(--bg-input)', color: 'var(--text-primary)',
               }),
             }}>
+              {/* 附件显示 */}
+              {msg.attachments && msg.attachments.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                  {msg.attachments.map((att) => (
+                    <div key={att.name} style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                      padding: '2px 6px', fontSize: 11,
+                      background: msg.role === 'user' ? 'rgba(255,255,255,0.2)' : '#e6f7ff',
+                      borderRadius: 4,
+                    }}>
+                      <span>📎</span>
+                      <span style={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {att.name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {msg.content}
             </div>
 
@@ -485,40 +520,108 @@ export default function AIChatDialog({
       <div style={{
         display: 'flex', gap: 8, padding: '10px 14px',
         borderTop: '1px solid var(--border-color)', flexShrink: 0,
+        flexDirection: 'column',
       }}>
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={connected ? '描述你想做的修改...' : '正在连接...'}
-          disabled={!connected || loading}
-          rows={2}
-          style={{
-            flex: 1, resize: 'none',
-            padding: '6px 10px', fontSize: 13,
-            background: 'var(--bg-input)',
-            color: 'var(--text-primary)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 4,
-            outline: 'none',
-            fontFamily: 'inherit',
-          }}
-        />
-        <button
-          onClick={handleSend}
-          disabled={!connected || loading || !input.trim()}
-          style={{
-            alignSelf: 'flex-end',
-            padding: '6px 14px', fontSize: 13, fontWeight: 500,
-            background: connected && input.trim() ? 'var(--primary)' : 'var(--bg-input)',
-            color: connected && input.trim() ? '#fff' : 'var(--text-muted)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 4,
-            cursor: connected && input.trim() ? 'pointer' : 'default',
-          }}
-        >
-          发送
-        </button>
+        {/* 附件列表 */}
+        {attachments.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {attachments.map((att) => (
+              <div
+                key={att.name}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '2px 8px',
+                  fontSize: 11,
+                  background: att.uploading ? 'var(--bg-input)' : '#e6f7ff',
+                  border: `1px solid ${att.uploading ? 'var(--border-color)' : '#91d5ff'}`,
+                  borderRadius: 4,
+                  color: 'var(--text-primary)',
+                }}
+              >
+                <span style={{ color: att.uploading ? 'var(--text-muted)' : '#1890ff' }}>
+                  {att.uploading ? '⏳' : '📎'}
+                </span>
+                <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {att.name}
+                </span>
+                {!att.uploading && (
+                  <button
+                    onClick={() => removeAttachment(att.name)}
+                    style={{
+                      background: 'none', border: 'none',
+                      cursor: 'pointer', padding: 0,
+                      fontSize: 12, color: '#999',
+                      lineHeight: 1,
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          {/* 隐藏的文件输入 */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ALLOWED_EXTENSIONS.join(',')}
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
+          />
+          {/* 上传附件按钮 */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!connected || loading}
+            title="上传附件"
+            style={{
+              padding: '6px 8px', fontSize: 16,
+              background: 'transparent',
+              border: '1px solid var(--border-color)',
+              borderRadius: 4, cursor: 'pointer',
+              color: 'var(--text-secondary)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            📎
+          </button>
+
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={connected ? '描述你想做的修改...' : '正在连接...'}
+            disabled={!connected || loading}
+            rows={2}
+            style={{
+              flex: 1, resize: 'none',
+              padding: '6px 10px', fontSize: 13,
+              background: 'var(--bg-input)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 4, outline: 'none',
+            }}
+          />
+          <button
+            onClick={handleSend}
+            disabled={!connected || loading || !input.trim()}
+            style={{
+              alignSelf: 'flex-end',
+              padding: '6px 14px', fontSize: 13, fontWeight: 500,
+              background: connected && input.trim() ? 'var(--primary)' : 'var(--bg-input)',
+              color: connected && input.trim() ? '#fff' : 'var(--text-muted)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 4,
+              cursor: connected && input.trim() ? 'pointer' : 'default',
+            }}
+          >
+            发送
+          </button>
+        </div>
       </div>
     </div>
   )
