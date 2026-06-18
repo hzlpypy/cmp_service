@@ -258,14 +258,48 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
 
   const enableColFilter = options?.enableColumnFilter === true && type === 'table'
 
+  // 构建 aliasMap 双向映射，供 mergeColumns 和 cellAlerts 共用
+  const colAliasMap = useMemo(() => {
+    const expanded: Map<string, Set<string>> = new Map()
+    for (const t of targets) {
+      if (!t.aliasMap) continue
+      for (const [rawCol, alias] of Object.entries(t.aliasMap)) {
+        if (!alias) continue
+        let set = expanded.get(rawCol)
+        if (!set) { set = new Set(); expanded.set(rawCol, set) }
+        set.add(rawCol)
+        set.add(alias)
+        set = expanded.get(alias)
+        if (!set) { set = new Set(); expanded.set(alias, set) }
+        set.add(rawCol)
+        set.add(alias)
+      }
+    }
+    return expanded
+  }, [targets])
+
   // 条件告警
   interface CellAlertRule { column: string; op: '>' | '>=' | '<' | '<=' | '=' | '!='; value: number; color: string }
-  const cellAlertRules: CellAlertRule[] = (() => {
+  const cellAlertRules: CellAlertRule[] = useMemo(() => {
     if (type !== 'table') return []
     const raw = options?.cellAlerts
     if (!Array.isArray(raw)) return []
-    return raw.filter((r: any) => r && typeof r.column === 'string' && typeof r.op === 'string' && typeof r.value === 'number' && typeof r.color === 'string')
-  })()
+    const valid = raw.filter((r: any) => r && typeof r.column === 'string' && typeof r.op === 'string' && typeof r.value === 'number' && typeof r.color === 'string')
+    // 为有 aliasMap 的列生成对应的别名规则，使 raw/alias 列名都能匹配
+    const expanded: CellAlertRule[] = []
+    for (const r of valid) {
+      expanded.push(r)
+      const names = colAliasMap.get(r.column as string)
+      if (names) {
+        for (const n of names) {
+          if (n !== (r.column as string)) {
+            expanded.push({ ...r, column: n })
+          }
+        }
+      }
+    }
+    return expanded
+  }, [type, options?.cellAlerts, colAliasMap])
   const alertMode = (options?.alertMode === 'percentage' ? 'percentage' : 'absolute') as 'absolute' | 'percentage'
   // 百分比模式下预计算每列最大值
   const columnMax = useMemo(() => {
@@ -308,14 +342,19 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
     return matchColor
   }
   const enableCellMerge = options?.enableCellMerge === true && type === 'table'
+
   const mergeColumns = useMemo(() => {
     if (!enableCellMerge) return new Set<string>()
     const raw = options?.mergeColumns
-    if (typeof raw === 'string' && raw.trim()) {
-      return new Set(raw.split(',').map((s: string) => s.trim()).filter(Boolean))
+    if (typeof raw !== 'string' || !raw.trim()) return new Set<string>()
+    const names = new Set(raw.split(',').map((s: string) => s.trim()).filter(Boolean))
+    // 也加入 aliasMap 的对应列名
+    for (const col of [...names]) {
+      const expanded = colAliasMap.get(col)
+      if (expanded) expanded.forEach((n) => names.add(n))
     }
-    return new Set<string>()
-  }, [enableCellMerge, options?.mergeColumns])
+    return names
+  }, [enableCellMerge, options?.mergeColumns, colAliasMap])
 
   const filteredSortedData = useMemo(() => {
     let rows = allData

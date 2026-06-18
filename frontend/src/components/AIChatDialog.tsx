@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import * as api from '../api'
 
 interface AIChatDialogProps {
@@ -14,16 +16,22 @@ interface AIChatDialogProps {
   onDraftUpdate: (dashboardJson: any) => void
   /** WebSocket 服务地址 */
   wsUrl?: string
+  /** 对话窗口是否可见，用于控制 WebSocket 连接 */
+  visible?: boolean
 }
 
 /** 聊天消息 */
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
+  /** 消息类别：model=模型输出, reasoning=思考过程, toolcallchunk=tool */
+  category?: 'model' | 'reasoning' | 'toolcallchunk'
   /** 是否在执行 update_draft 指令 */
   applied?: boolean
   /** 附件列表 */
   attachments?: Array<{ name: string; path: string }>
+  /** 思考/tool调用是否折叠（reasoning 和 toolcallchunk 默认折叠） */
+  collapsed?: boolean
 }
 
 /**
@@ -95,6 +103,10 @@ function mergePanels(draftJson: any, newPanels: any[]) {
         id: panelId,
         // targets 完全替换（agent 返回完整 targets）
         targets: np.targets || existingPanels[idx].targets,
+        // options 深合并：AI 只传要改的 option 字段，保留其余
+        options: np.options != null
+          ? { ...(existingPanels[idx].options || {}), ...np.options }
+          : existingPanels[idx].options,
       }
     } else {
       // 新面板
@@ -123,6 +135,7 @@ export default function AIChatDialog({
   draftJson,
   onDraftUpdate,
   wsUrl = DEFAULT_WS_URL,
+  visible = true,
 }: AIChatDialogProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -130,6 +143,9 @@ export default function AIChatDialog({
   const [loading, setLoading] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
+  const isUserScrolledUp = useRef(false)
+  const scrollRAF = useRef<number | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -139,19 +155,31 @@ export default function AIChatDialog({
   // 流式消息累积
   const streamRef = useRef<{
     currentTokenId: string | null
+    currentCategory: string | null
     content: string
     msgIndex: number
-    draftApplied: boolean  // 当前 token 段是否已应用过 update_draft
-  }>({ currentTokenId: null, content: '', msgIndex: -1, draftApplied: false })
+    draftApplied: boolean
+  }>({ currentTokenId: null, currentCategory: null, content: '', msgIndex: -1, draftApplied: false })
 
-  // 始终保持最新的 draftJson 引用，避免 WebSocket 回调中使用过期闭包值
+  // 始终保持最新的 draftJson 引用
   const draftRef = useRef(draftJson)
   useEffect(() => { draftRef.current = draftJson }, [draftJson])
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
-  useEffect(() => { scrollToBottom() }, [messages])
+  // 检测用户是否手动滚离底部
+  const handleScroll = useCallback(() => {
+    const el = chatContainerRef.current
+    if (!el) return
+    isUserScrolledUp.current = el.scrollHeight - el.scrollTop - el.clientHeight > 50
+  }, [])
+
+  const scrollToBottom = useCallback((force = false) => {
+    if (scrollRAF.current) cancelAnimationFrame(scrollRAF.current)
+    scrollRAF.current = requestAnimationFrame(() => {
+      if (isUserScrolledUp.current && !force) return
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
+    })
+  }, [])
+  useEffect(() => { scrollToBottom() }, [messages, scrollToBottom])
 
   // 连接 WebSocket
   const connect = useCallback(() => {
@@ -240,18 +268,20 @@ export default function AIChatDialog({
 
   /**
    * 处理流式消息块。
-   * 协议：{ token_id, type, message, time, client_id }
-   * 改进：每收到 chunk 都检查是否已包含完整的 update_draft 指令，不依赖 token_id 变化或 WS 关闭。
+   * 协议：{ token_id, type, message, msg_category, time, client_id }
+   * msg_category: model=模型输出, reasoning=思考过程, toolcallchunk=tool
+   * token_id 或 msg_category 变化时创建新消息。
    */
   const handleStreamChunk = (data: any) => {
-    // 过滤心跳包及其他非流式消息：心跳包 type="heartbeat"，无 token_id 和 message
+    // 过滤心跳包及其他非流式消息
     if (data.type === 'heartbeat') return
 
     const tokenId: string = data.token_id || ''
     const chunk: string = data.message || ''
+    const category: string = data.msg_category || 'model'
 
-    // 无 token_id 或内容为空的不处理
-    if (!tokenId) return
+    // 无内容的不处理
+    if (!tokenId || !chunk) return
     const s = streamRef.current
 
     // token_id 变化 → 前一段完成
@@ -259,17 +289,21 @@ export default function AIChatDialog({
       tryApplyDraft(s.content, s.msgIndex)
     }
 
-    // 新 token_id → 新建消息
-    if (!s.currentTokenId || tokenId !== s.currentTokenId) {
+    // 新 token_id 或 category 变化 → 新建消息
+    if (!s.currentTokenId || tokenId !== s.currentTokenId || category !== s.currentCategory) {
       s.currentTokenId = tokenId
+      s.currentCategory = category
       s.content = chunk
       s.draftApplied = false
       setMessages((prev) => {
         s.msgIndex = prev.length
-        return [...prev, { role: 'assistant' as const, content: chunk }]
+        return [...prev, {
+          role: 'assistant' as const,
+          content: chunk,
+          category: category as ChatMessage['category'],
+          collapsed: category === 'reasoning' || category === 'toolcallchunk',
+        }]
       })
-      // 即使第一个 chunk 也检查
-      tryApplyDraft(chunk, s.msgIndex)
       return
     }
 
@@ -293,6 +327,7 @@ export default function AIChatDialog({
     if (!s.currentTokenId) return
     tryApplyDraft(s.content, s.msgIndex)
     s.currentTokenId = null
+    s.currentCategory = null
     s.content = ''
     s.msgIndex = -1
   }
@@ -302,27 +337,39 @@ export default function AIChatDialog({
   }, [dashboardId])
 
   useEffect(() => {
-    connect()
-    return () => {
+    if (visible) {
+      connect()
+    } else {
+      // 隐藏时断开 WebSocket，避免长时间闲置连接
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
       wsRef.current?.close()
+      setConnected(false)
     }
-  }, [connect])
+    return () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+      if (scrollRAF.current) cancelAnimationFrame(scrollRAF.current)
+      wsRef.current?.close()
+    }
+  }, [connect, visible])
 
   /** 构建带完整面板上下文的消息 */
   const buildContextMessage = (userText: string) => {
     const panels = draftRef.current?.panels || panelsSummary
-    // 只发送面板摘要（id + 标题 + 类型），不发送完整 targets 避免上下文过大
     const panelList = panels.map((p: any, i: number) => ({
       idx: i,
       id: p.id || '',
       title: p.title || '',
       type: p.type || '',
+      datasource_id: p.datasource_id || '',
+      targets: (p.targets || []).map((t: any) => ({
+        refId: t.refId,
+        rawSql: t.rawSql || '',
+        metricName: t.metricName || '',
+        aliasMap: t.aliasMap || {},
+      })),
     }))
     const count = panelList.length
-    const summary = count > 8
-      ? `${count} 个面板（已折叠，仅显示前8个）: ${JSON.stringify(panelList.slice(0, 8))}`
-      : `${count} 个面板: ${JSON.stringify(panelList)}`
+    const summary = `${count} 个面板: ${JSON.stringify(panelList)}`
 
     return [
       `【仪表盘上下文】`,
@@ -401,7 +448,8 @@ export default function AIChatDialog({
     }
     wsRef.current?.send(JSON.stringify(payload))
 
-    // 发送后清空附件
+    // 发送后强制滚动到底部并清空附件
+    scrollToBottom(true)
     setAttachments([])
   }
 
@@ -444,11 +492,18 @@ export default function AIChatDialog({
         </div>
       </div>
 
-      <div style={{
+      <div
+        ref={chatContainerRef}
+        onScroll={handleScroll}
+        style={{
         flex: 1, overflow: 'auto', padding: '10px 14px',
         display: 'flex', flexDirection: 'column', gap: 8,
       }}>
-        {messages.map((msg, i) => (
+        {messages.map((msg, i) => {
+          const isReasoning = msg.category === 'reasoning'
+          const isToolCall = msg.category === 'toolcallchunk'
+
+          return (
           <div key={i} style={{
             alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
             maxWidth: '88%',
@@ -458,40 +513,99 @@ export default function AIChatDialog({
               marginBottom: 2,
               textAlign: msg.role === 'user' ? 'right' : 'left',
             }}>
-              {msg.role === 'user' ? '你' : msg.role === 'system' ? '系统' : 'AI'}
+              {msg.role === 'user' ? '你' : msg.role === 'system' ? '系统' : (
+                isReasoning ? '思考过程' : isToolCall ? 'tool' : 'AI'
+              )}
             </div>
 
-            <div style={{
-              padding: '8px 12px', borderRadius: 8, fontSize: 13,
-              lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              ...(msg.role === 'user' ? {
-                background: 'var(--primary)', color: '#fff',
-              } : msg.role === 'system' ? {
-                background: '#fff3cd', color: '#856404',
-              } : {
-                background: 'var(--bg-input)', color: 'var(--text-primary)',
-              }),
-            }}>
-              {/* 附件显示 */}
-              {msg.attachments && msg.attachments.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-                  {msg.attachments.map((att) => (
-                    <div key={att.name} style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 3,
-                      padding: '2px 6px', fontSize: 11,
-                      background: msg.role === 'user' ? 'rgba(255,255,255,0.2)' : '#e6f7ff',
-                      borderRadius: 4,
+            {/* tool & 思考过程：可折叠，默认收起，显示首行预览 */}
+            {(isToolCall || isReasoning) ? (
+              <div>
+                <button
+                  onClick={() => {
+                    setMessages((prev) => {
+                      const updated = [...prev]
+                      updated[i] = { ...updated[i], collapsed: !updated[i].collapsed }
+                      return updated
+                    })
+                  }}
+                  style={{
+                    background: isToolCall ? '#fff7e6' : '#f5f5f5',
+                    border: `1px solid ${isToolCall ? '#ffd591' : '#d9d9d9'}`,
+                    borderRadius: 8, padding: '6px 12px',
+                    cursor: 'pointer', width: '100%', textAlign: 'left',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 10, color: isToolCall ? '#d46b08' : '#8c8c8c' }}>
+                      {msg.collapsed ? '▶' : '▼'}
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: isToolCall ? '#d46b08' : '#595959' }}>
+                      {isToolCall ? 'tool' : '思考过程'}
+                    </span>
+                  </div>
+                  {msg.collapsed && (
+                    <div style={{
+                      marginTop: 4, fontSize: 11, color: '#999',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      maxWidth: '100%',
                     }}>
-                      <span>📎</span>
-                      <span style={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {att.name}
-                      </span>
+                      {msg.content.split('\n')[0].slice(0, 80) || '(空)'}
                     </div>
-                  ))}
-                </div>
-              )}
-              {msg.content}
-            </div>
+                  )}
+                </button>
+                {!msg.collapsed && (
+                  <div style={{
+                    marginTop: 4, padding: '8px 12px', borderRadius: 8,
+                    background: isToolCall ? '#fffbe6' : '#fafafa',
+                    border: `1px solid ${isToolCall ? '#ffe58f' : '#e8e8e8'}`,
+                    fontSize: 12, lineHeight: 1.6, color: isToolCall ? '#8c6900' : '#595959',
+                    maxHeight: 300, overflow: 'auto',
+                  }}>
+                    <div className="chat-markdown">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* 模型输出：Markdown 渲染 */
+              <div style={{
+                padding: '8px 12px', borderRadius: 8, fontSize: 13,
+                lineHeight: 1.6,
+                ...(msg.role === 'user' ? {
+                  background: 'var(--primary)', color: '#fff',
+                } : msg.role === 'system' ? {
+                  background: '#fff3cd', color: '#856404',
+                } : {
+                  background: 'var(--bg-input)', color: 'var(--text-primary)',
+                }),
+              }}>
+                {/* 附件显示 */}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                    {msg.attachments.map((att) => (
+                      <div key={att.name} style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                        padding: '2px 6px', fontSize: 11,
+                        background: msg.role === 'user' ? 'rgba(255,255,255,0.2)' : '#e6f7ff',
+                        borderRadius: 4,
+                      }}>
+                        <span>📎</span>
+                        <span style={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {att.name}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {msg.role === 'user' ? msg.content : (
+                  <div className="chat-markdown">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                  </div>
+                )}
+              </div>
+            )}
 
             {msg.applied && (
               <div style={{
@@ -502,7 +616,7 @@ export default function AIChatDialog({
               </div>
             )}
           </div>
-        ))}
+        )})}
 
         {loading && (
           <div style={{

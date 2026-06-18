@@ -7,7 +7,7 @@ export default function DataSourcesPage() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
-  const [testingId, setTestingId] = useState<string | null>(null)
+  const [testingForm, setTestingForm] = useState(false)
   const [form, setForm] = useState({
     name: '',
     type: 'mysql' as 'mysql' | 'http',
@@ -69,13 +69,21 @@ export default function DataSourcesPage() {
     } catch (e: any) { alert('删除失败: ' + e.message) }
   }
 
-  const handleTest = async (id: string) => {
-    setTestingId(id)
+  const handleTestForm = async () => {
+    setTestingForm(true)
     try {
-      const msg = await api.testDatasource(id)
+      const msg = await api.testDatasource({
+        id: editId || undefined,
+        name: form.name,
+        type: form.type,
+        url: form.url,
+        database_name: form.database_name,
+        username: form.username,
+        password: form.password,
+      })
       alert(msg)
     } catch (e: any) { alert('测试失败: ' + e.message) }
-    finally { setTestingId(null) }
+    finally { setTestingForm(false) }
   }
 
   if (loading) return <div className="browse-page"><div className="empty-state">加载中...</div></div>
@@ -135,6 +143,9 @@ export default function DataSourcesPage() {
             </div>
             <div className="modal-footer">
               <button className="btn-secondary" onClick={resetForm}>取消</button>
+              <button className="btn-secondary" onClick={handleTestForm} disabled={testingForm}>
+                {testingForm ? '测试中...' : '测试连接'}
+              </button>
               <button className="btn-primary" onClick={handleSave}>{editId ? '保存修改' : '保存'}</button>
             </div>
           </div>
@@ -180,9 +191,6 @@ export default function DataSourcesPage() {
                 {ds.enabled ? '已启用' : '已禁用'}
               </span>
               <div className="ds-card-actions">
-                <button className="btn-sm" onClick={() => handleTest(ds.id)} disabled={testingId === ds.id}>
-                  {testingId === ds.id ? '测试中...' : '测试连接'}
-                </button>
                 <button className="btn-sm" onClick={() => handleEdit(ds)}>编辑</button>
                 <button className="btn-sm" onClick={() => handleDelete(ds.id)} style={{ color: 'var(--red)', borderColor: 'transparent' }}>删除</button>
               </div>

@@ -525,7 +525,19 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                             {liveColumns.map((col) => {
                               const selected = ((p.options?.mergeColumns as string) || '').split(',').map((s: string) => s.trim()).filter(Boolean)
-                              const checked = selected.includes(col)
+                              // 同时检查 aliasMap：如果 mergeColumns 存的是原始列名（如 node），也要匹配别名列（如 设备类型）
+                              let checked = selected.includes(col)
+                              if (!checked) {
+                                for (const t of p.targets) {
+                                  if (!t.aliasMap) continue
+                                  // 找到 col 对应的原始列名，检查是否在 mergeColumns 中
+                                  for (const [rawCol, alias] of Object.entries(t.aliasMap)) {
+                                    if (alias === col && selected.includes(rawCol)) { checked = true; break }
+                                    if (rawCol === col && selected.includes(alias)) { checked = true; break }
+                                  }
+                                  if (checked) break
+                                }
+                              }
                               return (
                                 <label key={col} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12 }}>
                                   <input
@@ -586,14 +598,30 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                         </div>
 
                         {/* 规则列表 */}
-                        {((p.options?.cellAlerts as any[]) || []).map((rule: any, idx: number) => (
+                        {((p.options?.cellAlerts as any[]) || []).map((rule: any, idx: number) => {
+                          // 解析列名：从 aliasMap 获取别名对应的原始名，供下拉框值匹配
+                          const resolvedCol = (() => {
+                            const rc = rule.column || ''
+                            // 如果 rule.column 已经是 liveColumns 中的列名（别名），直接返回
+                            if (!rc || liveColumns.includes(rc)) return rc
+                            // 在 aliasMap 中查找对应的别名
+                            for (const t of p.targets) {
+                              if (!t.aliasMap) continue
+                              for (const [rawCol, alias] of Object.entries(t.aliasMap)) {
+                                if (rc === rawCol && alias && liveColumns.includes(alias)) return alias
+                                if (rc === alias && liveColumns.includes(rawCol)) return rawCol
+                              }
+                            }
+                            return rc
+                          })()
+                          return (
                           <div key={idx} style={{
                             display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6,
                             padding: '6px 8px', background: 'var(--bg-input)', borderRadius: 4, flexWrap: 'wrap',
                           }}>
                             {/* 列选择 */}
                             <select
-                              value={rule.column || ''}
+                              value={resolvedCol}
                               onChange={(e) => {
                                 const alerts = [...((p.options?.cellAlerts as any[]) || [])]
                                 alerts[idx] = { ...alerts[idx], column: e.target.value }
@@ -659,7 +687,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                               ✕
                             </button>
                           </div>
-                        ))}
+                          )})}
 
                         {/* 添加规则 */}
                         <button

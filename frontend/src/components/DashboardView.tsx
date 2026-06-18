@@ -772,13 +772,14 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         </div>
 
         {/* AI 聊天侧边栏 */}
-        {chatOpen && (
-          <div style={{
-            width: 380, flexShrink: 0,
-            borderLeft: '1px solid var(--border-color)',
+        <div style={{
+            width: chatOpen ? 380 : 0, flexShrink: 0,
+            borderLeft: chatOpen ? '1px solid var(--border-color)' : 'none',
             overflow: 'hidden',
+            transition: 'width 0.2s',
           }}>
             <AIChatDialog
+              visible={chatOpen}
               dashboardId={dashboardId}
               dashboardTitle={displayTitle}
               panelsSummary={panels.map((p: any) => ({
@@ -790,7 +791,6 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
               onDraftUpdate={handleDraftUpdate}
             />
           </div>
-        )}
       </div>
     </div>
   )

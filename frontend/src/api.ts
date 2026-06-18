@@ -231,8 +231,8 @@ export async function deleteDatasource(id: string): Promise<void> {
   return request('/api/v1/datasources/delete', { method: 'POST', body: JSON.stringify({ id }) })
 }
 
-export async function testDatasource(id: string): Promise<string> {
-  return request('/api/v1/datasources/test', { method: 'POST', body: JSON.stringify({ id }) })
+export async function testDatasource(data: { id?: string; name?: string; type?: string; url?: string; database_name?: string; username?: string; password?: string }): Promise<string> {
+  return request('/api/v1/datasources/test', { method: 'POST', body: JSON.stringify(data) })
 }
 
 // ---- Snapshots API ----
