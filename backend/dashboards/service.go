@@ -4,6 +4,7 @@ package dashboards
 
 import (
 	"cmp_service_backend/model"
+	"cmp_service_backend/variables"
 	"fmt"
 	"regexp"
 	"strings"
@@ -37,6 +38,8 @@ type Interface interface {
 	GetDashboardData(ctx *gin.Context, req *DashboardDataReq) (*DashboardDataRes, error)
 	// GetPanelData 根据仪表板ID和面板ID查询单个面板的实际数据
 	GetPanelData(ctx *gin.Context, req *PanelDataReq) (*PanelData, error)
+	// QueryInspect 查询检查器：返回变量替换后的 SQL 和查询结果
+	QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryInspectRes, error)
 }
 
 // NewServer 创建仪表板业务服务实例。
@@ -237,9 +240,10 @@ func generatePanelID() string {
 // GetDashboardData 根据仪表板JSON中的面板配置，查询 network_metrics 表的实际数据。
 // 流程：
 //  1. 若请求中传入了 dashboard_json 则直接使用（前端草稿模式），否则从数据库加载
-//  2. 遍历每个 panel，解析其 targets 配置
-//  3. 根据 targets 查数据并应用时间范围过滤
-//  4. 返回每个面板的查询结果
+//  2. 获取变量值（优先使用请求中的变量，否则从数据库加载）
+//  3. 遍历每个 panel，解析其 targets 配置
+//  4. 根据 targets 查数据并应用时间范围过滤和变量替换
+//  5. 返回每个面板的查询结果
 func (s *Server) GetDashboardData(ctx *gin.Context, req *DashboardDataReq) (*DashboardDataRes, error) {
 	var dashJSON map[string]interface{}
 	var dashTitle string
@@ -260,6 +264,9 @@ func (s *Server) GetDashboardData(ctx *gin.Context, req *DashboardDataReq) (*Das
 		dashTitle = dashboard.Title
 		dashID = dashboard.ID
 	}
+
+	// 获取变量值
+	varValues := s.getVariableValues(dashID, req.Variables)
 
 	// 解析 dashboard_json 中的 panels
 	panelsRaw, ok := dashJSON["panels"]
@@ -283,7 +290,7 @@ func (s *Server) GetDashboardData(ctx *gin.Context, req *DashboardDataReq) (*Das
 		if !ok {
 			continue
 		}
-		panelData := s.queryPanelData(pMap, req.From, req.To)
+		panelData := s.queryPanelDataWithVars(pMap, req.From, req.To, varValues)
 		panelsData = append(panelsData, panelData)
 	}
 
@@ -299,14 +306,18 @@ func (s *Server) GetDashboardData(ctx *gin.Context, req *DashboardDataReq) (*Das
 // 与 GetDashboardData 不同，此接口只查询一个面板，减少数据传输量和处理开销。
 // 流程：
 //  1. 从数据库加载仪表板的 dashboard_json
-//  2. 遍历 panels 找到匹配 panel_id 的面板
-//  3. 只查询该面板的 targets，返回结果
+//  2. 获取变量值
+//  3. 遍历 panels 找到匹配 panel_id 的面板
+//  4. 只查询该面板的 targets，返回结果
 func (s *Server) GetPanelData(ctx *gin.Context, req *PanelDataReq) (*PanelData, error) {
 	// 从数据库加载仪表板
 	var dashboard model.Dashboard
 	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.DashboardID).First(&dashboard).Error; err != nil {
 		return nil, fmt.Errorf("仪表板不存在: %v", err)
 	}
+
+	// 获取变量值
+	varValues := s.getVariableValues(req.DashboardID, req.Variables)
 
 	// 解析 dashboard_json 中的 panels
 	dashJSON := dashboard.DashboardJSON
@@ -327,12 +338,267 @@ func (s *Server) GetPanelData(ctx *gin.Context, req *PanelDataReq) (*PanelData, 
 			continue
 		}
 		if getStringField(pMap, "id") == req.PanelID {
-			panelData := s.queryPanelData(pMap, req.From, req.To)
+			panelData := s.queryPanelDataWithVars(pMap, req.From, req.To, varValues)
 			return &panelData, nil
 		}
 	}
 
 	return nil, fmt.Errorf("面板 %s 不存在", req.PanelID)
+}
+
+// QueryInspect 查询检查器：执行变量替换后的 SQL 并返回实际 SQL 和查询结果。
+// 用于前端 Query Inspector 功能，帮助用户调试 SQL 查询和变量替换。
+func (s *Server) QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryInspectRes, error) {
+	// 获取变量值
+	varValues := s.getVariableValues(req.DashboardID, req.Variables)
+
+	// 应用变量替换
+	processedSQL := variables.ReplaceVariables(req.RawSQL, varValues)
+
+	res := &QueryInspectRes{
+		ProcessedSQL: processedSQL,
+		Columns:      []string{},
+		Rows:         []map[string]interface{}{},
+	}
+
+	// 安全检查：只允许 SELECT 开头
+	trimmed := strings.TrimSpace(processedSQL)
+	upper := strings.ToUpper(trimmed)
+	if !strings.HasPrefix(upper, "SELECT") {
+		res.Error = "只允许 SELECT 查询"
+		return res, nil
+	}
+
+	// 执行 SQL
+	rows, err := s.db.Raw(trimmed).Rows()
+	if err != nil {
+		res.Error = err.Error()
+		return res, nil
+	}
+	defer rows.Close()
+
+	columns, _ := rows.Columns()
+	res.Columns = columns
+
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			continue
+		}
+		row := make(map[string]interface{}, len(columns))
+		for i, col := range columns {
+			val := values[i]
+			if b, ok := val.([]byte); ok {
+				val = string(b)
+			}
+			row[col] = val
+		}
+		res.Rows = append(res.Rows, row)
+	}
+
+	res.RowCount = len(res.Rows)
+	return res, nil
+}
+
+// getVariableValues 获取变量值。
+// 优先使用请求中传入的变量值，否则从数据库加载变量的当前值。
+func (s *Server) getVariableValues(dashboardID string, reqVars map[string]interface{}) []variables.VariableValue {
+	result := make([]variables.VariableValue, 0)
+
+	// 如果请求中传入了变量值，直接使用
+	if reqVars != nil && len(reqVars) > 0 {
+		for name, val := range reqVars {
+			vv := variables.VariableValue{Name: name}
+			switch v := val.(type) {
+			case string:
+				vv.Value = v
+			case []interface{}:
+				vv.Multi = true
+				vv.Values = make([]string, 0, len(v))
+				for _, item := range v {
+					if s, ok := item.(string); ok {
+						vv.Values = append(vv.Values, s)
+					}
+				}
+				if len(vv.Values) > 0 {
+					vv.Value = vv.Values[0]
+				}
+			case []string:
+				vv.Multi = true
+				vv.Values = v
+				if len(v) > 0 {
+					vv.Value = v[0]
+				}
+			}
+			result = append(result, vv)
+		}
+		return result
+	}
+
+	// 从数据库加载变量的当前值
+	dbVars, err := variables.GetVariableValuesFromDB(s.db, dashboardID)
+	if err != nil {
+		s.log.Warnf("加载仪表盘变量失败: %v", err)
+		return result
+	}
+
+	return dbVars
+}
+
+// queryPanelDataWithVars 根据单个面板配置查询数据，支持变量替换。
+func (s *Server) queryPanelDataWithVars(panelMap map[string]interface{}, from, to string, varValues []variables.VariableValue) PanelData {
+	panelID := getStringField(panelMap, "id")
+	panelTitle := getStringField(panelMap, "title")
+	panelType := getStringField(panelMap, "type")
+
+	// 读取面板指定的数据源ID
+	datasourceID := getStringField(panelMap, "datasource_id")
+
+	if datasourceID != "" {
+		var d model.Datasource
+		if err := s.db.Where("id = ? AND enabled = 1 AND deleted_at IS NULL", datasourceID).First(&d).Error; err == nil {
+			s.log.Infof("面板 %s 使用数据源: %s (%s)", panelID, d.Name, d.Type)
+		} else {
+			s.log.Warnf("面板 %s 指定的数据源 %s 不可用: %v", panelID, datasourceID, err)
+		}
+	}
+
+	// 解析 targets 配置
+	targetsRaw, ok := panelMap["targets"]
+	if !ok {
+		return PanelData{PanelID: panelID, PanelTitle: panelTitle, PanelType: panelType, Target: [][]map[string]interface{}{}}
+	}
+	targetsList, ok := targetsRaw.([]interface{})
+	if !ok {
+		return PanelData{PanelID: panelID, PanelTitle: panelTitle, PanelType: panelType, Target: [][]map[string]interface{}{}}
+	}
+
+	// 为每个 target 查询数据
+	targetResults := make([][]map[string]interface{}, 0, len(targetsList))
+	var columns []string
+	for _, tRaw := range targetsList {
+		tMap, ok := tRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		cols, rows, err := s.queryTargetWithVars(tMap, from, to, varValues)
+		if err != nil {
+			s.log.Warnf("查询 panel %s target 数据失败: %v", panelID, err)
+			continue
+		}
+		if columns == nil {
+			columns = cols
+		}
+		targetResults = append(targetResults, rows)
+	}
+
+	return PanelData{
+		PanelID:      panelID,
+		PanelTitle:   panelTitle,
+		PanelType:    panelType,
+		DatasourceID: datasourceID,
+		Columns:      columns,
+		Target:       targetResults,
+	}
+}
+
+// queryTargetWithVars 根据 target map 执行数据库查询，支持变量替换。
+func (s *Server) queryTargetWithVars(tMap map[string]interface{}, from, to string, varValues []variables.VariableValue) ([]string, []map[string]interface{}, error) {
+	rawSQL := getStringField(tMap, "rawSql")
+
+	// 模式1: 用户自定义 SQL（支持变量替换）
+	if rawSQL != "" {
+		return s.queryWithRawSQLAndVars(rawSQL, tMap, varValues)
+	}
+
+	// 模式2: 自定义表模式
+	table := getStringField(tMap, "table")
+	fields := getStringField(tMap, "fields")
+	if table != "" {
+		return s.queryCustomTable(table, fields, tMap)
+	}
+
+	// 模式3: 默认 net_work_metrics
+	category := getStringField(tMap, "category")
+	metricName := getStringField(tMap, "metricName")
+	return s.queryNetworkMetrics(category, metricName, from, to)
+}
+
+// queryWithRawSQLAndVars 执行用户自定义 SQL，支持变量替换和别名映射。
+func (s *Server) queryWithRawSQLAndVars(rawSQL string, tMap map[string]interface{}, varValues []variables.VariableValue) ([]string, []map[string]interface{}, error) {
+	// 应用变量替换
+	processedSQL := variables.ReplaceVariables(rawSQL, varValues)
+
+	// 安全检查：只允许 SELECT 开头的语句
+	trimmed := strings.TrimSpace(processedSQL)
+	upper := strings.ToUpper(trimmed)
+	if !strings.HasPrefix(upper, "SELECT") {
+		return nil, nil, fmt.Errorf("只允许 SELECT 查询")
+	}
+
+	// 执行 SQL
+	rows, err := s.db.Raw(trimmed).Rows()
+	if err != nil {
+		return nil, nil, fmt.Errorf("SQL 执行失败: %w", err)
+	}
+	defer rows.Close()
+
+	columns, _ := rows.Columns()
+
+	// 读取别名映射
+	aliasMap := make(map[string]string)
+	if amRaw, ok := tMap["aliasMap"]; ok {
+		if am, ok := amRaw.(map[string]interface{}); ok {
+			for k, v := range am {
+				if vs, ok := v.(string); ok && vs != "" {
+					aliasMap[k] = vs
+				}
+			}
+		}
+	}
+
+	// 应用别名映射生成最终列名
+	finalColumns := make([]string, 0, len(columns))
+	for _, col := range columns {
+		if alias, ok := aliasMap[col]; ok {
+			finalColumns = append(finalColumns, alias)
+		} else {
+			finalColumns = append(finalColumns, col)
+		}
+	}
+
+	result := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			continue
+		}
+
+		row := make(map[string]interface{}, len(columns))
+		for i, col := range columns {
+			val := values[i]
+			if b, ok := val.([]byte); ok {
+				val = string(b)
+			}
+			if alias, ok := aliasMap[col]; ok {
+				row[alias] = val
+			} else {
+				row[col] = val
+			}
+		}
+		result = append(result, row)
+	}
+
+	return finalColumns, result, nil
 }
 
 // queryPanelData 根据单个面板配置查询 network_metrics 数据。

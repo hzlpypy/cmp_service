@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useState } from 'react'
+import { useRef, useEffect, useMemo, useState, memo } from 'react'
 import * as echarts from 'echarts'
 import type { MetricRow, TargetDef } from '../api'
 
@@ -78,7 +78,7 @@ function shortName(name: string): string {
 
 const SERIES_COLORS = ['#5794f2', '#e24d4d', '#55bd6a', '#ff9830', '#b877d9', '#eca846']
 
-export default function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, panelKey, columns }: ChartPanelProps) {
+export default memo(function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, panelKey, columns }: ChartPanelProps) {
   const chartRef = useRef<HTMLDivElement>(null)
   const chartInstanceRef = useRef<echarts.ECharts | null>(null)
   const [chartError, setChartError] = useState<string | null>(null)
@@ -252,17 +252,54 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
   const [colFilters, setColFilters] = useState<Record<string, ColFilter>>({})
   // 当前打开筛选弹窗的列
   const [filterOpenCol, setFilterOpenCol] = useState<string | null>(null)
+  // 分页
+  const pageSize = typeof options?.pageSize === 'number' && options.pageSize > 0 ? options.pageSize : 5
+  const [currentPage, setCurrentPage] = useState(1)
 
   const enableColFilter = options?.enableColumnFilter === true && type === 'table'
 
+  // 构建 aliasMap 双向映射，供 mergeColumns 和 cellAlerts 共用
+  const colAliasMap = useMemo(() => {
+    const expanded: Map<string, Set<string>> = new Map()
+    for (const t of targets) {
+      if (!t.aliasMap) continue
+      for (const [rawCol, alias] of Object.entries(t.aliasMap)) {
+        if (!alias) continue
+        let set = expanded.get(rawCol)
+        if (!set) { set = new Set(); expanded.set(rawCol, set) }
+        set.add(rawCol)
+        set.add(alias)
+        set = expanded.get(alias)
+        if (!set) { set = new Set(); expanded.set(alias, set) }
+        set.add(rawCol)
+        set.add(alias)
+      }
+    }
+    return expanded
+  }, [targets])
+
   // 条件告警
   interface CellAlertRule { column: string; op: '>' | '>=' | '<' | '<=' | '=' | '!='; value: number; color: string }
-  const cellAlertRules: CellAlertRule[] = (() => {
+  const cellAlertRules: CellAlertRule[] = useMemo(() => {
     if (type !== 'table') return []
     const raw = options?.cellAlerts
     if (!Array.isArray(raw)) return []
-    return raw.filter((r: any) => r && typeof r.column === 'string' && typeof r.op === 'string' && typeof r.value === 'number' && typeof r.color === 'string')
-  })()
+    const valid = raw.filter((r: any) => r && typeof r.column === 'string' && typeof r.op === 'string' && typeof r.value === 'number' && typeof r.color === 'string')
+    // 为有 aliasMap 的列生成对应的别名规则，使 raw/alias 列名都能匹配
+    const expanded: CellAlertRule[] = []
+    for (const r of valid) {
+      expanded.push(r)
+      const names = colAliasMap.get(r.column as string)
+      if (names) {
+        for (const n of names) {
+          if (n !== (r.column as string)) {
+            expanded.push({ ...r, column: n })
+          }
+        }
+      }
+    }
+    return expanded
+  }, [type, options?.cellAlerts, colAliasMap])
   const alertMode = (options?.alertMode === 'percentage' ? 'percentage' : 'absolute') as 'absolute' | 'percentage'
   // 百分比模式下预计算每列最大值
   const columnMax = useMemo(() => {
@@ -305,14 +342,19 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
     return matchColor
   }
   const enableCellMerge = options?.enableCellMerge === true && type === 'table'
+
   const mergeColumns = useMemo(() => {
     if (!enableCellMerge) return new Set<string>()
     const raw = options?.mergeColumns
-    if (typeof raw === 'string' && raw.trim()) {
-      return new Set(raw.split(',').map((s: string) => s.trim()).filter(Boolean))
+    if (typeof raw !== 'string' || !raw.trim()) return new Set<string>()
+    const names = new Set(raw.split(',').map((s: string) => s.trim()).filter(Boolean))
+    // 也加入 aliasMap 的对应列名
+    for (const col of [...names]) {
+      const expanded = colAliasMap.get(col)
+      if (expanded) expanded.forEach((n) => names.add(n))
     }
-    return new Set<string>()
-  }, [enableCellMerge, options?.mergeColumns])
+    return names
+  }, [enableCellMerge, options?.mergeColumns, colAliasMap])
 
   const filteredSortedData = useMemo(() => {
     let rows = allData
@@ -369,11 +411,22 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
     return rows
   }, [allData, colFilters, sortColumn, sortDir, tableHeaders, enableColFilter])
 
-  // 预计算单元格合并信息：层级合并（类似 Excel）
+  // 分页：数据变化时重置到第一页
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(filteredSortedData.length / pageSize)), [filteredSortedData, pageSize])
+  useEffect(() => { setCurrentPage(1) }, [filteredSortedData.length, pageSize])
+  // 确保 currentPage 在有效范围内
+  const safePage = Math.min(currentPage, totalPages)
+  const paginatedData = useMemo(() => {
+    const start = (safePage - 1) * pageSize
+    return filteredSortedData.slice(start, start + pageSize)
+  }, [filteredSortedData, safePage, pageSize])
+
+  // 预计算单元格合并信息：层级合并（类似 Excel）- 仅在分页数据上计算
   // 后续列的合并范围限制在前面列的合并范围内，不会跨组
   const cellMergeInfo = useMemo(() => {
-    if (!enableCellMerge || filteredSortedData.length === 0 || mergeColumns.size === 0) return null
-    const info: { rowSpan: number; skip: boolean }[][] = filteredSortedData.map(() =>
+    const data = paginatedData // 在当前页数据上合并，避免跨页边界
+    if (!enableCellMerge || data.length === 0 || mergeColumns.size === 0) return null
+    const info: { rowSpan: number; skip: boolean }[][] = data.map(() =>
       tableHeaders.map(() => ({ rowSpan: 1, skip: false }))
     )
 
@@ -389,21 +442,18 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
     // 对每个合并列，在当前列及之前所有合并列的值都相同的范围内查找连续相同行
     for (let colRank = 0; colRank < mergeColIndices.length; colRank++) {
       const ci = mergeColIndices[colRank]
-      // 当前列之前的所有合并列索引（用于约束范围）
       const prevMergeIndices = mergeColIndices.slice(0, colRank)
 
       let i = 0
-      while (i < filteredSortedData.length) {
+      while (i < data.length) {
         let j = i + 1
-        while (j < filteredSortedData.length) {
-          // 当前列值不同则停止
+        while (j < data.length) {
           const curCol = tableHeaders[ci]
-          if (String(filteredSortedData[j][curCol] ?? '') !== String(filteredSortedData[i][curCol] ?? '')) break
-          // 前面任一合并列的值不同也停止（保证不跨组）
+          if (String(data[j][curCol] ?? '') !== String(data[i][curCol] ?? '')) break
           let crossGroup = false
           for (const pc of prevMergeIndices) {
             const prevCol = tableHeaders[pc]
-            if (String(filteredSortedData[j][prevCol] ?? '') !== String(filteredSortedData[i][prevCol] ?? '')) {
+            if (String(data[j][prevCol] ?? '') !== String(data[i][prevCol] ?? '')) {
               crossGroup = true
               break
             }
@@ -422,7 +472,7 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
       }
     }
     return info
-  }, [enableCellMerge, filteredSortedData, tableHeaders, mergeColumns])
+  }, [enableCellMerge, paginatedData, tableHeaders, mergeColumns])
 
   const handleSort = (col: string) => {
     if (sortColumn === col) {
@@ -562,7 +612,7 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
               </tr>
             </thead>
             <tbody>
-              {filteredSortedData.map((m, i) => (
+              {paginatedData.map((m, i) => (
                 <tr key={i}>
                   {tableHeaders.map((h, ci) => {
                     if (cellMergeInfo && cellMergeInfo[i][ci].skip) return null
@@ -578,13 +628,46 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
                   })}
                 </tr>
               ))}
-              {filteredSortedData.length === 0 && (
+              {paginatedData.length === 0 && (
                 <tr><td colSpan={tableHeaders.length || 1} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20 }}>
                   {hasAnyFilter ? '无匹配结果' : '暂无数据'}
                 </td></tr>
               )}
             </tbody>
           </table>
+          {/* 分页控件 */}
+          {totalPages > 1 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              padding: '8px 0', borderTop: '1px solid var(--border-color)',
+              fontSize: 12, color: 'var(--text-secondary)',
+            }}>
+              <button
+                disabled={safePage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                style={{
+                  padding: '2px 8px', fontSize: 11,
+                  background: 'var(--bg-input)', color: 'var(--text-primary)',
+                  border: '1px solid var(--border-color)', borderRadius: 3,
+                  cursor: safePage <= 1 ? 'default' : 'pointer',
+                  opacity: safePage <= 1 ? 0.4 : 1,
+                }}
+              >上一页</button>
+              <span>第 {safePage} / {totalPages} 页</span>
+              <button
+                disabled={safePage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                style={{
+                  padding: '2px 8px', fontSize: 11,
+                  background: 'var(--bg-input)', color: 'var(--text-primary)',
+                  border: '1px solid var(--border-color)', borderRadius: 3,
+                  cursor: safePage >= totalPages ? 'default' : 'pointer',
+                  opacity: safePage >= totalPages ? 0.4 : 1,
+                }}
+              >下一页</button>
+              <span style={{ marginLeft: 4 }}>共 {filteredSortedData.length} 条</span>
+            </div>
+          )}
         </div>
       ) : (
         <div ref={chartRef} style={{ width: '100%', flex: 1, minHeight: 0 }}>
@@ -605,4 +688,4 @@ export default function ChartPanel({ type, title, data, targets, menuOpen, onTog
       )}
     </div>
   )
-}
+})

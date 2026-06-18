@@ -247,3 +247,41 @@ type Snapshot struct {
 
 // TableName 指定快照表名。
 func (Snapshot) TableName() string { return "snapshots" }
+
+// Variable 仪表盘变量表，存储仪表盘级别的模板变量。
+// 变量可在 SQL 查询中使用 $varname 或 ${varname} 语法引用。
+// 对应数据库表：variables
+type Variable struct {
+	Base
+	// DashboardID 所属仪表盘ID（外键关联 dashboards 表）
+	DashboardID string `gorm:"column:dashboard_id;type:varchar(19);not null" json:"dashboard_id"`
+	// Name 变量名（用于 $varname 引用）
+	Name string `gorm:"type:varchar(64);not null" json:"name"`
+	// Type 变量类型：custom（自定义列表）、query（查询生成）、textbox（文本框）、constant（常量）、datasource（数据源选择）、interval（时间间隔）
+	Type string `gorm:"type:varchar(16);not null;default:'custom'" json:"type"`
+	// Label 显示名称（下拉框标签）
+	Label string `gorm:"type:varchar(128);default:''" json:"label"`
+	// Description 变量描述
+	Description string `gorm:"type:varchar(512);default:''" json:"description"`
+	// Options 选项列表（JSON数组，用于 custom 类型）：[{"text":"显示文本","value":"值","selected":true}]
+	Options JSONArray `gorm:"type:json" json:"options"`
+	// Query 查询语句（用于 query 类型，如 SELECT DISTINCT server FROM servers）
+	Query string `gorm:"type:varchar(2048);default:''" json:"query"`
+	// DatasourceID 数据源ID（用于 query 类型）
+	DatasourceID string `gorm:"column:datasource_id;type:varchar(19);default:''" json:"datasource_id"`
+	// Default 默认值
+	Default string `gorm:"type:varchar(256);default:''" json:"default"`
+	// Current 当前选中的值（JSON格式）
+	Current JSONMap `gorm:"type:json" json:"current"`
+	// Multi 是否支持多选
+	Multi bool `gorm:"type:tinyint(1);default:0" json:"multi"`
+	// IncludeAll 是否包含"全部"选项
+	IncludeAll bool `gorm:"column:include_all;type:tinyint(1);default:0" json:"include_all"`
+	// AllValue "全部"选项的值（默认为 *）
+	AllValue string `gorm:"column:all_value;type:varchar(256);default:'*'" json:"all_value"`
+	// SortOrder 排序序号
+	SortOrder int `gorm:"column:sort_order;not null;default:0" json:"sort_order"`
+}
+
+// TableName 指定变量表名。
+func (Variable) TableName() string { return "variables" }

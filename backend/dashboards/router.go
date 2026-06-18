@@ -26,4 +26,6 @@ func RegisterDashboardsRouter(e *gin.Engine, c *Controller) {
 	}
 	// 面板独立路由：查询单个面板数据
 	e.POST("/api/v1/panels/data", c.GetPanelDataController)
+	// 查询检查器：返回变量替换后的 SQL 和查询结果
+	e.POST("/api/v1/panels/inspect", c.QueryInspectController)
 }

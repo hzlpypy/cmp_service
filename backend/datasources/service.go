@@ -4,10 +4,14 @@ package datasources
 
 import (
 	"cmp_service_backend/model"
+	"database/sql"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -124,14 +128,108 @@ func (s *Server) DeleteDatasource(ctx *gin.Context, req *DatasourceReq) error {
 }
 
 // TestDatasource 测试数据源连接。
-// 当前为模拟实现，仅查询数据库记录并返回"连接正常"消息。
-// 后续可扩展为实际的 MySQL ping 或 HTTP 健康检查。
+// 如果请求中提供了 ID，则从数据库查询配置作为默认值，请求中的字段会覆盖默认值；
+// 如果没有提供 ID，则直接使用请求中的配置进行测试。
 func (s *Server) TestDatasource(ctx *gin.Context, req *DatasourceReq) (string, error) {
-	var record model.Datasource
-	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&record).Error; err != nil {
-		return "", fmt.Errorf("数据源不存在: %v", err)
+	var name, dsType, url, databaseName, username, password string
+
+	// 如果有 ID，从数据库获取默认值
+	if req.ID != "" {
+		var record model.Datasource
+		if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&record).Error; err != nil {
+			return "", fmt.Errorf("数据源不存在: %v", err)
+		}
+		name = record.Name
+		dsType = record.Type
+		url = record.URL
+		databaseName = record.DatabaseName
+		username = record.Username
+		password = record.Password
 	}
-	return fmt.Sprintf("%s(%s) 连接正常", record.Name, record.Type), nil
+
+	// 请求中的字段覆盖数据库中的值
+	if req.Name != "" {
+		name = req.Name
+	}
+	if req.Type != "" {
+		dsType = req.Type
+	}
+	if req.URL != "" {
+		url = req.URL
+	}
+	if req.DatabaseName != "" {
+		databaseName = req.DatabaseName
+	}
+	if req.Username != "" {
+		username = req.Username
+	}
+	if req.Password != "" {
+		password = req.Password
+	}
+
+	if name == "" {
+		name = "未命名数据源"
+	}
+
+	switch dsType {
+	case "mysql":
+		return testMySQLConnection(name, url, databaseName, username, password)
+	case "http":
+		return testHTTPConnection(name, url)
+	default:
+		return "", fmt.Errorf("不支持的数据源类型: %s", dsType)
+	}
+}
+
+// testMySQLConnection 测试 MySQL 数据库连接
+func testMySQLConnection(name, url, databaseName, username, password string) (string, error) {
+	if url == "" {
+		return "", fmt.Errorf("URL 不能为空")
+	}
+	// 构建 DSN: username:password@tcp(host:port)/database
+	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s",
+		username, password, url, databaseName)
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return "", fmt.Errorf("连接失败: %v", err)
+	}
+	defer db.Close()
+
+	// 设置连接超时
+	db.SetConnMaxLifetime(5 * time.Second)
+
+	// 测试连接
+	if err := db.Ping(); err != nil {
+		return "", fmt.Errorf("连接失败: %v", err)
+	}
+
+	return fmt.Sprintf("%s(MySQL) 连接成功", name), nil
+}
+
+// testHTTPConnection 测试 HTTP API 连接
+func testHTTPConnection(name, url string) (string, error) {
+	if url == "" {
+		return "", fmt.Errorf("URL 不能为空")
+	}
+
+	// 确保URL以http://或https://开头
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		url = "http://" + url
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("连接失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 500 {
+		return "", fmt.Errorf("服务器错误: HTTP %d", resp.StatusCode)
+	}
+
+	return fmt.Sprintf("%s(HTTP) 连接成功, 状态码: %d", name, resp.StatusCode), nil
 }
 
 // generateDSID 生成数据源的唯一ID（最多19字符）。

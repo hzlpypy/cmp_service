@@ -1896,3 +1896,365 @@ body {
   background: var(--accent);
   opacity: 0.8;
 }
+
+/* ===== Variable Selector (Grafana style) ===== */
+.variable-selector-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.variable-dropdown {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.variable-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.variable-select-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  cursor: pointer;
+  min-width: 80px;
+  transition: all 0.15s;
+}
+
+.variable-select-box:hover {
+  border-color: var(--text-secondary);
+}
+
+.variable-select-box.open {
+  border-color: var(--accent);
+}
+
+.variable-current-value {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.variable-arrow {
+  font-size: 8px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.variable-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  min-width: 180px;
+  max-width: 320px;
+  z-index: 100;
+  overflow: hidden;
+}
+
+.variable-search-wrapper {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.variable-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+  font-family: inherit;
+}
+
+.variable-search-input:focus {
+  border-color: var(--accent);
+}
+
+.variable-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.variable-options-list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.variable-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.variable-option:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.variable-option.selected {
+  background: rgba(56, 113, 220, 0.1);
+  color: var(--accent);
+}
+
+.variable-option-all {
+  border-bottom: 1px solid var(--border-light);
+  font-weight: 500;
+}
+
+.variable-checkbox {
+  font-size: 12px;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.variable-option-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ===== Variable Editor ===== */
+.variable-editor {
+  padding: 0;
+}
+
+.variable-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.variable-editor-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.variable-editor-loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.variable-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.variable-list-empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  background: var(--bg-input);
+  border-radius: 4px;
+}
+
+.variable-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  transition: border-color 0.15s;
+}
+
+.variable-item:hover {
+  border-color: var(--text-secondary);
+}
+
+.variable-item-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.variable-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.variable-item-type {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: rgba(56, 113, 220, 0.12);
+  color: var(--accent);
+  border-radius: 3px;
+}
+
+.variable-item-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.variable-item-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Variable Form Modal */
+.variable-form-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.variable-form {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  width: 520px;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+.variable-form-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.variable-form-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.variable-form-body {
+  padding: 20px;
+}
+
+.variable-form-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color);
+}
+
+.form-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+/* ---- Markdown 消息样式 ---- */
+.chat-markdown h1, .chat-markdown h2, .chat-markdown h3 {
+  margin: 12px 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.chat-markdown h1 { font-size: 16px; }
+.chat-markdown h2 { font-size: 15px; }
+.chat-markdown p { margin: 4px 0; }
+.chat-markdown ul, .chat-markdown ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.chat-markdown li { margin: 2px 0; }
+.chat-markdown code {
+  background: rgba(0,0,0,0.15);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: 'SF Mono', Monaco, Menlo, monospace;
+}
+.chat-markdown pre {
+  background: rgba(0,0,0,0.12);
+  padding: 8px 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.chat-markdown pre code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+}
+.chat-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.chat-markdown th, .chat-markdown td {
+  border: 1px solid var(--border-color);
+  padding: 4px 8px;
+  text-align: left;
+}
+.chat-markdown th {
+  background: rgba(0,0,0,0.1);
+  font-weight: 600;
+}
+.chat-markdown blockquote {
+  margin: 4px 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--accent);
+  opacity: 0.85;
+}
+.chat-markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+}

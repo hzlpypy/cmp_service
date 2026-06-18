@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import ChartPanel from './ChartPanel'
-import type { PanelDef, TargetDef, DatasourceRes, DashboardJSON, PanelDataRes, MetricRow } from '../api'
+import QueryInspector from './QueryInspector'
+import type { PanelDef, TargetDef, DatasourceRes, DashboardJSON, PanelDataRes, MetricRow, VariableRes } from '../api'
 import * as api from '../api'
 
 export interface PanelEditPageProps {
@@ -54,8 +55,14 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
   const [liveColumns, setLiveColumns] = useState<string[]>([])
   const [queryLoading, setQueryLoading] = useState(false)
   const [hasUnsaved, setHasUnsaved] = useState(false)
+  const [variables, setVariables] = useState<VariableRes[]>([])
 
   useEffect(() => { setP(clonePanel(panel)) }, [panel])
+
+  // 加载变量列表
+  useEffect(() => {
+    api.listVariables(dashboardId).then((list) => setVariables(list.sort((a, b) => a.sort_order - b.sort_order))).catch(() => {})
+  }, [dashboardId])
 
   // 从 panelsData 中获取当前面板的数据用于预览
   useEffect(() => {
@@ -394,6 +401,13 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                           <span className="pe-hint-text">暂未配置别名</span>
                         )}
                       </div>
+
+                      {/* Query Inspector */}
+                      <QueryInspector
+                        dashboardId={dashboardId}
+                        rawSql={target.rawSql || ''}
+                        variables={variables}
+                      />
                     </div>
                   ))}
 
@@ -474,6 +488,21 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                     <div className="pe-hint-text" style={{ marginTop: 4, marginLeft: 0 }}>
                       开启后，表格每列表头旁会出现筛选按钮，点击可按该列值过滤行。
                     </div>
+                    <div style={{ marginTop: 12 }}>
+                      <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>每页显示条数</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={typeof p.options?.pageSize === 'number' ? p.options.pageSize : 5}
+                        onChange={(e) => {
+                          const v = Math.max(1, Math.min(500, parseInt(e.target.value) || 5))
+                          update({ options: { ...p.options, pageSize: v } })
+                        }}
+                        style={{ width: 80, fontSize: 12, padding: '4px 8px' }}
+                      />
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 8 }}>范围 1-500，默认 5</span>
+                    </div>
                     <label className="pe-toggle" style={{ marginTop: 12 }}>
                       <input
                         type="checkbox"
@@ -496,7 +525,19 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                             {liveColumns.map((col) => {
                               const selected = ((p.options?.mergeColumns as string) || '').split(',').map((s: string) => s.trim()).filter(Boolean)
-                              const checked = selected.includes(col)
+                              // 同时检查 aliasMap：如果 mergeColumns 存的是原始列名（如 node），也要匹配别名列（如 设备类型）
+                              let checked = selected.includes(col)
+                              if (!checked) {
+                                for (const t of p.targets) {
+                                  if (!t.aliasMap) continue
+                                  // 找到 col 对应的原始列名，检查是否在 mergeColumns 中
+                                  for (const [rawCol, alias] of Object.entries(t.aliasMap)) {
+                                    if (alias === col && selected.includes(rawCol)) { checked = true; break }
+                                    if (rawCol === col && selected.includes(alias)) { checked = true; break }
+                                  }
+                                  if (checked) break
+                                }
+                              }
                               return (
                                 <label key={col} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12 }}>
                                   <input
@@ -557,14 +598,30 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                         </div>
 
                         {/* 规则列表 */}
-                        {((p.options?.cellAlerts as any[]) || []).map((rule: any, idx: number) => (
+                        {((p.options?.cellAlerts as any[]) || []).map((rule: any, idx: number) => {
+                          // 解析列名：从 aliasMap 获取别名对应的原始名，供下拉框值匹配
+                          const resolvedCol = (() => {
+                            const rc = rule.column || ''
+                            // 如果 rule.column 已经是 liveColumns 中的列名（别名），直接返回
+                            if (!rc || liveColumns.includes(rc)) return rc
+                            // 在 aliasMap 中查找对应的别名
+                            for (const t of p.targets) {
+                              if (!t.aliasMap) continue
+                              for (const [rawCol, alias] of Object.entries(t.aliasMap)) {
+                                if (rc === rawCol && alias && liveColumns.includes(alias)) return alias
+                                if (rc === alias && liveColumns.includes(rawCol)) return rawCol
+                              }
+                            }
+                            return rc
+                          })()
+                          return (
                           <div key={idx} style={{
                             display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6,
                             padding: '6px 8px', background: 'var(--bg-input)', borderRadius: 4, flexWrap: 'wrap',
                           }}>
                             {/* 列选择 */}
                             <select
-                              value={rule.column || ''}
+                              value={resolvedCol}
                               onChange={(e) => {
                                 const alerts = [...((p.options?.cellAlerts as any[]) || [])]
                                 alerts[idx] = { ...alerts[idx], column: e.target.value }
@@ -630,7 +687,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                               ✕
                             </button>
                           </div>
-                        ))}
+                          )})}
 
                         {/* 添加规则 */}
                         <button

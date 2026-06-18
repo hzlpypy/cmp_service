@@ -105,5 +105,5 @@ func (cont *Controller) TestDatasourceController(ctx *gin.Context) {
 		ctx.JSON(500, gin.H{"errorCode": "50000", "errorMessage": err.Error(), "success": false})
 		return
 	}
-	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": msg, "success": true})
+	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "data": msg, "success": true})
 }

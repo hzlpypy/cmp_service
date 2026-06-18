@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import html2canvas from 'html2canvas'
 import ChartPanel from './ChartPanel'
 import GridLayout from './GridLayout'
 import AIChatDialog from './AIChatDialog'
+import VariableSelector from './VariableSelector'
+import DashboardEditor from './DashboardEditor'
 import * as api from '../api'
-import type { DashboardRes, DashboardDataRes, DashboardJSON, MetricRow, PanelDef, PanelDataRes, DatasourceRes } from '../api'
+import type { DashboardRes, DashboardDataRes, DashboardJSON, MetricRow, PanelDef, PanelDataRes, DatasourceRes, VariableRes } from '../api'
 
 interface DashboardViewProps {
   dashboardId: string
@@ -31,13 +33,17 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [showJson, setShowJson] = useState(false)
   const [datasources, setDatasources] = useState<DatasourceRes[]>([])
+  const [variables, setVariables] = useState<VariableRes[]>([])
 
   // ---- 本地草稿状态：所有编辑操作仅修改此状态，不调 API ----
   const [draftJson, setDraftJson] = useState<any>(null)
   // 上次保存时的快照，用于判断有无未保存变更
   const [savedJson, setSavedJson] = useState<any>(null)
   const [saving, setSaving] = useState(false)
-  const hasUnsaved = savedJson !== null && JSON.stringify(draftJson) !== JSON.stringify(savedJson)
+  const hasUnsaved = useMemo(
+    () => savedJson !== null && JSON.stringify(draftJson) !== JSON.stringify(savedJson),
+    [savedJson, draftJson]
+  )
 
   // AI 对话面板
   const [chatOpen, setChatOpen] = useState(false)
@@ -169,9 +175,8 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   }
 
   // 单面板编辑器
-  // 仪表板元信息编辑器
-  const [showMetaEdit, setShowMetaEdit] = useState(false)
-  const [metaTitle, setMetaTitle] = useState('')
+  // 仪表盘编辑器（包含变量管理）
+  const [showEditor, setShowEditor] = useState(false)
   // 添加面板
   const [showNewPanel, setShowNewPanel] = useState(false)
 
@@ -202,14 +207,32 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     setError(null)
     try {
       const tr = getTimeRange()
-      const [db, dbData, dsList] = await Promise.all([
+      // 先加载变量列表，再传变量值查询数据
+      const [db, varList, dsList] = await Promise.all([
         api.getDashboard(dashboardId),
-        api.getDashboardData(dashboardId, tr?.from, tr?.to),
+        api.listVariables(dashboardId),
         api.listDatasources(),
       ])
+
+      // 构建变量值映射
+      const varMap: Record<string, string | string[]> = {}
+      varList.forEach((v) => {
+        if (v.current && (v.current as any).value) {
+          varMap[v.name] = (v.current as any).value
+        } else if (v.default) {
+          varMap[v.name] = v.default
+        } else if (v.type === 'custom' && v.options?.length > 0) {
+          // 自定义类型：使用第一个选项作为默认值
+          const firstOpt = v.options.find((o) => o.selected) || v.options[0]
+          varMap[v.name] = firstOpt.value
+        }
+      })
+
+      const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
       setDashboard(db)
       setDataRes(dbData)
       setDatasources(dsList)
+      setVariables(varList)
       // 初始化本地草稿为当前 dashboard_json 的深拷贝
       const dj = JSON.parse(JSON.stringify(db.dashboard_json || {}))
       setDraftJson(dj)
@@ -226,7 +249,16 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     if (!draft) return
     try {
       const tr = getTimeRange()
-      const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, draft as DashboardJSON)
+      // 构建变量值映射
+      const varMap: Record<string, string | string[]> = {}
+      variables.forEach((v) => {
+        if (v.current && (v.current as any).value) {
+          varMap[v.name] = (v.current as any).value
+        } else if (v.default) {
+          varMap[v.name] = v.default
+        }
+      })
+      const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, draft as DashboardJSON, varMap)
       setDataRes(dbData)
     } catch (e: any) {
       // 静默失败，不影响草稿编辑
@@ -234,6 +266,77 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   }
 
   useEffect(() => { loadData() }, [dashboardId, timePreset, customFrom, customTo])
+
+  // 使用本地草稿渲染面板（必须在条件返回前，保证 hooks 顺序一致）
+  const { dj, panels, displayTitle } = useMemo(() => {
+    const d = draftJson || (dashboard?.dashboard_json as any) || {}
+    return {
+      dj: d,
+      panels: (d.panels || []) as any[],
+      displayTitle: (d.title || dashboard?.title || '') as string,
+    }
+  }, [draftJson, dashboard])
+
+  // 建立 panel_id → 图表类型 的映射，用于时间范围过滤
+  const panelTypeMap = useMemo(() => {
+    const map = new Map<string, string>()
+    panels.forEach((p: any) => { if (p.id) map.set(p.id, p.type) })
+    return map
+  }, [panels])
+
+  const { dataMap, columnMap } = useMemo(() => {
+    const dMap = new Map<string, MetricRow[][]>()
+    const cMap = new Map<string, string[]>()
+    if (dataRes?.panels_data) {
+      const tr = getTimeRange()
+      const fromMs = tr ? new Date(tr.from).getTime() : 0
+      const toMs = tr ? new Date(tr.to).getTime() : Infinity
+
+      dataRes.panels_data.forEach((pd) => {
+        const pType = panelTypeMap.get(pd.panel_id)
+        const shouldFilter = pType === 'line' && tr
+
+        const filtered = shouldFilter
+          ? (pd.target || []).map((rows) => {
+              if (rows.length === 0) return rows
+              const dateCol = Object.keys(rows[0]).find((k) => {
+                const kl = k.toLowerCase()
+                return kl.includes('date') || kl.includes('time') || kl.includes('日期') || kl.includes('时间') || kl === 'day'
+              })
+              if (!dateCol) return rows
+              return rows.filter((row: any) => {
+                const val = row[dateCol]
+                if (!val) return false
+                const t = new Date(val).getTime()
+                return !isNaN(t) && t >= fromMs && t <= toMs
+              })
+            })
+          : (pd.target || [])
+
+        dMap.set(pd.panel_id, filtered)
+        cMap.set(pd.panel_id, pd.columns || [])
+      })
+    }
+    return { dataMap: dMap, columnMap: cMap }
+  }, [dataRes, panelTypeMap, timePreset, customFrom, customTo])
+
+  const renderPanelContent = (panel: any, _style: React.CSSProperties) => {
+    const panelData = dataMap.get(panel.id) || []
+    return (
+      <ChartPanel
+        type={panel.type || 'table'}
+        title={panel.title || '未命名'}
+        data={panelData}
+        targets={panel.targets || []}
+        options={panel.options}
+        columns={columnMap.get(panel.id)}
+        menuOpen={openMenuId === panel.id}
+        onToggleMenu={() => toggleMenu(panel.id)}
+        onEdit={() => handleEditPanel(panel.id)}
+        onRemove={() => handleRemovePanel(panel.id)}
+      />
+    )
+  }
 
   const toggleMenu = (panelId: string) => {
     setOpenMenuId((prev) => (prev === panelId ? null : panelId))
@@ -287,16 +390,14 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     }
   }
 
-  // ---- 仪表板元信息编辑（仅修改本地草稿） ----
-  const handleOpenMetaEdit = () => {
-    setMetaTitle(draftJson?.title || dashboard?.title || '')
-    setShowMetaEdit(true)
-  }
-
-  const handleSaveMeta = () => {
-    if (!metaTitle.trim()) return
-    setDraftJson({ ...draftJson, title: metaTitle.trim() })
-    setShowMetaEdit(false)
+  // ---- 仪表盘编辑器保存 ----
+  const handleEditorSave = async (updated: DashboardJSON) => {
+    setDraftJson(updated)
+    // 重新加载变量列表
+    try {
+      const varList = await api.listVariables(dashboardId)
+      setVariables(varList.sort((a, b) => a.sort_order - b.sort_order))
+    } catch {}
   }
 
   // ---- 添加面板（仅修改本地草稿） ----
@@ -333,6 +434,51 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     setDraftJson({ ...draftJson, panels: updatedPanels })
   }
 
+  // ---- 处理变量值变化 ----
+  const handleVariableChange = async (variableId: string, value: string | string[]) => {
+    // 更新本地变量状态
+    const updatedVars = variables.map((v) => {
+      if (v.id !== variableId) return v
+      const text = Array.isArray(value)
+        ? value.map((val) => v.options.find((o) => o.value === val)?.text || val)
+        : (v.options.find((o) => o.value === value)?.text || value)
+      return {
+        ...v,
+        current: { text: text as any, value: value as any },
+      }
+    })
+    setVariables(updatedVars)
+
+    // 构建变量值映射传给后端
+    const varMap: Record<string, string | string[]> = {}
+    updatedVars.forEach((v) => {
+      if (v.current) {
+        varMap[v.name] = (v.current as any).value
+      } else if (v.default) {
+        varMap[v.name] = v.default
+      }
+    })
+
+    // 保存变量当前值到后端
+    try {
+      await api.updateVariable(variableId, {
+        dashboard_id: dashboardId,
+        current: Array.isArray(value)
+          ? { text: value.join(','), value }
+          : { text: value, value },
+      } as any)
+    } catch {}
+
+    // 用变量值重新加载数据（不调 loadData 以避免覆盖本地变量状态）
+    try {
+      const tr = getTimeRange()
+      const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
+      setDataRes(dbData)
+    } catch (e: any) {
+      console.error('重新加载数据失败:', e)
+    }
+  }
+
   if (loading) {
     return (
       <div className="dashboard-view">
@@ -353,49 +499,6 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         <div className="empty-state" style={{ color: 'var(--red)' }}>{error || '仪表板不存在'}</div>
       </div>
     )
-  }
-
-  // 使用本地草稿渲染面板
-  const dj = draftJson || (dashboard.dashboard_json as any) || {}
-  const panels: any[] = dj.panels || []
-  const displayTitle = dj.title || dashboard.title
-
-  // 建立 panel_id → 图表类型 的映射，用于时间范围过滤
-  const panelTypeMap = new Map<string, string>()
-  panels.forEach((p: any) => { if (p.id) panelTypeMap.set(p.id, p.type) })
-
-  const dataMap = new Map<string, MetricRow[][]>()
-  const columnMap = new Map<string, string[]>()
-  if (dataRes?.panels_data) {
-    const tr = getTimeRange()
-    const fromMs = tr ? new Date(tr.from).getTime() : 0
-    const toMs = tr ? new Date(tr.to).getTime() : Infinity
-
-    dataRes.panels_data.forEach((pd) => {
-      const pType = panelTypeMap.get(pd.panel_id)
-      // 时间范围仅对折线图生效
-      const shouldFilter = pType === 'line' && tr
-
-      const filtered = shouldFilter
-        ? (pd.target || []).map((rows) => {
-            if (rows.length === 0) return rows
-            const dateCol = Object.keys(rows[0]).find((k) => {
-              const kl = k.toLowerCase()
-              return kl.includes('date') || kl.includes('time') || kl.includes('日期') || kl.includes('时间') || kl === 'day'
-            })
-            if (!dateCol) return rows
-            return rows.filter((row: any) => {
-              const val = row[dateCol]
-              if (!val) return false
-              const t = new Date(val).getTime()
-              return !isNaN(t) && t >= fromMs && t <= toMs
-            })
-          })
-        : (pd.target || [])
-
-      dataMap.set(pd.panel_id, filtered)
-      columnMap.set(pd.panel_id, pd.columns || [])
-    })
   }
 
   return (
@@ -438,7 +541,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
             )}
           </div>
           <button className="btn-sm" onClick={() => setShowNewPanel(true)}>+ 添加面板</button>
-          <button className="btn-sm" onClick={handleOpenMetaEdit} title="编辑仪表板信息">&#x270E; 设置</button>
+          <button className="btn-sm" onClick={() => setShowEditor(true)} title="编辑仪表盘">&#x270E; 编辑仪表盘</button>
           <button className="btn-sm" onClick={() => setShowJson(true)} title="查看仪表板JSON">{'{ }'} 查看JSON</button>
           <button className="btn-sm" onClick={handleExportImage} disabled={exporting} title="导出仪表板为PNG图像">
             {exporting ? '导出中...' : '📷 导出图像'}
@@ -468,29 +571,23 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         </div>
       </div>
 
-      {/* ---- 仪表板元信息编辑 Modal ---- */}
-      {showMetaEdit && (
-        <div className="modal-overlay" onClick={() => setShowMetaEdit(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ width: 440 }}>
-            <div className="modal-header">
-              <h2>仪表板设置</h2>
-              <button className="modal-close" onClick={() => setShowMetaEdit(false)}>&times;</button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label>标题</label>
-                <input value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} placeholder="仪表板名称" autoFocus />
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                修改仪表板的基础信息。保存后需点击右上角"保存仪表板"才会持久化。
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowMetaEdit(false)}>取消</button>
-              <button className="btn-primary" onClick={handleSaveMeta}>确定</button>
-            </div>
-          </div>
-        </div>
+      {/* ---- 变量选择器 ---- */}
+      {variables.length > 0 && (
+        <VariableSelector
+          variables={variables}
+          onChange={handleVariableChange}
+        />
+      )}
+
+      {/* ---- 仪表盘编辑器（包含变量管理） ---- */}
+      {showEditor && (
+        <DashboardEditor
+          title={displayTitle}
+          json={draftJson as DashboardJSON}
+          dashboardId={dashboardId}
+          onSave={handleEditorSave}
+          onClose={() => setShowEditor(false)}
+        />
       )}
 
       {/* ---- 创建快照 Modal ---- */}
@@ -664,23 +761,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                 gap={8}
                 editable={true}
               >
-                {(panel, _style) => {
-                  const panelData = dataMap.get(panel.id) || []
-                  return (
-                    <ChartPanel
-                      type={panel.type || 'table'}
-                      title={panel.title || '未命名'}
-                      data={panelData}
-                      targets={panel.targets || []}
-                      options={panel.options}
-                      columns={columnMap.get(panel.id)}
-                      menuOpen={openMenuId === panel.id}
-                      onToggleMenu={() => toggleMenu(panel.id)}
-                      onEdit={() => handleEditPanel(panel.id)}
-                      onRemove={() => handleRemovePanel(panel.id)}
-                    />
-                  )
-                }}
+                {renderPanelContent}
               </GridLayout>
             )
           ) : (
@@ -691,13 +772,14 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         </div>
 
         {/* AI 聊天侧边栏 */}
-        {chatOpen && (
-          <div style={{
-            width: 380, flexShrink: 0,
-            borderLeft: '1px solid var(--border-color)',
+        <div style={{
+            width: chatOpen ? 380 : 0, flexShrink: 0,
+            borderLeft: chatOpen ? '1px solid var(--border-color)' : 'none',
             overflow: 'hidden',
+            transition: 'width 0.2s',
           }}>
             <AIChatDialog
+              visible={chatOpen}
               dashboardId={dashboardId}
               dashboardTitle={displayTitle}
               panelsSummary={panels.map((p: any) => ({
@@ -709,7 +791,6 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
               onDraftUpdate={handleDraftUpdate}
             />
           </div>
-        )}
       </div>
     </div>
   )

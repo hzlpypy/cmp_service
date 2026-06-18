@@ -7,7 +7,17 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   })
-  const json = await res.json()
+  // 检查响应是否为空
+  const text = await res.text()
+  if (!text) {
+    throw new Error(`服务器返回空响应 (HTTP ${res.status})`)
+  }
+  let json: any
+  try {
+    json = JSON.parse(text)
+  } catch (e) {
+    throw new Error(`服务器返回非 JSON 响应: ${text.slice(0, 200)}`)
+  }
   if (!json.success && json.errorCode !== '00000') {
     throw new Error(json.errorMessage || 'Unknown error')
   }
@@ -182,11 +192,12 @@ export async function deleteDashboard(id: string): Promise<void> {
   return request('/api/v1/dashboards/delete', { method: 'POST', body: JSON.stringify({ id }) })
 }
 
-export async function getDashboardData(id: string, from?: string, to?: string, dashboardJson?: DashboardJSON): Promise<DashboardDataRes> {
+export async function getDashboardData(id: string, from?: string, to?: string, dashboardJson?: DashboardJSON, variables?: Record<string, string | string[]>): Promise<DashboardDataRes> {
   const body: any = { id }
   if (from) body.from = from
   if (to) body.to = to
   if (dashboardJson) body.dashboard_json = dashboardJson
+  if (variables && Object.keys(variables).length > 0) body.variables = variables
   return request('/api/v1/dashboards/data', { method: 'POST', body: JSON.stringify(body) })
 }
 
@@ -220,8 +231,8 @@ export async function deleteDatasource(id: string): Promise<void> {
   return request('/api/v1/datasources/delete', { method: 'POST', body: JSON.stringify({ id }) })
 }
 
-export async function testDatasource(id: string): Promise<string> {
-  return request('/api/v1/datasources/test', { method: 'POST', body: JSON.stringify({ id }) })
+export async function testDatasource(data: { id?: string; name?: string; type?: string; url?: string; database_name?: string; username?: string; password?: string }): Promise<string> {
+  return request('/api/v1/datasources/test', { method: 'POST', body: JSON.stringify(data) })
 }
 
 // ---- Snapshots API ----
@@ -263,4 +274,110 @@ export async function listSnapshots(dashboardId: string, panelId?: string): Prom
 
 export async function deleteSnapshot(key: string): Promise<void> {
   return request('/api/v1/snapshots/delete', { method: 'POST', body: JSON.stringify({ snapshot_key: key }) })
+}
+
+// ---- Variables API ----
+
+export interface VariableOption {
+  text: string
+  value: string
+  selected?: boolean
+}
+
+export interface VariableRes {
+  id: string
+  dashboard_id: string
+  name: string
+  type: 'custom' | 'query' | 'textbox' | 'constant' | 'datasource' | 'interval'
+  label: string
+  description: string
+  options: VariableOption[]
+  query: string
+  datasource_id: string
+  default: string
+  current: { text: string; value: string } | { text: string; value: string[] }
+  multi: boolean
+  include_all: boolean
+  all_value: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export async function listVariables(dashboardId: string): Promise<VariableRes[]> {
+  return request('/api/v1/variables/list', { method: 'POST', body: JSON.stringify({ dashboard_id: dashboardId }) })
+}
+
+export async function getVariable(id: string): Promise<VariableRes> {
+  return request('/api/v1/variables/get', { method: 'POST', body: JSON.stringify({ id }) })
+}
+
+export async function createVariable(data: Partial<VariableRes>): Promise<VariableRes> {
+  return request('/api/v1/variables/create', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export async function updateVariable(id: string, data: Partial<VariableRes>): Promise<VariableRes> {
+  return request('/api/v1/variables/update', { method: 'POST', body: JSON.stringify({ id, ...data }) })
+}
+
+export async function deleteVariable(id: string): Promise<void> {
+  return request('/api/v1/variables/delete', { method: 'POST', body: JSON.stringify({ id }) })
+}
+
+export async function getVariableValues(id: string): Promise<VariableOption[]> {
+  return request('/api/v1/variables/values', { method: 'POST', body: JSON.stringify({ id }) })
+}
+
+// ---- Panels API ----
+
+export async function getPanelData(dashboard_id: string, panel_id: string, from?: string, to?: string, variables?: Record<string, string | string[]>): Promise<PanelDataRes> {
+  const body: any = { dashboard_id, panel_id }
+  if (from) body.from = from
+  if (to) body.to = to
+  if (variables && Object.keys(variables).length > 0) body.variables = variables
+  return request('/api/v1/panels/data', { method: 'POST', body: JSON.stringify(body) })
+}
+
+// QueryInspector 查询检查器
+export interface QueryInspectReq {
+  raw_sql: string
+  dashboard_id: string
+  variables?: Record<string, string | string[]>
+}
+
+export interface QueryInspectRes {
+  processed_sql: string
+  columns: string[]
+  rows: Record<string, unknown>[]
+  row_count: number
+  error?: string
+}
+
+export async function queryInspect(data: QueryInspectReq): Promise<QueryInspectRes> {
+  return request('/api/v1/panels/inspect', { method: 'POST', body: JSON.stringify(data) })
+}
+
+// ---- Files API ----
+
+export interface UploadFileRes {
+  file_path: string
+  file_name: string
+}
+
+export async function uploadFile(file: File): Promise<UploadFileRes> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await fetch('/api/v1/file/upload', {
+    method: 'POST',
+    body: formData,
+  })
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(errText || '上传失败')
+  }
+  const data = await res.json()
+  if (!data.success) {
+    throw new Error(data.errorMessage || '上传失败')
+  }
+  return data.data as UploadFileRes
 }

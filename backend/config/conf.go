@@ -3,12 +3,9 @@
 package config
 
 import (
+	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"log"
-	"path"
-	"runtime"
-
-	"gopkg.in/yaml.v2"
 )
 
 // Config 是应用的总配置结构体，对应 config.yaml 文件的顶层结构。
@@ -50,19 +47,12 @@ type Config struct {
 	} `yaml:"mysql"`
 }
 
-// currentDir 获取当前源文件所在的目录路径。
-// 用于定位 config.yaml 配置文件的位置。
-func currentDir() string {
-	_, filename, _, _ := runtime.Caller(0)
-	return path.Dir(filename)
-}
-
 // NewConfig 创建并加载应用配置。
 // 从与 conf.go 同目录下的 config.yaml 文件中读取配置，
 // 解析失败时会直接终止程序。
 func NewConfig() *Config {
 	// 读取 YAML 配置文件内容
-	bytes, err := ioutil.ReadFile(path.Join(currentDir(), "config.yaml"))
+	bytes, err := ioutil.ReadFile("./config/config.yaml")
 	if err != nil {
 		log.Fatal(err)
 	}

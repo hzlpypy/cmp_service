@@ -18,14 +18,16 @@ package main
 
 import (
 	"cmp_service_backend/business_systems"
-	"cmp_service_backend/cmd/config"
+	"cmp_service_backend/config"
 	"cmp_service_backend/dashboards"
 	"cmp_service_backend/datasources"
+	"cmp_service_backend/file"
 	"cmp_service_backend/folders"
 	"cmp_service_backend/model"
 	"cmp_service_backend/network_metrics"
 	"cmp_service_backend/panels"
 	"cmp_service_backend/snapshots"
+	"cmp_service_backend/variables"
 	"fmt"
 	"time"
 
@@ -81,6 +83,38 @@ func main() {
 	l.Info("Database connection established")
 
 	// ============================================================
+	// 全局中间件
+	// ============================================================
+
+	// CORS 中间件：允许跨域请求（开发阶段开放所有来源）
+	e.Use(func(ctx *gin.Context) {
+		ctx.Header("Access-Control-Allow-Origin", "*")
+		ctx.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+		ctx.Header("Access-Control-Allow-Headers", "Content-Type,Authorization")
+		// 预检请求直接返回 204
+		if ctx.Request.Method == "OPTIONS" {
+			ctx.AbortWithStatus(204)
+			return
+		}
+		ctx.Next()
+	})
+
+	// 自定义 Recovery 中间件：确保 panic 时返回 JSON 格式的错误
+	e.Use(func(ctx *gin.Context) {
+		defer func() {
+			if err := recover(); err != nil {
+				l.Errorf("Panic recovered: %v", err)
+				ctx.AbortWithStatusJSON(500, gin.H{
+					"errorCode":    "50000",
+					"errorMessage": fmt.Sprintf("服务器内部错误: %v", err),
+					"success":      false,
+				})
+			}
+		}()
+		ctx.Next()
+	})
+
+	// ============================================================
 	// 存量接口注册（原有 cmp_service 功能）
 	// ============================================================
 
@@ -123,25 +157,22 @@ func main() {
 	snapCtrl := snapshots.NewController(snapSvc)
 	snapshots.RegisterSnapshotsRouter(e, snapCtrl)
 
+	// 变量管理：/api/v1/variables/*
+	varSvc := variables.NewServer(db, l)
+	varCtrl := variables.NewController(varSvc)
+	variables.RegisterVariablesRouter(e, varCtrl)
+
+	// 注册文件上传模块
+	fi := file.NewServer(l)
+	fnc := file.NewController(fi)
+	file.RegisterFileRouter(e, fnc)
+
 	// Auto-migrate new tables
-	db.AutoMigrate(&model.Snapshot{})
+	db.AutoMigrate(&model.Snapshot{}, &model.Variable{})
 
 	// 确保 snapshots 表的 panel_id 和 dashboard_id 字段长度足够
 	db.Exec("ALTER TABLE snapshots MODIFY COLUMN dashboard_id VARCHAR(64) NOT NULL")
 	db.Exec("ALTER TABLE snapshots MODIFY COLUMN panel_id VARCHAR(64) DEFAULT ''")
-
-	// CORS 中间件：允许跨域请求（开发阶段开放所有来源）
-	e.Use(func(ctx *gin.Context) {
-		ctx.Header("Access-Control-Allow-Origin", "*")
-		ctx.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		ctx.Header("Access-Control-Allow-Headers", "Content-Type,Authorization")
-		// 预检请求直接返回 204
-		if ctx.Request.Method == "OPTIONS" {
-			ctx.AbortWithStatus(204)
-			return
-		}
-		ctx.Next()
-	})
 
 	// 启动 HTTP 服务器
 	l.Infof("Server starting on port %d", cfg.Server.Port)
