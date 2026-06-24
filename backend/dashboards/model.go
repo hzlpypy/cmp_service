@@ -110,6 +110,10 @@ type QueryInspectReq struct {
 	DashboardID string `json:"dashboard_id" binding:"required"`
 	// Variables 可选，前端传入的变量值映射（优先级高于数据库中的变量值）
 	Variables map[string]interface{} `json:"variables,omitempty"`
+	// From 时间范围开始（ISO格式），用于系统变量替换和时间过滤
+	From string `json:"from,omitempty"`
+	// To 时间范围结束（ISO格式），用于系统变量替换和时间过滤
+	To string `json:"to,omitempty"`
 }
 
 // QueryInspectRes 查询检查器响应。
@@ -190,4 +194,102 @@ func ToDashboardRes(m *model.Dashboard) *DashboardRes {
 		CreatedAt:     m.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
 		UpdatedAt:     m.UpdatedAt.Format("2006-01-02T15:04:05+08:00"),
 	}
+}
+
+// ============================================================
+// 版本管理相关类型
+// ============================================================
+
+// VersionListReq 版本列表请求参数。
+type VersionListReq struct {
+	// DashboardID 仪表盘ID
+	DashboardID string `json:"dashboard_id" binding:"required"`
+}
+
+// VersionReq 单个版本请求参数。
+type VersionReq struct {
+	// DashboardID 仪表盘ID
+	DashboardID string `json:"dashboard_id" binding:"required"`
+	// Version 版本号
+	Version int `json:"version"`
+}
+
+// VersionRestoreReq 版本还原请求参数。
+type VersionRestoreReq struct {
+	// DashboardID 仪表盘ID
+	DashboardID string `json:"dashboard_id" binding:"required"`
+	// Version 要还原的版本号
+	Version int `json:"version" binding:"required"`
+	// Message 还原说明（可选）
+	Message string `json:"message"`
+}
+
+// VersionCompareReq 版本对比请求参数。
+type VersionCompareReq struct {
+	// DashboardID 仪表盘ID
+	DashboardID string `json:"dashboard_id" binding:"required"`
+	// VersionFrom 起始版本号
+	VersionFrom int `json:"version_from" binding:"required"`
+	// VersionTo 目标版本号
+	VersionTo int `json:"version_to" binding:"required"`
+}
+
+// VersionRes 版本信息响应。
+type VersionRes struct {
+	// ID 版本记录ID
+	ID string `json:"id"`
+	// DashboardID 仪表盘ID
+	DashboardID string `json:"dashboard_id"`
+	// Version 版本号
+	Version int `json:"version"`
+	// Title 该版本的仪表盘标题
+	Title string `json:"title"`
+	// DashboardJSON 该版本的仪表盘完整JSON定义
+	DashboardJSON interface{} `json:"dashboard_json"`
+	// Message 版本说明
+	Message string `json:"message"`
+	// CreatedBy 创建者
+	CreatedBy string `json:"created_by"`
+	// CreatedAt 创建时间
+	CreatedAt string `json:"created_at"`
+}
+
+// VersionBriefRes 版本简要信息（用于列表）。
+type VersionBriefRes struct {
+	// ID 版本记录ID
+	ID string `json:"id"`
+	// Version 版本号
+	Version int `json:"version"`
+	// Title 该版本的仪表盘标题
+	Title string `json:"title"`
+	// Message 版本说明
+	Message string `json:"message"`
+	// CreatedBy 创建者
+	CreatedBy string `json:"created_by"`
+	// CreatedAt 创建时间
+	CreatedAt string `json:"created_at"`
+}
+
+// VersionDiffRes 版本差异对比响应。
+type VersionDiffRes struct {
+	// DashboardID 仪表盘ID
+	DashboardID string `json:"dashboard_id"`
+	// VersionFrom 起始版本号
+	VersionFrom int `json:"version_from"`
+	// VersionTo 目标版本号
+	VersionTo int `json:"version_to"`
+	// TitleFrom 起始版本标题
+	TitleFrom string `json:"title_from"`
+	// TitleTo 目标版本标题
+	TitleTo string `json:"title_to"`
+	// CreatedAtFrom 起始版本创建时间
+	CreatedAtFrom string `json:"created_at_from"`
+	// CreatedAtTo 目标版本创建时间
+	CreatedAtTo string `json:"created_at_to"`
+	// DiffJSON 差异内容（JSON格式）
+	DiffJSON map[string]interface{} `json:"diff_json"`
+	// JSONFrom 起始版本JSON
+	JSONFrom map[string]interface{} `json:"json_from"`
+	// JSONTo 目标版本JSON
+	JSONTo map[string]interface{} `json:"json_to"`
 }

@@ -5,6 +5,7 @@ import GridLayout from './GridLayout'
 import AIChatDialog from './AIChatDialog'
 import VariableSelector from './VariableSelector'
 import DashboardEditor from './DashboardEditor'
+import VersionHistory from './VersionHistory'
 import * as api from '../api'
 import type { DashboardRes, DashboardDataRes, DashboardJSON, MetricRow, PanelDef, PanelDataRes, DatasourceRes, VariableRes } from '../api'
 
@@ -17,6 +18,10 @@ interface DashboardViewProps {
     datasources: DatasourceRes[]
     draftJson: any
     panelsData?: PanelDataRes[]
+    variables: VariableRes[]
+    timePreset: string
+    customFrom: string
+    customTo: string
     onSave: (updated: PanelDef) => void
   }) => void
 }
@@ -179,12 +184,87 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   const [showEditor, setShowEditor] = useState(false)
   // 添加面板
   const [showNewPanel, setShowNewPanel] = useState(false)
+  // 版本历史
+  const [showVersionHistory, setShowVersionHistory] = useState(false)
 
-  // 时间范围选择
-  type TimePreset = '6h' | '24h' | '7d' | 'custom'
-  const [timePreset, setTimePreset] = useState<TimePreset>('6h')
-  const [customFrom, setCustomFrom] = useState('')
-  const [customTo, setCustomTo] = useState('')
+  // 时间范围选择（从 localStorage 恢复上次的选择）
+  type TimePreset = '5m' | '30m' | '1h' | '6h' | '12h' | '24h' | '2d' | '7d' | '30d' | 'today' | 'yesterday' | 'day_before_yesterday' | 'last_week_today' | 'custom'
+  const [timePreset, setTimePresetState] = useState<TimePreset>(() => {
+    try {
+      const saved = localStorage.getItem(`dash_time_${dashboardId}`)
+      if (saved) return (JSON.parse(saved).timePreset as TimePreset) || '6h'
+    } catch {}
+    return '6h'
+  })
+  const [customFrom, setCustomFrom] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`dash_time_${dashboardId}`)
+      if (saved) return JSON.parse(saved).customFrom || ''
+    } catch {}
+    return ''
+  })
+  const [customTo, setCustomTo] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`dash_time_${dashboardId}`)
+      if (saved) return JSON.parse(saved).customTo || ''
+    } catch {}
+    return ''
+  })
+  const [timePickerOpen, setTimePickerOpen] = useState(false)
+  // 自定义时间的草稿状态：输入时只更新草稿，点击"应用"才提交
+  const [draftCustomFrom, setDraftCustomFrom] = useState('')
+  const [draftCustomTo, setDraftCustomTo] = useState('')
+
+  // 打开时间选择器时，将草稿初始化为当前已保存值
+  useEffect(() => {
+    if (timePickerOpen) {
+      setDraftCustomFrom(customFrom)
+      setDraftCustomTo(customTo)
+    }
+  }, [timePickerOpen])
+
+  // 持久化时间范围到 localStorage
+  const setTimePreset = (preset: TimePreset) => {
+    setTimePresetState(preset)
+    try {
+      localStorage.setItem(`dash_time_${dashboardId}`, JSON.stringify({ timePreset: preset, customFrom, customTo }))
+    } catch {}
+  }
+  // 提交自定义时间（从草稿→正式）并持久化
+  const applyCustomTime = () => {
+    setCustomFrom(draftCustomFrom)
+    setCustomTo(draftCustomTo)
+    setTimePresetState('custom')
+    try {
+      localStorage.setItem(`dash_time_${dashboardId}`, JSON.stringify({ timePreset: 'custom', customFrom: draftCustomFrom, customTo: draftCustomTo }))
+    } catch {}
+  }
+
+  const getTimeRangeDisplay = (): string => {
+    if (timePreset === 'custom') {
+      if (customFrom && customTo) {
+        return `${customFrom} 至 ${customTo}`
+      }
+      return '自定义'
+    }
+    const labels: Record<TimePreset, string> = {
+      '5m': '最近5分钟',
+      '30m': '最近30分钟',
+      '1h': '最近1小时',
+      '6h': '最近6小时',
+      '12h': '最近12小时',
+      '24h': '最近24小时',
+      '2d': '最近2天',
+      '7d': '最近7天',
+      '30d': '最近30天',
+      'today': '今天',
+      'yesterday': '昨天',
+      'day_before_yesterday': '前天',
+      'last_week_today': '上周今天',
+      'custom': '自定义',
+    }
+    return labels[timePreset] || '最近6小时'
+  }
 
   const getTimeRange = (): { from: string; to: string } | null => {
     if (timePreset === 'custom') {
@@ -194,12 +274,83 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         to: customTo ? new Date(customTo).toISOString() : '',
       }
     }
+
     const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
+    // 绝对时间范围（整天）
+    if (timePreset === 'today') {
+      return { from: today.toISOString(), to: now.toISOString() }
+    }
+    if (timePreset === 'yesterday') {
+      const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000)
+      const yesterdayEnd = new Date(today.getTime() - 1)
+      return { from: yesterday.toISOString(), to: yesterdayEnd.toISOString() }
+    }
+    if (timePreset === 'day_before_yesterday') {
+      const dayBeforeYesterday = new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000)
+      const dayBeforeYesterdayEnd = new Date(today.getTime() - 24 * 60 * 60 * 1000 - 1)
+      return { from: dayBeforeYesterday.toISOString(), to: dayBeforeYesterdayEnd.toISOString() }
+    }
+    if (timePreset === 'last_week_today') {
+      const lastWeekToday = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+      const lastWeekTodayEnd = new Date(lastWeekToday.getTime() + 24 * 60 * 60 * 1000 - 1)
+      return { from: lastWeekToday.toISOString(), to: lastWeekTodayEnd.toISOString() }
+    }
+
+    // 相对时间范围
     const to = now.toISOString()
-    const hours = timePreset === '6h' ? 6 : timePreset === '24h' ? 24 : 168
-    const from = new Date(now.getTime() - hours * 60 * 60 * 1000).toISOString()
+    let ms = 0
+    switch (timePreset) {
+      case '5m': ms = 5 * 60 * 1000; break
+      case '30m': ms = 30 * 60 * 1000; break
+      case '1h': ms = 60 * 60 * 1000; break
+      case '6h': ms = 6 * 60 * 60 * 1000; break
+      case '12h': ms = 12 * 60 * 60 * 1000; break
+      case '24h': ms = 24 * 60 * 60 * 1000; break
+      case '2d': ms = 2 * 24 * 60 * 60 * 1000; break
+      case '7d': ms = 7 * 24 * 60 * 60 * 1000; break
+      case '30d': ms = 30 * 24 * 60 * 60 * 1000; break
+      default: ms = 6 * 60 * 60 * 1000
+    }
+    const from = new Date(now.getTime() - ms).toISOString()
     return { from, to }
   }
+
+  const handleTimePresetSelect = (preset: TimePreset) => {
+    setTimePreset(preset)
+    setTimePickerOpen(false)
+    // 非自定义预设：立即触发数据刷新
+    loadData()
+  }
+
+  // 应用自定义时间并关闭下拉、刷新数据
+  const handleApplyCustomTime = () => {
+    if (!draftCustomFrom || !draftCustomTo) return
+    applyCustomTime()
+    setTimePickerOpen(false)
+    loadData()
+  }
+
+  // 点击外部关闭时间选择器
+  useEffect(() => {
+    if (!timePickerOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      // 检查点击是否在时间选择器内部
+      if (!target.closest('.time-picker-dropdown') && !target.closest('.time-picker-button')) {
+        setTimePickerOpen(false)
+      }
+    }
+    // 延迟添加监听器，避免当前点击事件立即触发关闭
+    const timer = setTimeout(() => {
+      document.addEventListener('click', handleClickOutside)
+    }, 0)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('click', handleClickOutside)
+    }
+  }, [timePickerOpen])
 
   // 加载仪表板详情和数据
   const loadData = async () => {
@@ -214,7 +365,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         api.listDatasources(),
       ])
 
-      // 构建变量值映射
+      // 构建变量值映射（用户变量 + 系统变量）
       const varMap: Record<string, string | string[]> = {}
       varList.forEach((v) => {
         if (v.current && (v.current as any).value) {
@@ -227,6 +378,8 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
           varMap[v.name] = firstOpt.value
         }
       })
+      // 合并系统内置变量（$__from, $__to 等）
+      if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
 
       const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
       setDashboard(db)
@@ -249,7 +402,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     if (!draft) return
     try {
       const tr = getTimeRange()
-      // 构建变量值映射
+      // 构建变量值映射（用户变量 + 系统变量）
       const varMap: Record<string, string | string[]> = {}
       variables.forEach((v) => {
         if (v.current && (v.current as any).value) {
@@ -258,6 +411,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
           varMap[v.name] = v.default
         }
       })
+      if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
       const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, draft as DashboardJSON, varMap)
       setDataRes(dbData)
     } catch (e: any) {
@@ -265,7 +419,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     }
   }
 
-  useEffect(() => { loadData() }, [dashboardId, timePreset, customFrom, customTo])
+  useEffect(() => { loadData() }, [dashboardId])
 
   // 使用本地草稿渲染面板（必须在条件返回前，保证 hooks 顺序一致）
   const { dj, panels, displayTitle } = useMemo(() => {
@@ -330,6 +484,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         targets={panel.targets || []}
         options={panel.options}
         columns={columnMap.get(panel.id)}
+        dataLinks={panel.dataLinks}
         menuOpen={openMenuId === panel.id}
         onToggleMenu={() => toggleMenu(panel.id)}
         onEdit={() => handleEditPanel(panel.id)}
@@ -356,7 +511,20 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       if (title !== dashboard.title) {
         setDashboard({ ...dashboard, title, dashboard_json: saved })
       }
-      loadData()
+      // 不重新加载变量，保留用户当前选择的变量值
+      // 只重新加载仪表盘数据（使用当前变量和时间范围）
+      const tr = getTimeRange()
+      const varMap: Record<string, string | string[]> = {}
+      variables.forEach((v) => {
+        if (v.current && (v.current as any).value) {
+          varMap[v.name] = (v.current as any).value
+        } else if (v.default) {
+          varMap[v.name] = v.default
+        }
+      })
+      if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
+      const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
+      setDataRes(dbData)
     } catch (e: any) {
       alert('保存失败: ' + (e.message || e))
     } finally {
@@ -376,6 +544,10 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         datasources,
         draftJson,
         panelsData: dataRes?.panels_data,
+        variables,
+        timePreset,
+        customFrom,
+        customTo,
         onSave: (updated: PanelDef) => {
           // 更新本地草稿
           const newPanels: any[] = [...(draftJson?.panels || [])]
@@ -436,20 +608,44 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
   // ---- 处理变量值变化 ----
   const handleVariableChange = async (variableId: string, value: string | string[]) => {
+    // 找到当前变量，更新 current 值
+    const currentVar = variables.find((v) => v.id === variableId)
+    if (!currentVar) return
+
+    const text = Array.isArray(value)
+      ? value.map((val) => currentVar.options.find((o) => o.value === val)?.text || val)
+      : (currentVar.options.find((o) => o.value === value)?.text || value)
+
+    const updatedVar = {
+      ...currentVar,
+      current: { text: text as any, value: value as any },
+    }
+
     // 更新本地变量状态
-    const updatedVars = variables.map((v) => {
-      if (v.id !== variableId) return v
-      const text = Array.isArray(value)
-        ? value.map((val) => v.options.find((o) => o.value === val)?.text || val)
-        : (v.options.find((o) => o.value === value)?.text || value)
-      return {
-        ...v,
-        current: { text: text as any, value: value as any },
-      }
-    })
+    const updatedVars = variables.map((v) => v.id === variableId ? updatedVar : v)
     setVariables(updatedVars)
 
-    // 构建变量值映射传给后端
+    // 保存变量到后端（传递完整数据）
+    try {
+      await api.updateVariable(variableId, {
+        dashboard_id: dashboardId,
+        name: updatedVar.name,
+        type: updatedVar.type,
+        label: updatedVar.label,
+        description: updatedVar.description,
+        options: updatedVar.options,
+        query: updatedVar.query,
+        datasource_id: updatedVar.datasource_id,
+        default: updatedVar.default,
+        current: updatedVar.current,
+        multi: updatedVar.multi,
+        include_all: updatedVar.include_all,
+        all_value: updatedVar.all_value,
+        sort_order: updatedVar.sort_order,
+      })
+    } catch {}
+
+    // 构建变量值映射传给后端（用户变量 + 系统变量）
     const varMap: Record<string, string | string[]> = {}
     updatedVars.forEach((v) => {
       if (v.current) {
@@ -459,19 +655,10 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       }
     })
 
-    // 保存变量当前值到后端
-    try {
-      await api.updateVariable(variableId, {
-        dashboard_id: dashboardId,
-        current: Array.isArray(value)
-          ? { text: value.join(','), value }
-          : { text: value, value },
-      } as any)
-    } catch {}
-
     // 用变量值重新加载数据（不调 loadData 以避免覆盖本地变量状态）
     try {
       const tr = getTimeRange()
+      if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
       const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
       setDataRes(dbData)
     } catch (e: any) {
@@ -517,27 +704,166 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
           )}
         </div>
         <div className="toolbar-right">
-          {/* 时间范围选择器 - 仅对折线图生效 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginRight: 12 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>时间范围</span>
-            <select
-              value={timePreset}
-              onChange={(e) => setTimePreset(e.target.value as TimePreset)}
-              style={{ fontSize: 11, padding: '2px 6px', background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+          {/* 时间范围选择器 - 类似 Grafana 风格 */}
+          <div style={{ position: 'relative', marginRight: 12 }}>
+            <button
+              className="btn-sm time-picker-button"
+              onClick={() => setTimePickerOpen(!timePickerOpen)}
+              style={{ display: 'flex', alignItems: 'center', gap: 4 }}
             >
-              <option value="6h">最近6小时</option>
-              <option value="24h">最近24小时</option>
-              <option value="7d">最近7天</option>
-              <option value="custom">自定义</option>
-            </select>
-            {timePreset === 'custom' && (
-              <>
-                <input type="datetime-local" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
-                  style={{ fontSize: 10, padding: '1px 4px', width: 130, background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }} />
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>至</span>
-                <input type="datetime-local" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
-                  style={{ fontSize: 10, padding: '1px 4px', width: 130, background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }} />
-              </>
+              <span>🕐</span>
+              <span>{getTimeRangeDisplay()}</span>
+              <span style={{ fontSize: 10 }}>▼</span>
+            </button>
+            {timePickerOpen && (
+              <div
+                className="time-picker-dropdown"
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  marginTop: 4,
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 8,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+                  zIndex: 1000,
+                  minWidth: 280,
+                  padding: 12,
+                }}
+              >
+                {/* 相对时间范围 */}
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 600 }}>相对时间范围</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                  {[
+                    { key: '5m', label: '5分钟' },
+                    { key: '30m', label: '30分钟' },
+                    { key: '1h', label: '1小时' },
+                    { key: '6h', label: '6小时' },
+                    { key: '12h', label: '12小时' },
+                    { key: '24h', label: '24小时' },
+                    { key: '2d', label: '2天' },
+                    { key: '7d', label: '7天' },
+                    { key: '30d', label: '30天' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.key}
+                      onClick={() => handleTimePresetSelect(opt.key as TimePreset)}
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: 12,
+                        background: timePreset === opt.key ? 'var(--primary)' : 'var(--bg-input)',
+                        color: timePreset === opt.key ? '#fff' : 'var(--text-primary)',
+                        border: '1px solid',
+                        borderColor: timePreset === opt.key ? 'var(--primary)' : 'var(--border-color)',
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 分隔线 */}
+                <div style={{ height: 1, background: 'var(--border-color)', margin: '12px 0' }} />
+
+                {/* 绝对时间范围 */}
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 600 }}>绝对时间范围</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  {[
+                    { key: 'today', label: '今天' },
+                    { key: 'yesterday', label: '昨天' },
+                    { key: 'day_before_yesterday', label: '前天' },
+                    { key: 'last_week_today', label: '上周今天' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.key}
+                      onClick={() => handleTimePresetSelect(opt.key as TimePreset)}
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: 12,
+                        background: timePreset === opt.key ? 'var(--primary)' : 'var(--bg-input)',
+                        color: timePreset === opt.key ? '#fff' : 'var(--text-primary)',
+                        border: '1px solid',
+                        borderColor: timePreset === opt.key ? 'var(--primary)' : 'var(--border-color)',
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 分隔线 */}
+                <div style={{ height: 1, background: 'var(--border-color)', margin: '12px 0' }} />
+
+                {/* 自定义时间范围 */}
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 600 }}>自定义时间范围</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 32 }}>从</span>
+                    <input
+                      type="datetime-local"
+                      value={draftCustomFrom}
+                      onChange={(e) => setDraftCustomFrom(e.target.value)}
+                      style={{
+                        fontSize: 12,
+                        padding: '6px 10px',
+                        flex: 1,
+                        background: 'var(--bg-input)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 6,
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 32 }}>至</span>
+                    <input
+                      type="datetime-local"
+                      value={draftCustomTo}
+                      onChange={(e) => setDraftCustomTo(e.target.value)}
+                      style={{
+                        fontSize: 12,
+                        padding: '6px 10px',
+                        flex: 1,
+                        background: 'var(--bg-input)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 6,
+                      }}
+                    />
+                  </div>
+                  {/* 应用按钮：只有点击这里才会提交自定义时间并刷新数据 */}
+                  <button
+                    onClick={handleApplyCustomTime}
+                    disabled={!draftCustomFrom || !draftCustomTo}
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: 12,
+                      background: draftCustomFrom && draftCustomTo ? 'var(--primary)' : 'var(--bg-input)',
+                      color: draftCustomFrom && draftCustomTo ? '#fff' : 'var(--text-muted)',
+                      border: '1px solid',
+                      borderColor: draftCustomFrom && draftCustomTo ? 'var(--primary)' : 'var(--border-color)',
+                      borderRadius: 6,
+                      cursor: draftCustomFrom && draftCustomTo ? 'pointer' : 'not-allowed',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    应用时间范围
+                  </button>
+                  {/* 显示当前时间范围摘要 */}
+                  {timePreset === 'custom' && customFrom && customTo && (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 10px', background: 'var(--bg-input)', borderRadius: 6 }}>
+                      {new Date(customFrom).toLocaleString('zh-CN')} → {new Date(customTo).toLocaleString('zh-CN')}
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </div>
           <button className="btn-sm" onClick={() => setShowNewPanel(true)}>+ 添加面板</button>
@@ -548,6 +874,9 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
           </button>
           <button className="btn-sm" onClick={() => { setSnapName(''); setSnapModalOpen(true); loadSnapshots() }} title="创建仪表盘快照">
             📸 创建快照
+          </button>
+          <button className="btn-sm" onClick={() => setShowVersionHistory(true)} title="查看版本历史">
+            📜 版本历史
           </button>
           <button className="btn-sm" onClick={loadData} title="刷新数据">&#x1F504; 刷新</button>
           <button className="btn-sm" onClick={() => setChatOpen(!chatOpen)} title="AI 智能助手"
@@ -665,6 +994,18 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         </div>
       )}
 
+      {/* ---- 版本历史 ---- */}
+      {showVersionHistory && (
+        <VersionHistory
+          dashboardId={dashboardId}
+          onClose={() => setShowVersionHistory(false)}
+          onRestore={() => {
+            loadData()
+            setDraftJson(null)
+          }}
+        />
+      )}
+
       {/* ---- 添加面板确认 ---- */}
       {showNewPanel && (
         <div className="modal-overlay" onClick={() => setShowNewPanel(false)}>
@@ -742,6 +1083,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                         targets={panel.targets || []}
                         options={panel.options}
                         columns={columnMap.get(panel.id)}
+                        dataLinks={panel.dataLinks}
                         menuOpen={false}
                         onToggleMenu={() => {}}
                         onEdit={() => {}}

@@ -168,11 +168,7 @@ func main() {
 	file.RegisterFileRouter(e, fnc)
 
 	// Auto-migrate new tables
-	db.AutoMigrate(&model.Snapshot{}, &model.Variable{})
-
-	// 确保 snapshots 表的 panel_id 和 dashboard_id 字段长度足够
-	db.Exec("ALTER TABLE snapshots MODIFY COLUMN dashboard_id VARCHAR(64) NOT NULL")
-	db.Exec("ALTER TABLE snapshots MODIFY COLUMN panel_id VARCHAR(64) DEFAULT ''")
+	db.AutoMigrate(&model.Snapshot{}, &model.Variable{}, &model.DashboardVersion{})
 
 	// 启动 HTTP 服务器
 	l.Infof("Server starting on port %d", cfg.Server.Port)

@@ -2,6 +2,30 @@
 
 const BASE = ''
 
+// getSystemVars 根据时间范围计算出系统变量值（Grafana 兼容格式）。
+// __from / __to 为原始 ISO 字符串，后端 ReplaceVariables 自动加引号。
+// __fromUnix / __toUnix / __fromMs / __toMs 不加引号（数字）。
+export function getSystemVars(from?: string, to?: string): Record<string, string> {
+  const vars: Record<string, string> = {}
+  if (from) {
+    vars['__from'] = from
+    const fromMs = new Date(from).getTime()
+    if (!isNaN(fromMs)) {
+      vars['__fromUnix'] = String(Math.floor(fromMs / 1000))
+      vars['__fromMs'] = String(fromMs)
+    }
+  }
+  if (to) {
+    vars['__to'] = to
+    const toMs = new Date(to).getTime()
+    if (!isNaN(toMs)) {
+      vars['__toUnix'] = String(Math.floor(toMs / 1000))
+      vars['__toMs'] = String(toMs)
+    }
+  }
+  return vars
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -94,6 +118,20 @@ export interface PanelDef {
   datasource_id?: string
   targets: TargetDef[]
   options: Record<string, unknown>
+  /** Data Links 配置（仿照 Grafana） */
+  dataLinks?: DataLinkDef[]
+}
+
+/** Data Link 定义（针对特定字段） */
+export interface DataLinkDef {
+  /** 针对哪个字段（列名） */
+  field: string
+  /** 链接标题（可选，默认使用字段值） */
+  title: string
+  /** 链接 URL，支持变量替换 */
+  url: string
+  /** 链接打开方式：_blank（新标签页）或 _self（当前页） */
+  target?: '_blank' | '_self'
 }
 
 export interface TargetDef {
@@ -343,6 +381,8 @@ export interface QueryInspectReq {
   raw_sql: string
   dashboard_id: string
   variables?: Record<string, string | string[]>
+  from?: string
+  to?: string
 }
 
 export interface QueryInspectRes {
@@ -380,4 +420,78 @@ export async function uploadFile(file: File): Promise<UploadFileRes> {
     throw new Error(data.errorMessage || '上传失败')
   }
   return data.data as UploadFileRes
+}
+
+// ---- Versions API ----
+
+export interface VersionBriefRes {
+  id: string
+  version: number
+  title: string
+  message: string
+  created_by: string
+  created_at: string
+}
+
+export interface VersionRes {
+  id: string
+  dashboard_id: string
+  version: number
+  title: string
+  dashboard_json: DashboardJSON
+  message: string
+  created_by: string
+  created_at: string
+}
+
+export interface VersionDiffRes {
+  dashboard_id: string
+  version_from: number
+  version_to: number
+  title_from: string
+  title_to: string
+  created_at_from: string
+  created_at_to: string
+  diff_json: {
+    title_changed?: { from: string; to: string }
+    panels?: {
+      from_count: number
+      to_count: number
+      added: Array<{ id: string; title: string }>
+      removed: Array<{ id: string; title: string }>
+      modified: Array<{ id: string; title: string }>
+      added_count: number
+      removed_count: number
+      modified_count: number
+    }
+  }
+  json_from: Record<string, unknown>
+  json_to: Record<string, unknown>
+}
+
+export async function listVersions(dashboardId: string): Promise<VersionBriefRes[]> {
+  return request('/api/v1/dashboards/versions/list', { method: 'POST', body: JSON.stringify({ dashboard_id: dashboardId }) })
+}
+
+export async function getVersion(dashboardId: string, version?: number): Promise<VersionRes> {
+  const body: any = { dashboard_id: dashboardId }
+  if (version) body.version = version
+  return request('/api/v1/dashboards/versions/get', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export async function restoreVersion(dashboardId: string, version: number, message?: string): Promise<DashboardRes> {
+  const body: any = { dashboard_id: dashboardId, version }
+  if (message) body.message = message
+  return request('/api/v1/dashboards/versions/restore', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export async function compareVersions(dashboardId: string, versionFrom: number, versionTo: number): Promise<VersionDiffRes> {
+  return request('/api/v1/dashboards/versions/compare', {
+    method: 'POST',
+    body: JSON.stringify({ dashboard_id: dashboardId, version_from: versionFrom, version_to: versionTo }),
+  })
+}
+
+export async function deleteVersion(dashboardId: string, version: number): Promise<void> {
+  return request('/api/v1/dashboards/versions/delete', { method: 'POST', body: JSON.stringify({ dashboard_id: dashboardId, version }) })
 }

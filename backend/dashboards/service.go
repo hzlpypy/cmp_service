@@ -5,6 +5,7 @@ package dashboards
 import (
 	"cmp_service_backend/model"
 	"cmp_service_backend/variables"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -14,6 +15,24 @@ import (
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
+
+// convertValue 将数据库查询结果中的值转换为合适的类型。
+// - []byte 转换为 string
+// - time.Time 转换为毫秒时间戳 (UnixMilli)
+func convertValue(val interface{}) interface{} {
+	if val == nil {
+		return nil
+	}
+	// []byte -> string
+	if b, ok := val.([]byte); ok {
+		return string(b)
+	}
+	// time.Time -> millisecond timestamp
+	if t, ok := val.(time.Time); ok {
+		return t.UnixMilli()
+	}
+	return val
+}
 
 // Server 仪表板业务服务，持有数据库连接和日志记录器。
 type Server struct {
@@ -40,6 +59,16 @@ type Interface interface {
 	GetPanelData(ctx *gin.Context, req *PanelDataReq) (*PanelData, error)
 	// QueryInspect 查询检查器：返回变量替换后的 SQL 和查询结果
 	QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryInspectRes, error)
+	// ListVersions 获取仪表盘版本历史列表
+	ListVersions(ctx *gin.Context, req *VersionListReq) ([]*VersionBriefRes, error)
+	// GetVersion 获取指定版本的详细信息
+	GetVersion(ctx *gin.Context, req *VersionReq) (*VersionRes, error)
+	// RestoreVersion 还原到指定版本
+	RestoreVersion(ctx *gin.Context, req *VersionRestoreReq) (*DashboardRes, error)
+	// CompareVersions 对比两个版本的差异
+	CompareVersions(ctx *gin.Context, req *VersionCompareReq) (*VersionDiffRes, error)
+	// DeleteVersion 删除指定版本
+	DeleteVersion(ctx *gin.Context, req *VersionReq) error
 }
 
 // NewServer 创建仪表板业务服务实例。
@@ -102,7 +131,14 @@ func (s *Server) CreateDashboard(ctx *gin.Context, req *DashboardReq) (*Dashboar
 
 // UpdateDashboard 更新仪表板的标题、文件夹和 dashboard_json。
 // 同步更新 panels 表：先删除旧面板，再根据新 JSON 创建面板。
+// 同时创建版本记录。
 func (s *Server) UpdateDashboard(ctx *gin.Context, req *DashboardReq) (*DashboardRes, error) {
+	// 先获取当前仪表盘信息
+	var current model.Dashboard
+	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&current).Error; err != nil {
+		return nil, err
+	}
+
 	updates := map[string]interface{}{
 		"title":     req.Title,
 		"folder_id": req.FolderID,
@@ -126,6 +162,14 @@ func (s *Server) UpdateDashboard(ctx *gin.Context, req *DashboardReq) (*Dashboar
 	// 查询更新后的记录
 	var record model.Dashboard
 	s.db.Preload("Folder").Preload("Panels", "deleted_at IS NULL").Where("id = ?", req.ID).First(&record)
+
+	// 创建版本记录（保存更新后的新版本）
+	newJSON := record.DashboardJSON
+	if req.DashboardJSON != nil {
+		newJSON = req.DashboardJSON
+	}
+	s.createVersionRecord(req.ID, record.Title, newJSON, "")
+
 	return ToDashboardRes(&record), nil
 }
 
@@ -352,8 +396,9 @@ func (s *Server) QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryIns
 	// 获取变量值
 	varValues := s.getVariableValues(req.DashboardID, req.Variables)
 
-	// 应用变量替换
-	processedSQL := variables.ReplaceVariables(req.RawSQL, varValues)
+	// 使用共享的 SQL 处理逻辑（变量替换、系统变量、时间过滤）
+	// Query Inspector 不自动添加时间过滤（chartType 为空）
+	processedSQL := ProcessRawSQL(req.RawSQL, varValues, req.From, req.To, "")
 
 	res := &QueryInspectRes{
 		ProcessedSQL: processedSQL,
@@ -391,11 +436,7 @@ func (s *Server) QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryIns
 		}
 		row := make(map[string]interface{}, len(columns))
 		for i, col := range columns {
-			val := values[i]
-			if b, ok := val.([]byte); ok {
-				val = string(b)
-			}
-			row[col] = val
+			row[col] = convertValue(values[i])
 		}
 		res.Rows = append(res.Rows, row)
 	}
@@ -486,7 +527,7 @@ func (s *Server) queryPanelDataWithVars(panelMap map[string]interface{}, from, t
 			continue
 		}
 
-		cols, rows, err := s.queryTargetWithVars(tMap, from, to, varValues)
+		cols, rows, err := s.queryTargetWithVars(tMap, from, to, panelType, varValues)
 		if err != nil {
 			s.log.Warnf("查询 panel %s target 数据失败: %v", panelID, err)
 			continue
@@ -508,12 +549,12 @@ func (s *Server) queryPanelDataWithVars(panelMap map[string]interface{}, from, t
 }
 
 // queryTargetWithVars 根据 target map 执行数据库查询，支持变量替换。
-func (s *Server) queryTargetWithVars(tMap map[string]interface{}, from, to string, varValues []variables.VariableValue) ([]string, []map[string]interface{}, error) {
+func (s *Server) queryTargetWithVars(tMap map[string]interface{}, from, to, chartType string, varValues []variables.VariableValue) ([]string, []map[string]interface{}, error) {
 	rawSQL := getStringField(tMap, "rawSql")
 
-	// 模式1: 用户自定义 SQL（支持变量替换）
+	// 模式1: 用户自定义 SQL（支持变量替换和时间范围过滤）
 	if rawSQL != "" {
-		return s.queryWithRawSQLAndVars(rawSQL, tMap, varValues)
+		return s.queryWithRawSQLAndVars(rawSQL, tMap, varValues, from, to, chartType)
 	}
 
 	// 模式2: 自定义表模式
@@ -529,10 +570,84 @@ func (s *Server) queryTargetWithVars(tMap map[string]interface{}, from, to strin
 	return s.queryNetworkMetrics(category, metricName, from, to)
 }
 
-// queryWithRawSQLAndVars 执行用户自定义 SQL，支持变量替换和别名映射。
-func (s *Server) queryWithRawSQLAndVars(rawSQL string, tMap map[string]interface{}, varValues []variables.VariableValue) ([]string, []map[string]interface{}, error) {
+// ProcessRawSQL 对原始 SQL 进行统一处理：变量替换、系统内置变量、时间过滤宏。
+// chartType 为图表类型，仅折线图(line)时自动添加时间列过滤。
+func ProcessRawSQL(rawSQL string, varValues []variables.VariableValue, from, to, chartType string) string {
 	// 应用变量替换
 	processedSQL := variables.ReplaceVariables(rawSQL, varValues)
+
+	// 应用系统内置变量替换（时间范围）- 作为 fallback
+	sysVars := variables.ParseSystemVariables(from, to)
+	processedSQL = variables.ReplaceSystemVariables(processedSQL, sysVars)
+
+	// 处理末尾分号：先移除，处理完后再添加
+	hasTrailingSemicolon := strings.HasSuffix(strings.TrimSpace(processedSQL), ";")
+	if hasTrailingSemicolon {
+		processedSQL = strings.TrimSuffix(strings.TrimSpace(processedSQL), ";")
+	}
+
+	// 应用时间范围过滤宏：$__timeFilter(column) 替换为 column >= 'from' AND column <= 'to'
+	if from != "" && to != "" {
+		timeFilterRegex := regexp.MustCompile(`\$__timeFilter\(([^)]+)\)`)
+		processedSQL = timeFilterRegex.ReplaceAllStringFunc(processedSQL, func(match string) string {
+			submatch := timeFilterRegex.FindStringSubmatch(match)
+			if len(submatch) > 1 {
+				colName := submatch[1]
+				return fmt.Sprintf("%s >= '%s' AND %s <= '%s'", colName, from, colName, to)
+			}
+			return match
+		})
+
+		// 仅折线图自动添加时间列过滤，其他图表类型不自动添加
+		// 用户 SQL 中已含 $__timeFilter 宏则跳过（已处理）
+		if chartType == "line" && !strings.Contains(rawSQL, "$__timeFilter") {
+			upperSQL := strings.ToUpper(processedSQL)
+			hasWhere := strings.Contains(upperSQL, "WHERE")
+			timeColumns := []string{"created_at", "updated_at", "date", "time", "timestamp", "created_time", "record_time"}
+			for _, tc := range timeColumns {
+				if strings.Contains(processedSQL, tc) {
+					timeFilter := fmt.Sprintf("%s >= '%s' AND %s <= '%s'", tc, from, tc, to)
+					if hasWhere {
+						whereIdx := strings.Index(upperSQL, "WHERE")
+						if whereIdx != -1 {
+							processedSQL = processedSQL[:whereIdx+5] + " " + timeFilter + " AND" + processedSQL[whereIdx+5:]
+						}
+					} else {
+						orderIdx := strings.Index(upperSQL, "ORDER BY")
+						limitIdx := strings.Index(upperSQL, "LIMIT")
+						groupIdx := strings.Index(upperSQL, "GROUP BY")
+						insertIdx := -1
+						if groupIdx != -1 {
+							insertIdx = strings.Index(processedSQL, "GROUP")
+						} else if orderIdx != -1 {
+							insertIdx = strings.Index(processedSQL, "ORDER")
+						} else if limitIdx != -1 {
+							insertIdx = strings.Index(processedSQL, "LIMIT")
+						}
+						if insertIdx != -1 {
+							processedSQL = processedSQL[:insertIdx] + " WHERE " + timeFilter + " " + processedSQL[insertIdx:]
+						} else {
+							processedSQL = processedSQL + " WHERE " + timeFilter
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// 恢复末尾分号
+	if hasTrailingSemicolon {
+		processedSQL = processedSQL + ";"
+	}
+
+	return processedSQL
+}
+
+// queryWithRawSQLAndVars 执行用户自定义 SQL，支持变量替换、时间范围过滤和别名映射。
+func (s *Server) queryWithRawSQLAndVars(rawSQL string, tMap map[string]interface{}, varValues []variables.VariableValue, from, to, chartType string) ([]string, []map[string]interface{}, error) {
+	// 使用共享的 SQL 处理逻辑
+	processedSQL := ProcessRawSQL(rawSQL, varValues, from, to, chartType)
 
 	// 安全检查：只允许 SELECT 开头的语句
 	trimmed := strings.TrimSpace(processedSQL)
@@ -585,10 +700,7 @@ func (s *Server) queryWithRawSQLAndVars(rawSQL string, tMap map[string]interface
 
 		row := make(map[string]interface{}, len(columns))
 		for i, col := range columns {
-			val := values[i]
-			if b, ok := val.([]byte); ok {
-				val = string(b)
-			}
+			val := convertValue(values[i])
 			if alias, ok := aliasMap[col]; ok {
 				row[alias] = val
 			} else {
@@ -744,10 +856,7 @@ func (s *Server) queryWithRawSQL(rawSQL string, tMap map[string]interface{}) ([]
 
 		row := make(map[string]interface{}, len(columns))
 		for i, col := range columns {
-			val := values[i]
-			if b, ok := val.([]byte); ok {
-				val = string(b)
-			}
+			val := convertValue(values[i])
 			// 应用别名映射
 			if alias, ok := aliasMap[col]; ok {
 				row[alias] = val
@@ -854,16 +963,16 @@ func (s *Server) queryNetworkMetrics(category, metricName, from, to string) ([]s
 	rows := make([]map[string]interface{}, 0, len(metrics))
 	for _, m := range metrics {
 		rows = append(rows, map[string]interface{}{
-			"id":               m.ID,
-			"created_at":       m.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
-			"metric_category":  m.Category,
-			"metric_name":      m.Metrics,
-			"node_type":        m.Node,
-			"current_value":    m.CurrentValue,
-			"historical_peak":  m.HistoricalPeak,
-			"mom_change":       m.DodChange,
-			"yoy_change":       m.WowChange,
-			"unit":             m.Unit,
+			"id":              m.ID,
+			"created_at":      m.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
+			"metric_category": m.Category,
+			"metric_name":     m.Metrics,
+			"node_type":       m.Node,
+			"current_value":   m.CurrentValue,
+			"historical_peak": m.HistoricalPeak,
+			"mom_change":      m.DodChange,
+			"yoy_change":      m.WowChange,
+			"unit":            m.Unit,
 		})
 	}
 	return columns, rows, nil
@@ -873,4 +982,260 @@ func (s *Server) queryNetworkMetrics(category, metricName, from, to string) ([]s
 // 格式：db-{13位毫秒时间戳}
 func generateDBID() string {
 	return fmt.Sprintf("db-%d", time.Now().UnixMilli())
+}
+
+// ============================================================
+// 版本管理
+// ============================================================
+
+// createVersionRecord 创建版本记录。
+func (s *Server) createVersionRecord(dashboardID, title string, dashboardJSON model.JSONMap, message string) {
+	// 获取当前最大版本号
+	var maxVersion int
+	s.db.Model(&model.DashboardVersion{}).
+		Where("dashboard_id = ?", dashboardID).
+		Select("COALESCE(MAX(version), 0)").
+		Scan(&maxVersion)
+
+	version := &model.DashboardVersion{
+		Base:          model.Base{ID: generateVersionID()},
+		DashboardID:   dashboardID,
+		Version:       maxVersion + 1,
+		Title:         title,
+		DashboardJSON: dashboardJSON,
+		Message:       message,
+	}
+	if err := s.db.Create(version).Error; err != nil {
+		s.log.Warnf("创建版本记录失败: %v", err)
+	}
+}
+
+// generateVersionID 生成版本记录的唯一ID。
+func generateVersionID() string {
+	return fmt.Sprintf("ver-%d", time.Now().UnixMilli())
+}
+
+// ListVersions 获取仪表盘版本历史列表。
+func (s *Server) ListVersions(ctx *gin.Context, req *VersionListReq) ([]*VersionBriefRes, error) {
+	var versions []model.DashboardVersion
+	if err := s.db.Where("dashboard_id = ?", req.DashboardID).
+		Order("version DESC").
+		Find(&versions).Error; err != nil {
+		return nil, err
+	}
+
+	result := make([]*VersionBriefRes, 0, len(versions))
+	for _, v := range versions {
+		result = append(result, &VersionBriefRes{
+			ID:        v.ID,
+			Version:   v.Version,
+			Title:     v.Title,
+			Message:   v.Message,
+			CreatedBy: v.CreatedBy,
+			CreatedAt: v.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
+		})
+	}
+	return result, nil
+}
+
+// GetVersion 获取指定版本的详细信息。
+func (s *Server) GetVersion(ctx *gin.Context, req *VersionReq) (*VersionRes, error) {
+	var version model.DashboardVersion
+	query := s.db.Where("dashboard_id = ?", req.DashboardID)
+	if req.Version > 0 {
+		query = query.Where("version = ?", req.Version)
+	} else {
+		// 未指定版本号，返回最新版本
+		query = query.Order("version DESC")
+	}
+	if err := query.First(&version).Error; err != nil {
+		return nil, fmt.Errorf("版本不存在")
+	}
+
+	return &VersionRes{
+		ID:            version.ID,
+		DashboardID:   version.DashboardID,
+		Version:       version.Version,
+		Title:         version.Title,
+		DashboardJSON: version.DashboardJSON,
+		Message:       version.Message,
+		CreatedBy:     version.CreatedBy,
+		CreatedAt:     version.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
+	}, nil
+}
+
+// RestoreVersion 还原到指定版本（直接切换，不创建新版本）。
+func (s *Server) RestoreVersion(ctx *gin.Context, req *VersionRestoreReq) (*DashboardRes, error) {
+	// 获取指定版本
+	var version model.DashboardVersion
+	if err := s.db.Where("dashboard_id = ? AND version = ?", req.DashboardID, req.Version).
+		First(&version).Error; err != nil {
+		return nil, fmt.Errorf("版本不存在")
+	}
+
+	// 还原到指定版本
+	updates := map[string]interface{}{
+		"title":          version.Title,
+		"dashboard_json": version.DashboardJSON,
+	}
+	if err := s.db.Model(&model.Dashboard{}).Where("id = ?", req.DashboardID).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+
+	// 同步面板
+	s.db.Where("dashboard_id = ?", req.DashboardID).Delete(&model.Panel{})
+	var dashboard model.Dashboard
+	dashboard.ID = req.DashboardID
+	dashboard.DashboardJSON = version.DashboardJSON
+	s.syncPanelsFromJSON(&dashboard)
+
+	// 查询更新后的记录
+	var record model.Dashboard
+	s.db.Preload("Folder").Preload("Panels", "deleted_at IS NULL").Where("id = ?", req.DashboardID).First(&record)
+	return ToDashboardRes(&record), nil
+}
+
+// CompareVersions 对比两个版本的差异。
+func (s *Server) CompareVersions(ctx *gin.Context, req *VersionCompareReq) (*VersionDiffRes, error) {
+	// 获取两个版本
+	var vFrom, vTo model.DashboardVersion
+	if err := s.db.Where("dashboard_id = ? AND version = ?", req.DashboardID, req.VersionFrom).First(&vFrom).Error; err != nil {
+		return nil, fmt.Errorf("版本 %d 不存在", req.VersionFrom)
+	}
+	if err := s.db.Where("dashboard_id = ? AND version = ?", req.DashboardID, req.VersionTo).First(&vTo).Error; err != nil {
+		return nil, fmt.Errorf("版本 %d 不存在", req.VersionTo)
+	}
+
+	// 计算差异
+	diff := s.computeDiff(vFrom.DashboardJSON, vTo.DashboardJSON)
+
+	return &VersionDiffRes{
+		DashboardID:   req.DashboardID,
+		VersionFrom:   req.VersionFrom,
+		VersionTo:     req.VersionTo,
+		TitleFrom:     vFrom.Title,
+		TitleTo:       vTo.Title,
+		CreatedAtFrom: vFrom.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
+		CreatedAtTo:   vTo.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
+		DiffJSON:      diff,
+		JSONFrom:      vFrom.DashboardJSON,
+		JSONTo:        vTo.DashboardJSON,
+	}, nil
+}
+
+// computeDiff 计算两个 JSON 之间的差异。
+func (s *Server) computeDiff(from, to model.JSONMap) map[string]interface{} {
+	diff := make(map[string]interface{})
+
+	// 比较标题
+	titleFrom, _ := from["title"].(string)
+	titleTo, _ := to["title"].(string)
+	if titleFrom != titleTo {
+		diff["title_changed"] = map[string]interface{}{
+			"from": titleFrom,
+			"to":   titleTo,
+		}
+	}
+
+	// 比较面板
+	panelsFrom, _ := from["panels"].([]interface{})
+	panelsTo, _ := to["panels"].([]interface{})
+
+	// 提取面板信息：ID -> 面板完整数据
+	fromPanelsMap := make(map[string]map[string]interface{})
+	for _, p := range panelsFrom {
+		if pm, ok := p.(map[string]interface{}); ok {
+			id, _ := pm["id"].(string)
+			if id != "" {
+				fromPanelsMap[id] = pm
+			}
+		}
+	}
+
+	toPanelsMap := make(map[string]map[string]interface{})
+	for _, p := range panelsTo {
+		if pm, ok := p.(map[string]interface{}); ok {
+			id, _ := pm["id"].(string)
+			if id != "" {
+				toPanelsMap[id] = pm
+			}
+		}
+	}
+
+	// 统计新增、删除、修改
+	added := []map[string]interface{}{}
+	removed := []map[string]interface{}{}
+	modified := []map[string]interface{}{}
+
+	// 查找新增和修改
+	for id, toPanel := range toPanelsMap {
+		if fromPanel, exists := fromPanelsMap[id]; !exists {
+			// 新增
+			title, _ := toPanel["title"].(string)
+			added = append(added, map[string]interface{}{
+				"id":    id,
+				"title": title,
+			})
+		} else {
+			// 检查是否修改
+			if !s.panelEqual(fromPanel, toPanel) {
+				title, _ := toPanel["title"].(string)
+				modified = append(modified, map[string]interface{}{
+					"id":    id,
+					"title": title,
+				})
+			}
+		}
+	}
+
+	// 查找删除
+	for id, fromPanel := range fromPanelsMap {
+		if _, exists := toPanelsMap[id]; !exists {
+			title, _ := fromPanel["title"].(string)
+			removed = append(removed, map[string]interface{}{
+				"id":    id,
+				"title": title,
+			})
+		}
+	}
+
+	panelDiff := map[string]interface{}{
+		"from_count":     len(panelsFrom),
+		"to_count":       len(panelsTo),
+		"added":          added,
+		"removed":        removed,
+		"modified":       modified,
+		"added_count":    len(added),
+		"removed_count":  len(removed),
+		"modified_count": len(modified),
+	}
+	diff["panels"] = panelDiff
+
+	return diff
+}
+
+// panelEqual 比较两个面板是否相等。
+func (s *Server) panelEqual(a, b map[string]interface{}) bool {
+	// 简单比较：序列化后比较
+	// 排除一些可能变化的字段如临时状态
+	aCopy := make(map[string]interface{})
+	bCopy := make(map[string]interface{})
+	for k, v := range a {
+		aCopy[k] = v
+	}
+	for k, v := range b {
+		bCopy[k] = v
+	}
+
+	aJSON, _ := json.Marshal(aCopy)
+	bJSON, _ := json.Marshal(bCopy)
+	return string(aJSON) == string(bJSON)
+}
+
+// DeleteVersion 删除指定版本。
+func (s *Server) DeleteVersion(ctx *gin.Context, req *VersionReq) error {
+	if req.Version <= 0 {
+		return fmt.Errorf("请指定要删除的版本号")
+	}
+	return s.db.Where("dashboard_id = ? AND version = ?", req.DashboardID, req.Version).Delete(&model.DashboardVersion{}).Error
 }

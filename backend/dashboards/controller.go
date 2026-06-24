@@ -135,3 +135,86 @@ func (cont *Controller) QueryInspectController(ctx *gin.Context) {
 	}
 	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
 }
+
+// ============================================================
+// 版本管理控制器
+// ============================================================
+
+// ListVersionsController 获取仪表盘版本历史列表。
+// POST /api/v1/dashboards/versions/list
+func (cont *Controller) ListVersionsController(ctx *gin.Context) {
+	var req VersionListReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
+		return
+	}
+	resp, err := cont.ListVersions(ctx, &req)
+	if err != nil {
+		ctx.JSON(500, gin.H{"errorCode": "50000", "errorMessage": err.Error(), "success": false})
+		return
+	}
+	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
+}
+
+// GetVersionController 获取指定版本的详细信息。
+// POST /api/v1/dashboards/versions/get
+func (cont *Controller) GetVersionController(ctx *gin.Context) {
+	var req VersionReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
+		return
+	}
+	resp, err := cont.GetVersion(ctx, &req)
+	if err != nil {
+		ctx.JSON(404, gin.H{"errorCode": "40400", "errorMessage": err.Error(), "success": false})
+		return
+	}
+	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
+}
+
+// RestoreVersionController 还原到指定版本。
+// POST /api/v1/dashboards/versions/restore
+func (cont *Controller) RestoreVersionController(ctx *gin.Context) {
+	var req VersionRestoreReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
+		return
+	}
+	resp, err := cont.RestoreVersion(ctx, &req)
+	if err != nil {
+		ctx.JSON(500, gin.H{"errorCode": "50000", "errorMessage": err.Error(), "success": false})
+		return
+	}
+	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
+}
+
+// CompareVersionsController 对比两个版本的差异。
+// POST /api/v1/dashboards/versions/compare
+func (cont *Controller) CompareVersionsController(ctx *gin.Context) {
+	var req VersionCompareReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
+		return
+	}
+	resp, err := cont.CompareVersions(ctx, &req)
+	if err != nil {
+		ctx.JSON(500, gin.H{"errorCode": "50000", "errorMessage": err.Error(), "success": false})
+		return
+	}
+	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
+}
+
+// DeleteVersionController 删除指定版本。
+// POST /api/v1/dashboards/versions/delete
+func (cont *Controller) DeleteVersionController(ctx *gin.Context) {
+	var req VersionReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
+		return
+	}
+	if err := cont.DeleteVersion(ctx, &req); err != nil {
+		ctx.JSON(500, gin.H{"errorCode": "50000", "errorMessage": err.Error(), "success": false})
+		return
+	}
+	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true})
+}

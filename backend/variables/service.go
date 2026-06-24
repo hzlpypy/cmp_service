@@ -123,21 +123,14 @@ func (s *Server) CreateVariable(ctx *gin.Context, req *VariableReq) (*VariableRe
 }
 
 // UpdateVariable 更新变量配置。
+// 前端传递完整数据，后端直接更新所有字段。
 func (s *Server) UpdateVariable(ctx *gin.Context, req *VariableReq) (*VariableRes, error) {
 	// 转换 Options 为 JSONArray
-	options := make(model.JSONArray, 0)
+	options := make(model.JSONArray, 0, len(req.Options))
 	for _, opt := range req.Options {
 		options = append(options, map[string]interface{}{
-			"text":     opt.Text,
-			"value":    opt.Value,
-			"selected": opt.Selected,
+			"text": opt.Text, "value": opt.Value, "selected": opt.Selected,
 		})
-	}
-
-	// 转换 Current 为 JSONMap
-	current := model.JSONMap{}
-	if req.Current != nil {
-		current = model.JSONMap(req.Current)
 	}
 
 	updates := map[string]interface{}{
@@ -149,7 +142,7 @@ func (s *Server) UpdateVariable(ctx *gin.Context, req *VariableReq) (*VariableRe
 		"query":         req.Query,
 		"datasource_id": req.DatasourceID,
 		"default":       req.Default,
-		"current":       current,
+		"current":       model.JSONMap(req.Current),
 		"multi":         req.Multi,
 		"include_all":   req.IncludeAll,
 		"all_value":     req.AllValue,
@@ -162,7 +155,6 @@ func (s *Server) UpdateVariable(ctx *gin.Context, req *VariableReq) (*VariableRe
 		return nil, err
 	}
 
-	// 查询更新后的记录
 	var record model.Variable
 	s.db.Where("id = ?", req.ID).First(&record)
 	return ToVariableRes(&record), nil
@@ -358,6 +350,7 @@ func (s *Server) executeQueryWithDB(db *gorm.DB, query string) ([]VariableOption
 }
 
 // formatValue 将数据库值格式化为字符串。
+// time.Time 转换为毫秒时间戳字符串。
 func formatValue(v interface{}) string {
 	if v == nil {
 		return ""
@@ -367,6 +360,8 @@ func formatValue(v interface{}) string {
 		return string(val)
 	case string:
 		return val
+	case time.Time:
+		return fmt.Sprintf("%d", val.UnixMilli())
 	default:
 		return fmt.Sprintf("%v", val)
 	}
@@ -389,9 +384,20 @@ type VariableValue struct {
 	Multi  bool
 }
 
+// SystemVariableValue 系统内置变量值（时间范围等）
+type SystemVariableValue struct {
+	From      string // 开始时间（ISO格式）
+	To        string // 结束时间（ISO格式）
+	FromUnix  int64  // 开始时间（Unix秒）
+	ToUnix    int64  // 结束时间（Unix秒）
+	FromMs    int64  // 开始时间（毫秒）
+	ToMs      int64  // 结束时间（毫秒）
+}
+
 // ReplaceVariables 替换 SQL 中的变量引用。
 // 支持 $varname 和 ${varname} 两种语法。
 // 单选值替换为 'value'，多选值替换为 'value1','value2',...
+// 支持系统内置变量：$__from, $__to, $__fromUnix, $__toUnix, $__fromMs, $__toMs
 func ReplaceVariables(sql string, variables []VariableValue) string {
 	result := sql
 
@@ -411,9 +417,75 @@ func ReplaceVariables(sql string, variables []VariableValue) string {
 	return result
 }
 
+// ReplaceSystemVariables 替换 SQL 中的系统内置变量。
+// $__from -> 开始时间字符串（自动添加引号）
+// $__to -> 结束时间字符串（自动添加引号）
+// $__fromUnix -> 开始时间Unix秒（数字，不加引号）
+// $__toUnix -> 结束时间Unix秒（数字，不加引号）
+// $__fromMs -> 开始时间毫秒（数字，不加引号）
+// $__toMs -> 结束时间毫秒（数字，不加引号）
+func ReplaceSystemVariables(sql string, sysVars SystemVariableValue) string {
+	result := sql
+
+	// 替换 $__from 和 ${__from}（自动添加引号，因为时间是字符串）
+	fromQuoted := fmt.Sprintf("'%s'", sysVars.From)
+	result = regexp.MustCompile(`\$\{__from\}`).ReplaceAllString(result, fromQuoted)
+	result = regexp.MustCompile(`\$__from\b`).ReplaceAllString(result, fromQuoted)
+
+	// 替换 $__to 和 ${__to}（自动添加引号）
+	toQuoted := fmt.Sprintf("'%s'", sysVars.To)
+	result = regexp.MustCompile(`\$\{__to\}`).ReplaceAllString(result, toQuoted)
+	result = regexp.MustCompile(`\$__to\b`).ReplaceAllString(result, toQuoted)
+
+	// 替换 $__fromUnix 和 ${__fromUnix}（数字，不加引号）
+	result = regexp.MustCompile(`\$\{__fromUnix\}`).ReplaceAllString(result, fmt.Sprintf("%d", sysVars.FromUnix))
+	result = regexp.MustCompile(`\$__fromUnix\b`).ReplaceAllString(result, fmt.Sprintf("%d", sysVars.FromUnix))
+
+	// 替换 $__toUnix 和 ${__toUnix}（数字，不加引号）
+	result = regexp.MustCompile(`\$\{__toUnix\}`).ReplaceAllString(result, fmt.Sprintf("%d", sysVars.ToUnix))
+	result = regexp.MustCompile(`\$__toUnix\b`).ReplaceAllString(result, fmt.Sprintf("%d", sysVars.ToUnix))
+
+	// 替换 $__fromMs 和 ${__fromMs}（数字，不加引号）
+	result = regexp.MustCompile(`\$\{__fromMs\}`).ReplaceAllString(result, fmt.Sprintf("%d", sysVars.FromMs))
+	result = regexp.MustCompile(`\$__fromMs\b`).ReplaceAllString(result, fmt.Sprintf("%d", sysVars.FromMs))
+
+	// 替换 $__toMs 和 ${__toMs}（数字，不加引号）
+	result = regexp.MustCompile(`\$\{__toMs\}`).ReplaceAllString(result, fmt.Sprintf("%d", sysVars.ToMs))
+	result = regexp.MustCompile(`\$__toMs\b`).ReplaceAllString(result, fmt.Sprintf("%d", sysVars.ToMs))
+
+	return result
+}
+
+// ParseSystemVariables 从时间范围字符串解析系统变量值
+func ParseSystemVariables(from, to string) SystemVariableValue {
+	sysVars := SystemVariableValue{
+		From: from,
+		To:   to,
+	}
+
+	// 解析时间
+	if from != "" {
+		t, err := time.Parse(time.RFC3339, from)
+		if err == nil {
+			sysVars.FromUnix = t.Unix()
+			sysVars.FromMs = t.UnixMilli()
+		}
+	}
+	if to != "" {
+		t, err := time.Parse(time.RFC3339, to)
+		if err == nil {
+			sysVars.ToUnix = t.Unix()
+			sysVars.ToMs = t.UnixMilli()
+		}
+	}
+
+	return sysVars
+}
+
 // formatVariableValue 格式化变量值为 SQL 可用格式。
 // 单选：直接返回原始值（用户在 SQL 中用 '$var' 自己加引号）
 // 多选：生成 'value1','value2',... 格式，用于 IN ($var) 场景
+// 系统时间字符串变量（__from, __to）自动加引号
 func formatVariableValue(v VariableValue) string {
 	if v.Multi && len(v.Values) > 0 {
 		// 多选：生成 'value1','value2',...
@@ -423,9 +495,20 @@ func formatVariableValue(v VariableValue) string {
 		}
 		return strings.Join(quoted, ",")
 	}
+	// 系统时间字符串变量自动加引号
+	if isSystemTimeStringVar(v.Name) {
+		return fmt.Sprintf("'%s'", escapeSingleQuote(v.Value))
+	}
 	// 单选：直接返回原始值，不自动加引号
 	// 用户在 SQL 中自己处理引号：WHERE name = '$var' 或 WHERE id = $var
 	return escapeSingleQuote(v.Value)
+}
+
+// isSystemTimeStringVar 判断是否为需要自动加引号的系统时间变量。
+// __from 和 __to 是时间字符串，需要加引号；
+// __fromUnix / __toUnix / __fromMs / __toMs 是数字，不加引号。
+func isSystemTimeStringVar(name string) bool {
+	return name == "__from" || name == "__to"
 }
 
 // escapeSingleQuote 转义 SQL 中的单引号。
