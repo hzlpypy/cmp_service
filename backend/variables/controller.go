@@ -101,18 +101,13 @@ func (c *Controller) UpdateVariable(ctx *gin.Context) {
 // DeleteVariable 删除变量。
 // POST /api/v1/variables/delete
 func (c *Controller) DeleteVariable(ctx *gin.Context) {
-	var req VariableReq
+	var req VariableDeleteReq
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
 		return
 	}
 
-	if req.ID == "" {
-		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "id is required", "success": false})
-		return
-	}
-
-	if err := c.svc.DeleteVariable(ctx, &req); err != nil {
+	if err := c.svc.DeleteVariable(ctx, req.ID); err != nil {
 		ctx.JSON(500, gin.H{"errorCode": "50000", "errorMessage": err.Error(), "success": false})
 		return
 	}

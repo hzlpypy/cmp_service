@@ -88,6 +88,13 @@ type VariableRes struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// VariableDeleteReq 变量删除请求参数。
+// 删除操作只需要 ID 即可。
+type VariableDeleteReq struct {
+	// ID 变量主键ID（必填）
+	ID string `json:"id" binding:"required"`
+}
+
 // VariableListReq 变量列表查询请求参数。
 type VariableListReq struct {
 	// DashboardID 仪表盘ID（必填，按仪表盘过滤变量）

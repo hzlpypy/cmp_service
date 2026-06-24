@@ -5,6 +5,7 @@ package dashboards
 import (
 	"cmp_service_backend/model"
 	"cmp_service_backend/variables"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -12,7 +13,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/sirupsen/logrus"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -74,6 +77,43 @@ type Interface interface {
 // NewServer 创建仪表板业务服务实例。
 func NewServer(db *gorm.DB, log *logrus.Logger) Interface {
 	return &Server{db: db, log: log}
+}
+
+// getDatasourceDB 根据数据源 ID 获取对应的数据库连接。
+// 如果 datasourceID 为空，返回主应用数据库连接（s.db）。
+// 对于 MySQL 类型数据源，动态创建临时连接并返回 *gorm.DB。
+func (s *Server) getDatasourceDB(datasourceID string) (*gorm.DB, error) {
+	if datasourceID == "" {
+		return s.db, nil
+	}
+
+	// 从数据库查询数据源配置
+	var ds model.Datasource
+	if err := s.db.Where("id = ? AND enabled = 1 AND deleted_at IS NULL", datasourceID).First(&ds).Error; err != nil {
+		return nil, fmt.Errorf("数据源 %s 不存在或已禁用: %v", datasourceID, err)
+	}
+
+	switch ds.Type {
+	case "mysql":
+		dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s",
+			ds.Username, ds.Password, ds.URL, ds.DatabaseName)
+		sqlDB, err := sql.Open("mysql", dsn)
+		if err != nil {
+			return nil, fmt.Errorf("连接数据源 %s 失败: %v", ds.Name, err)
+		}
+		sqlDB.SetConnMaxLifetime(5 * time.Minute)
+		sqlDB.SetMaxOpenConns(5)
+		sqlDB.SetMaxIdleConns(2)
+
+		gormDB, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB}), &gorm.Config{})
+		if err != nil {
+			sqlDB.Close()
+			return nil, fmt.Errorf("初始化 GORM 连接失败: %v", err)
+		}
+		return gormDB, nil
+	default:
+		return nil, fmt.Errorf("不支持的数据源类型: %s", ds.Type)
+	}
 }
 
 // ListDashboards 获取所有未删除的仪表板，可选按文件夹ID过滤。
@@ -414,8 +454,15 @@ func (s *Server) QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryIns
 		return res, nil
 	}
 
+	// 获取数据源对应的数据库连接
+	db, err := s.getDatasourceDB(req.DatasourceID)
+	if err != nil {
+		res.Error = fmt.Sprintf("获取数据源连接失败: %v", err)
+		return res, nil
+	}
+
 	// 执行 SQL
-	rows, err := s.db.Raw(trimmed).Rows()
+	rows, err := db.Raw(trimmed).Rows()
 	if err != nil {
 		res.Error = err.Error()
 		return res, nil
@@ -499,13 +546,16 @@ func (s *Server) queryPanelDataWithVars(panelMap map[string]interface{}, from, t
 	// 读取面板指定的数据源ID
 	datasourceID := getStringField(panelMap, "datasource_id")
 
+	// 获取数据源对应的数据库连接
+	db, err := s.getDatasourceDB(datasourceID)
+	if err != nil {
+		s.log.Warnf("面板 %s 获取数据源 %s 失败，使用主数据库: %v", panelID, datasourceID, err)
+		db = s.db
+		datasourceID = ""
+	}
+
 	if datasourceID != "" {
-		var d model.Datasource
-		if err := s.db.Where("id = ? AND enabled = 1 AND deleted_at IS NULL", datasourceID).First(&d).Error; err == nil {
-			s.log.Infof("面板 %s 使用数据源: %s (%s)", panelID, d.Name, d.Type)
-		} else {
-			s.log.Warnf("面板 %s 指定的数据源 %s 不可用: %v", panelID, datasourceID, err)
-		}
+		s.log.Infof("面板 %s 使用数据源: %s", panelID, datasourceID)
 	}
 
 	// 解析 targets 配置
@@ -527,7 +577,7 @@ func (s *Server) queryPanelDataWithVars(panelMap map[string]interface{}, from, t
 			continue
 		}
 
-		cols, rows, err := s.queryTargetWithVars(tMap, from, to, panelType, varValues)
+		cols, rows, err := s.queryTargetWithVars(db, tMap, from, to, panelType, varValues)
 		if err != nil {
 			s.log.Warnf("查询 panel %s target 数据失败: %v", panelID, err)
 			continue
@@ -549,25 +599,25 @@ func (s *Server) queryPanelDataWithVars(panelMap map[string]interface{}, from, t
 }
 
 // queryTargetWithVars 根据 target map 执行数据库查询，支持变量替换。
-func (s *Server) queryTargetWithVars(tMap map[string]interface{}, from, to, chartType string, varValues []variables.VariableValue) ([]string, []map[string]interface{}, error) {
+func (s *Server) queryTargetWithVars(db *gorm.DB, tMap map[string]interface{}, from, to, chartType string, varValues []variables.VariableValue) ([]string, []map[string]interface{}, error) {
 	rawSQL := getStringField(tMap, "rawSql")
 
 	// 模式1: 用户自定义 SQL（支持变量替换和时间范围过滤）
 	if rawSQL != "" {
-		return s.queryWithRawSQLAndVars(rawSQL, tMap, varValues, from, to, chartType)
+		return s.queryWithRawSQLAndVars(db, rawSQL, tMap, varValues, from, to, chartType)
 	}
 
 	// 模式2: 自定义表模式
 	table := getStringField(tMap, "table")
 	fields := getStringField(tMap, "fields")
 	if table != "" {
-		return s.queryCustomTable(table, fields, tMap)
+		return s.queryCustomTable(db, table, fields, tMap)
 	}
 
 	// 模式3: 默认 net_work_metrics
 	category := getStringField(tMap, "category")
 	metricName := getStringField(tMap, "metricName")
-	return s.queryNetworkMetrics(category, metricName, from, to)
+	return s.queryNetworkMetrics(db, category, metricName, from, to)
 }
 
 // ProcessRawSQL 对原始 SQL 进行统一处理：变量替换、系统内置变量、时间过滤宏。
@@ -645,7 +695,7 @@ func ProcessRawSQL(rawSQL string, varValues []variables.VariableValue, from, to,
 }
 
 // queryWithRawSQLAndVars 执行用户自定义 SQL，支持变量替换、时间范围过滤和别名映射。
-func (s *Server) queryWithRawSQLAndVars(rawSQL string, tMap map[string]interface{}, varValues []variables.VariableValue, from, to, chartType string) ([]string, []map[string]interface{}, error) {
+func (s *Server) queryWithRawSQLAndVars(db *gorm.DB, rawSQL string, tMap map[string]interface{}, varValues []variables.VariableValue, from, to, chartType string) ([]string, []map[string]interface{}, error) {
 	// 使用共享的 SQL 处理逻辑
 	processedSQL := ProcessRawSQL(rawSQL, varValues, from, to, chartType)
 
@@ -657,7 +707,7 @@ func (s *Server) queryWithRawSQLAndVars(rawSQL string, tMap map[string]interface
 	}
 
 	// 执行 SQL
-	rows, err := s.db.Raw(trimmed).Rows()
+	rows, err := db.Raw(trimmed).Rows()
 	if err != nil {
 		return nil, nil, fmt.Errorf("SQL 执行失败: %w", err)
 	}
@@ -713,7 +763,7 @@ func (s *Server) queryWithRawSQLAndVars(rawSQL string, tMap map[string]interface
 	return finalColumns, result, nil
 }
 
-// queryPanelData 根据单个面板配置查询 network_metrics 数据。
+// queryPanelData 根据单个面板配置查询数据。
 // 每个 target 查询一组数据，返回按 target 分组的结果。
 // 面板可指定 datasource_id，不同面板可使用不同数据源获取数据。
 func (s *Server) queryPanelData(panelMap map[string]interface{}, from, to string) PanelData {
@@ -724,14 +774,16 @@ func (s *Server) queryPanelData(panelMap map[string]interface{}, from, to string
 	// 读取面板指定的数据源ID，用于根据不同的数据源查询数据
 	datasourceID := getStringField(panelMap, "datasource_id")
 
-	// 如果面板指定了数据源，打印日志确认
+	// 获取数据源对应的数据库连接
+	db, err := s.getDatasourceDB(datasourceID)
+	if err != nil {
+		s.log.Warnf("面板 %s 获取数据源 %s 失败，使用主数据库: %v", panelID, datasourceID, err)
+		db = s.db
+		datasourceID = ""
+	}
+
 	if datasourceID != "" {
-		var d model.Datasource
-		if err := s.db.Where("id = ? AND enabled = 1 AND deleted_at IS NULL", datasourceID).First(&d).Error; err == nil {
-			s.log.Infof("面板 %s 使用数据源: %s (%s)", panelID, d.Name, d.Type)
-		} else {
-			s.log.Warnf("面板 %s 指定的数据源 %s 不可用: %v", panelID, datasourceID, err)
-		}
+		s.log.Infof("面板 %s 使用数据源: %s", panelID, datasourceID)
 	}
 
 	// 解析 targets 配置
@@ -753,8 +805,8 @@ func (s *Server) queryPanelData(panelMap map[string]interface{}, from, to string
 			continue
 		}
 
-		// 读取 target 配置
-		cols, rows, err := s.queryTargetFromMap(tMap, from, to)
+		// 读取 target 配置，传入数据源连接
+		cols, rows, err := s.queryTargetFromMap(db, tMap, from, to)
 		if err != nil {
 			s.log.Warnf("查询 panel %s target 数据失败: %v", panelID, err)
 			continue
@@ -781,30 +833,30 @@ func (s *Server) queryPanelData(panelMap map[string]interface{}, from, to string
 //   - rawSql 模式：执行用户自定义 SQL 语句
 //   - table 模式：指定 table + fields 查询（向后兼容）
 //   - 默认模式：查询 net_work_metrics 表
-func (s *Server) queryTargetFromMap(tMap map[string]interface{}, from, to string) ([]string, []map[string]interface{}, error) {
+func (s *Server) queryTargetFromMap(db *gorm.DB, tMap map[string]interface{}, from, to string) ([]string, []map[string]interface{}, error) {
 	rawSQL := getStringField(tMap, "rawSql")
 
 	// 模式1: 用户自定义 SQL
 	if rawSQL != "" {
-		return s.queryWithRawSQL(rawSQL, tMap)
+		return s.queryWithRawSQL(db, rawSQL, tMap)
 	}
 
 	// 模式2: 自定义表模式
 	table := getStringField(tMap, "table")
 	fields := getStringField(tMap, "fields")
 	if table != "" {
-		return s.queryCustomTable(table, fields, tMap)
+		return s.queryCustomTable(db, table, fields, tMap)
 	}
 
 	// 模式3: 默认 net_work_metrics
 	category := getStringField(tMap, "category")
 	metricName := getStringField(tMap, "metricName")
-	return s.queryNetworkMetrics(category, metricName, from, to)
+	return s.queryNetworkMetrics(db, category, metricName, from, to)
 }
 
 // queryWithRawSQL 执行用户自定义 SQL 并应用别名映射。
 // tMap["aliasMap"] 格式: {"col_name": "别名", ...}，用于将查询返回的列名重命名为中文别名。
-func (s *Server) queryWithRawSQL(rawSQL string, tMap map[string]interface{}) ([]string, []map[string]interface{}, error) {
+func (s *Server) queryWithRawSQL(db *gorm.DB, rawSQL string, tMap map[string]interface{}) ([]string, []map[string]interface{}, error) {
 	// 安全检查：只允许 SELECT 开头的语句
 	trimmed := strings.TrimSpace(rawSQL)
 	upper := strings.ToUpper(trimmed)
@@ -813,7 +865,7 @@ func (s *Server) queryWithRawSQL(rawSQL string, tMap map[string]interface{}) ([]
 	}
 
 	// 执行 SQL
-	rows, err := s.db.Raw(trimmed).Rows()
+	rows, err := db.Raw(trimmed).Rows()
 	if err != nil {
 		return nil, nil, fmt.Errorf("SQL 执行失败: %w", err)
 	}
@@ -873,7 +925,7 @@ func (s *Server) queryWithRawSQL(rawSQL string, tMap map[string]interface{}) ([]
 // queryCustomTable 通过 raw SQL 查询自定义表，返回指定字段。
 // table: 表名
 // fields: 逗号分隔的字段列表，如 "market,date,weekday"；为空则查所有字段
-func (s *Server) queryCustomTable(table, fields string, _ map[string]interface{}) ([]string, []map[string]interface{}, error) {
+func (s *Server) queryCustomTable(db *gorm.DB, table, fields string, _ map[string]interface{}) ([]string, []map[string]interface{}, error) {
 	// 构建 SQL，防止 SQL 注入：检查 table 名是否合法（只允许字母数字下划线）
 	if !regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`).MatchString(table) {
 		return nil, nil, fmt.Errorf("无效的表名: %s", table)
@@ -896,7 +948,7 @@ func (s *Server) queryCustomTable(table, fields string, _ map[string]interface{}
 	}
 
 	// 执行查询
-	rows, err := s.db.Raw(fmt.Sprintf("SELECT %s FROM %s LIMIT 500", selectClause, table)).Rows()
+	rows, err := db.Raw(fmt.Sprintf("SELECT %s FROM %s LIMIT 500", selectClause, table)).Rows()
 	if err != nil {
 		return nil, nil, fmt.Errorf("查询表 %s 失败: %w", table, err)
 	}
@@ -935,9 +987,9 @@ func (s *Server) queryCustomTable(table, fields string, _ map[string]interface{}
 }
 
 // queryNetworkMetrics 查询 net_work_metrics 表（默认模式，保持向后兼容）。
-func (s *Server) queryNetworkMetrics(category, metricName, from, to string) ([]string, []map[string]interface{}, error) {
+func (s *Server) queryNetworkMetrics(db *gorm.DB, category, metricName, from, to string) ([]string, []map[string]interface{}, error) {
 	var metrics []model.NetWorkMetrics
-	query := s.db.Model(&model.NetWorkMetrics{})
+	query := db.Model(&model.NetWorkMetrics{})
 
 	if category != "" {
 		query = query.Where("category LIKE ?", "%"+category+"%")

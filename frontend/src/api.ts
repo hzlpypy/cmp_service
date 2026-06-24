@@ -380,6 +380,7 @@ export async function getPanelData(dashboard_id: string, panel_id: string, from?
 export interface QueryInspectReq {
   raw_sql: string
   dashboard_id: string
+  datasource_id?: string
   variables?: Record<string, string | string[]>
   from?: string
   to?: string
