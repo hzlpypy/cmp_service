@@ -1024,8 +1024,16 @@ func (s *Server) ListVersions(ctx *gin.Context, req *VersionListReq) ([]*Version
 		return nil, err
 	}
 
+	// 获取当前仪表盘的 JSON，用于判断哪个版本是当前生效版本
+	var dashboard model.Dashboard
+	currentJSON, _ := json.Marshal(model.JSONMap{})
+	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.DashboardID).First(&dashboard).Error; err == nil {
+		currentJSON, _ = json.Marshal(dashboard.DashboardJSON)
+	}
+
 	result := make([]*VersionBriefRes, 0, len(versions))
 	for _, v := range versions {
+		versionJSON, _ := json.Marshal(v.DashboardJSON)
 		result = append(result, &VersionBriefRes{
 			ID:        v.ID,
 			Version:   v.Version,
@@ -1033,6 +1041,7 @@ func (s *Server) ListVersions(ctx *gin.Context, req *VersionListReq) ([]*Version
 			Message:   v.Message,
 			CreatedBy: v.CreatedBy,
 			CreatedAt: v.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
+			IsCurrent: string(currentJSON) == string(versionJSON),
 		})
 	}
 	return result, nil

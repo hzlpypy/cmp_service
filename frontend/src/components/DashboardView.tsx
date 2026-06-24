@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useSearchParams, useNavigate, useParams } from 'react-router-dom'
 import html2canvas from 'html2canvas'
 import ChartPanel from './ChartPanel'
 import GridLayout from './GridLayout'
@@ -6,6 +7,7 @@ import AIChatDialog from './AIChatDialog'
 import VariableSelector from './VariableSelector'
 import DashboardEditor from './DashboardEditor'
 import VersionHistory from './VersionHistory'
+import ReportModal from './ReportModal'
 import * as api from '../api'
 import type { DashboardRes, DashboardDataRes, DashboardJSON, MetricRow, PanelDef, PanelDataRes, DatasourceRes, VariableRes } from '../api'
 
@@ -30,7 +32,56 @@ function uid(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 }
 
+/** 将标题转换为 URL slug（URL 编码） */
+function titleToSlug(title: string): string {
+  return encodeURIComponent(title.replace(/\s+/g, '-').toLowerCase())
+}
+
+/** 解析 Grafana 风格的时间参数（如 now-6h, now-7d 等） */
+function parseTimeParam(param: string): string | null {
+  if (!param) return null
+  // now → 当前时间
+  if (param === 'now') return new Date().toISOString()
+  // now-XXh, now-XXd, now-XXm → 相对时间
+  const match = param.match(/^now-(\d+)([hdmy])$/)
+  if (match) {
+    const num = parseInt(match[1])
+    const unit = match[2]
+    const now = new Date()
+    let ms = 0
+    switch (unit) {
+      case 'm': ms = num * 60 * 1000; break
+      case 'h': ms = num * 60 * 60 * 1000; break
+      case 'd': ms = num * 24 * 60 * 60 * 1000; break
+      case 'y': ms = num * 365 * 24 * 60 * 60 * 1000; break
+    }
+    return new Date(now.getTime() - ms).toISOString()
+  }
+  // 其他格式（ISO 日期或 epoch 毫秒）
+  if (/^\d+$/.test(param)) {
+    // epoch 毫秒
+    return new Date(parseInt(param)).toISOString()
+  }
+  // 尝试解析 ISO 格式
+  try {
+    const d = new Date(param)
+    if (!isNaN(d.getTime())) return d.toISOString()
+  } catch {}
+  return null
+}
+
+/** 将时间范围转换为 Grafana 风格的 URL 参数 */
+function timeToParam(date: Date | string, isNow: boolean = false): string {
+  if (isNow) return 'now'
+  const d = typeof date === 'string' ? new Date(date) : date
+  return d.getTime().toString()
+}
+
 export default function DashboardView({ dashboardId, onBack, onEditPanel }: DashboardViewProps) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const { slug } = useParams<{ uid: string; slug?: string }>()
+
   const [dashboard, setDashboard] = useState<DashboardRes | null>(null)
   const [dataRes, setDataRes] = useState<DashboardDataRes | null>(null)
   const [loading, setLoading] = useState(true)
@@ -186,10 +237,61 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   const [showNewPanel, setShowNewPanel] = useState(false)
   // 版本历史
   const [showVersionHistory, setShowVersionHistory] = useState(false)
+  // 报告生成
+  const [showReport, setShowReport] = useState(false)
 
-  // 时间范围选择（从 localStorage 恢复上次的选择）
+  // 时间范围选择（优先从 URL 参数读取，其次 localStorage）
   type TimePreset = '5m' | '30m' | '1h' | '6h' | '12h' | '24h' | '2d' | '7d' | '30d' | 'today' | 'yesterday' | 'day_before_yesterday' | 'last_week_today' | 'custom'
+  
+  /** 从 URL 参数解析时间范围 */
+  const parseUrlTimeRange = useCallback((): { preset: TimePreset; from: string; to: string } | null => {
+    const fromParam = searchParams.get('from')
+    const toParam = searchParams.get('to')
+    if (!fromParam && !toParam) return null
+    
+    // 解析 Grafana 风格的时间参数
+    const from = parseTimeParam(fromParam || '')
+    const to = parseTimeParam(toParam || '')
+    
+    // 如果 to 是 'now'，则根据 from 计算预设
+    if (from && to) {
+      // 尝试匹配预设
+      const now = new Date()
+      const fromMs = new Date(from).getTime()
+      const diffMs = now.getTime() - fromMs
+      const diffMins = Math.round(diffMs / (60 * 1000))
+      
+      // 匹配预设时间范围
+      const presetMap: Array<{ mins: number; preset: TimePreset }> = [
+        { mins: 5, preset: '5m' },
+        { mins: 30, preset: '30m' },
+        { mins: 60, preset: '1h' },
+        { mins: 360, preset: '6h' },
+        { mins: 720, preset: '12h' },
+        { mins: 1440, preset: '24h' },
+        { mins: 2880, preset: '2d' },
+        { mins: 10080, preset: '7d' },
+        { mins: 43200, preset: '30d' },
+      ]
+      
+      // 检查是否匹配预设（允许 ±10% 的误差）
+      for (const item of presetMap) {
+        if (Math.abs(diffMins - item.mins) < item.mins * 0.1) {
+          return { preset: item.preset, from: '', to: '' }
+        }
+      }
+      
+      // 不匹配预设，使用自定义
+      return { preset: 'custom', from, to }
+    }
+    return null
+  }, [searchParams])
+
   const [timePreset, setTimePresetState] = useState<TimePreset>(() => {
+    // 优先从 URL 读取
+    const urlRange = parseUrlTimeRange()
+    if (urlRange) return urlRange.preset
+    // 其次从 localStorage 读取
     try {
       const saved = localStorage.getItem(`dash_time_${dashboardId}`)
       if (saved) return (JSON.parse(saved).timePreset as TimePreset) || '6h'
@@ -197,6 +299,10 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     return '6h'
   })
   const [customFrom, setCustomFrom] = useState(() => {
+    // 优先从 URL 读取
+    const urlRange = parseUrlTimeRange()
+    if (urlRange && urlRange.preset === 'custom') return urlRange.from
+    // 其次从 localStorage 读取
     try {
       const saved = localStorage.getItem(`dash_time_${dashboardId}`)
       if (saved) return JSON.parse(saved).customFrom || ''
@@ -204,6 +310,10 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     return ''
   })
   const [customTo, setCustomTo] = useState(() => {
+    // 优先从 URL 读取
+    const urlRange = parseUrlTimeRange()
+    if (urlRange && urlRange.preset === 'custom') return urlRange.to
+    // 其次从 localStorage 读取
     try {
       const saved = localStorage.getItem(`dash_time_${dashboardId}`)
       if (saved) return JSON.parse(saved).customTo || ''
@@ -223,12 +333,56 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     }
   }, [timePickerOpen])
 
-  // 持久化时间范围到 localStorage
+  /** 更新 URL 参数（时间范围和变量） */
+  const updateUrlParams = useCallback((newPreset?: TimePreset, newFrom?: string, _newTo?: string, newVars?: Record<string, string>) => {
+    const params = new URLSearchParams()
+    
+    // 保留原有的非 var- 参数
+    searchParams.forEach((value, key) => {
+      if (!key.startsWith('var-')) {
+        params.set(key, value)
+      }
+    })
+    
+    // 更新时间范围参数
+    const preset = newPreset || timePreset
+    const tr = getTimeRange()
+    if (tr) {
+      // 使用 Grafana 风格的时间参数
+      const fromStr = preset === 'custom' && newFrom 
+        ? timeToParam(newFrom)
+        : `now-${preset}`
+      const toStr = 'now'
+      params.set('from', fromStr)
+      params.set('to', toStr)
+    }
+    
+    // 更新变量参数
+    if (newVars) {
+      // 添加新的变量参数
+      for (const [name, value] of Object.entries(newVars)) {
+        params.set(`var-${name}`, value)
+      }
+    } else {
+      // 保留原有的变量参数
+      searchParams.forEach((value, key) => {
+        if (key.startsWith('var-')) {
+          params.set(key, value)
+        }
+      })
+    }
+    
+    setSearchParams(params, { replace: true })
+  }, [searchParams, setSearchParams, timePreset])
+
+  // 持久化时间范围到 localStorage 和 URL
   const setTimePreset = (preset: TimePreset) => {
     setTimePresetState(preset)
     try {
       localStorage.setItem(`dash_time_${dashboardId}`, JSON.stringify({ timePreset: preset, customFrom, customTo }))
     } catch {}
+    // 更新 URL 参数
+    updateUrlParams(preset)
   }
   // 提交自定义时间（从草稿→正式）并持久化
   const applyCustomTime = () => {
@@ -238,6 +392,8 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     try {
       localStorage.setItem(`dash_time_${dashboardId}`, JSON.stringify({ timePreset: 'custom', customFrom: draftCustomFrom, customTo: draftCustomTo }))
     } catch {}
+    // 更新 URL 参数
+    updateUrlParams('custom', draftCustomFrom, draftCustomTo)
   }
 
   const getTimeRangeDisplay = (): string => {
@@ -365,10 +521,24 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         api.listDatasources(),
       ])
 
-      // 构建变量值映射（用户变量 + 系统变量）
+      // 从 URL 参数读取变量值
+      const urlVarMap: Record<string, string> = {}
+      searchParams.forEach((value, key) => {
+        if (key.startsWith('var-')) {
+          const varName = key.slice(4) // 去掉 'var-' 前缀
+          urlVarMap[varName] = value
+        }
+      })
+
+      // 构建变量值映射（优先 URL 参数，其次数据库 current/default）
       const varMap: Record<string, string | string[]> = {}
       varList.forEach((v) => {
-        if (v.current && (v.current as any).value) {
+        // 优先使用 URL 参数中的值
+        if (urlVarMap[v.name]) {
+          varMap[v.name] = urlVarMap[v.name]
+          // 同步更新变量的 current 值
+          v.current = { text: urlVarMap[v.name], value: urlVarMap[v.name] }
+        } else if (v.current && (v.current as any).value) {
           varMap[v.name] = (v.current as any).value
         } else if (v.default) {
           varMap[v.name] = v.default
@@ -389,6 +559,13 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       // 初始化本地草稿为当前 dashboard_json 的深拷贝
       const dj = JSON.parse(JSON.stringify(db.dashboard_json || {}))
       setDraftJson(dj)
+
+      // 更新 URL slug（如果当前 URL 没有 slug 或 slug 不匹配）
+      const title = db.title || '仪表盘'
+      const expectedSlug = titleToSlug(title)
+      if (!slug || slug !== expectedSlug) {
+        navigate(`/d/${dashboardId}/${expectedSlug}${window.location.search}`, { replace: true })
+      }
       setSavedJson(dj)
     } catch (e: any) {
       setError(e.message || '加载失败')
@@ -655,6 +832,17 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       }
     })
 
+    // 更新 URL 参数（只更新字符串类型的变量）
+    const urlVars: Record<string, string> = {}
+    for (const [name, val] of Object.entries(varMap)) {
+      if (typeof val === 'string') {
+        urlVars[name] = val
+      } else if (Array.isArray(val) && val.length === 1) {
+        urlVars[name] = val[0]
+      }
+    }
+    updateUrlParams(undefined, undefined, undefined, urlVars)
+
     // 用变量值重新加载数据（不调 loadData 以避免覆盖本地变量状态）
     try {
       const tr = getTimeRange()
@@ -878,6 +1066,9 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
           <button className="btn-sm" onClick={() => setShowVersionHistory(true)} title="查看版本历史">
             📜 版本历史
           </button>
+          <button className="btn-sm" onClick={() => setShowReport(true)} title="生成分析报告">
+            📊 生成报告
+          </button>
           <button className="btn-sm" onClick={loadData} title="刷新数据">&#x1F504; 刷新</button>
           <button className="btn-sm" onClick={() => setChatOpen(!chatOpen)} title="AI 智能助手"
             style={chatOpen ? { background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' } : undefined}
@@ -1003,6 +1194,24 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
             loadData()
             setDraftJson(null)
           }}
+        />
+      )}
+
+      {/* ---- 报告生成 ---- */}
+      {showReport && (
+        <ReportModal
+          dashboardId={dashboardId}
+          dashboardTitle={dashboard?.title || '仪表盘'}
+          panelsSummary={panels.map((p: any) => ({
+            id: p.id,
+            title: p.title,
+            type: p.type,
+            targets: (p.targets || []).map((t: any) => ({
+              refId: t.refId,
+              rawSql: t.rawSql || '',
+            })),
+          }))}
+          onClose={() => setShowReport(false)}
         />
       )}
 

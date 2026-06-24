@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { BrowserRouter, Routes, Route, useParams, useNavigate, useLocation } from 'react-router-dom'
 import DashboardView from './components/DashboardView'
 import BrowsePage from './components/BrowsePage'
 import DataSourcesPage from './components/DataSourcesPage'
@@ -21,40 +22,85 @@ interface EditingPanelCtx {
   onSave: (updated: PanelDef) => void
 }
 
+/** Dashboard 页面包装器：从 URL 参数读取 dashboardId */
+function DashboardPageWrapper() {
+  const { uid } = useParams<{ uid: string }>()
+  const navigate = useNavigate()
+  const [editingPanel, setEditingPanel] = useState<EditingPanelCtx | null>(null)
+
+  if (!uid) {
+    navigate('/', { replace: true })
+    return null
+  }
+
+  const handleBack = () => navigate('/')
+  const handleEditPanel = (ctx: any) => setEditingPanel(ctx)
+
+  return (
+    <>
+      <div style={{ display: editingPanel ? 'none' : undefined, height: '100%' }}>
+        <DashboardView
+          dashboardId={uid}
+          onBack={handleBack}
+          onEditPanel={handleEditPanel}
+        />
+      </div>
+      {editingPanel && (
+        <PanelEditPage
+          panel={editingPanel.panel}
+          datasources={editingPanel.datasources}
+          dashboardId={editingPanel.dashboardId}
+          draftJson={editingPanel.draftJson}
+          panelsData={editingPanel.panelsData}
+          onSave={(updated) => {
+            editingPanel.onSave(updated)
+            setEditingPanel(null)
+          }}
+          onBack={() => setEditingPanel(null)}
+        />
+      )}
+    </>
+  )
+}
+
+/** Snapshot 页面包装器：从 URL 参数读取 snapshotKey */
+function SnapshotPageWrapper() {
+  const { key } = useParams<{ key: string }>()
+  const navigate = useNavigate()
+
+  if (!key) {
+    navigate('/', { replace: true })
+    return null
+  }
+
+  const handleClose = () => {
+    navigate('/')
+  }
+
+  return <SnapshotView snapshotKey={key} onClose={handleClose} />
+}
+
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('browse')
-  const [selectedDashboardId, setSelectedDashboardId] = useState<string | null>(null)
-  const [snapshotKey, setSnapshotKey] = useState<string | null>(null)
-  const [editingPanel, setEditingPanel] = useState<EditingPanelCtx | null>(null)
   const [snapshotListKey, setSnapshotListKey] = useState(0)
-  const isInSnapshot = window.location.pathname.startsWith('/snapshot/') || snapshotKey !== null
+  const location = useLocation()
+
+  // 判断当前是否在仪表盘详情页或快照页
+  const isInDashboard = location.pathname.startsWith('/d/')
+  const isInSnapshot = location.pathname.startsWith('/snapshot/')
 
   // 初始化主题
   useEffect(() => {
     initTheme()
   }, [])
 
-  if (!snapshotKey && window.location.pathname.startsWith('/snapshot/')) {
-    const key = window.location.pathname.split('/snapshot/')[1]
-    if (key) { setSnapshotKey(key); return null }
-  }
-
-  const isInDashboard = selectedDashboardId !== null
-
-  const handleOpenDashboard = (id: string) => setSelectedDashboardId(id)
-  const handleBack = () => setSelectedDashboardId(null)
-  const handleCloseSnapshot = () => {
-    setSnapshotKey(null)
-    window.history.pushState({}, '', '/')
-  }
-
   return (
     <div className="app">
-      {!isInSnapshot && !editingPanel && (
+      {!isInSnapshot && !isInDashboard && (
       <aside className="sidebar">
         <div
           className="sidebar-logo"
-          onClick={() => { setCurrentPage('browse'); setSelectedDashboardId(null) }}
+          onClick={() => { setCurrentPage('browse') }}
         >
           <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
             <rect width="28" height="28" rx="6" fill="#fc9908" />
@@ -63,8 +109,8 @@ function App() {
         </div>
         <nav className="sidebar-nav">
           <div
-            className={`nav-item ${currentPage === 'browse' && !isInDashboard ? 'active' : ''}`}
-            onClick={() => { setCurrentPage('browse'); setSelectedDashboardId(null) }}
+            className={`nav-item ${currentPage === 'browse' ? 'active' : ''}`}
+            onClick={() => setCurrentPage('browse')}
             title="仪表板"
           >
             <span className="nav-icon">
@@ -73,8 +119,8 @@ function App() {
             <span className="nav-label">仪表板</span>
           </div>
           <div
-            className={`nav-item ${currentPage === 'snapshots' && !isInDashboard ? 'active' : ''}`}
-            onClick={() => { setCurrentPage('snapshots'); setSelectedDashboardId(null); setSnapshotListKey(k => k + 1) }}
+            className={`nav-item ${currentPage === 'snapshots' ? 'active' : ''}`}
+            onClick={() => { setCurrentPage('snapshots'); setSnapshotListKey(k => k + 1) }}
             title="快照"
           >
             <span className="nav-icon">
@@ -83,8 +129,8 @@ function App() {
             <span className="nav-label">快照</span>
           </div>
           <div
-            className={`nav-item ${currentPage === 'datasources' && !isInDashboard ? 'active' : ''}`}
-            onClick={() => { setCurrentPage('datasources'); setSelectedDashboardId(null) }}
+            className={`nav-item ${currentPage === 'datasources' ? 'active' : ''}`}
+            onClick={() => setCurrentPage('datasources')}
             title="数据源"
           >
             <span className="nav-icon">
@@ -95,8 +141,8 @@ function App() {
         </nav>
         <div className="sidebar-footer">
           <div
-            className={`nav-item ${currentPage === 'settings' && !isInDashboard ? 'active' : ''}`}
-            onClick={() => { setCurrentPage('settings'); setSelectedDashboardId(null) }}
+            className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}
+            onClick={() => setCurrentPage('settings')}
             title="设置"
           >
             <span className="nav-icon">
@@ -109,46 +155,30 @@ function App() {
       )}
 
       <div className="main-wrapper">
-        <main className="main-content" style={{ padding: (isInSnapshot || editingPanel) ? 0 : undefined }}>
-          {isInSnapshot ? (
-            <SnapshotView snapshotKey={snapshotKey!} onClose={handleCloseSnapshot} />
-          ) : isInDashboard ? (
-            <>
-              <div style={{ display: editingPanel ? 'none' : undefined, height: '100%' }}>
-                <DashboardView
-                  dashboardId={selectedDashboardId!}
-                  onBack={handleBack}
-                  onEditPanel={(ctx) => setEditingPanel(ctx)}
-                />
-              </div>
-              {editingPanel && (
-                <PanelEditPage
-                  panel={editingPanel.panel}
-                  datasources={editingPanel.datasources}
-                  dashboardId={editingPanel.dashboardId}
-                  draftJson={editingPanel.draftJson}
-                  panelsData={editingPanel.panelsData}
-                  onSave={(updated) => {
-                    editingPanel.onSave(updated)
-                    setEditingPanel(null)
-                  }}
-                  onBack={() => setEditingPanel(null)}
-                />
-              )}
-            </>
-          ) : currentPage === 'browse' ? (
-            <BrowsePage onOpenDashboard={handleOpenDashboard} />
-          ) : currentPage === 'snapshots' ? (
-            <SnapshotList key={snapshotListKey} />
-          ) : currentPage === 'settings' ? (
-            <SettingsPage />
-          ) : (
-            <DataSourcesPage />
-          )}
+        <main className="main-content" style={{ padding: isInSnapshot ? 0 : undefined }}>
+          <Routes>
+            <Route path="/" element={
+              currentPage === 'browse' ? <BrowsePage /> :
+              currentPage === 'snapshots' ? <SnapshotList key={snapshotListKey} /> :
+              currentPage === 'settings' ? <SettingsPage /> :
+              <DataSourcesPage />
+            } />
+            <Route path="/d/:uid/:slug?" element={<DashboardPageWrapper />} />
+            <Route path="/snapshot/:key" element={<SnapshotPageWrapper />} />
+          </Routes>
         </main>
       </div>
     </div>
   )
 }
 
-export default App
+/** 根组件：包裹 BrowserRouter */
+function Root() {
+  return (
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  )
+}
+
+export default Root
