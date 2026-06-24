@@ -108,6 +108,8 @@ type QueryInspectReq struct {
 	RawSQL string `json:"raw_sql" binding:"required"`
 	// DashboardID 仪表盘 ID，用于获取变量值
 	DashboardID string `json:"dashboard_id" binding:"required"`
+	// DatasourceID 数据源 ID，SQL 将在该数据源上执行；为空则使用主数据库
+	DatasourceID string `json:"datasource_id,omitempty"`
 	// Variables 可选，前端传入的变量值映射（优先级高于数据库中的变量值）
 	Variables map[string]interface{} `json:"variables,omitempty"`
 	// From 时间范围开始（ISO格式），用于系统变量替换和时间过滤

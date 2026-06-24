@@ -881,6 +881,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                       {/* Query Inspector */}
                       <QueryInspector
                         dashboardId={dashboardId}
+                        datasourceId={p.datasource_id}
                         rawSql={target.rawSql || ''}
                         variables={variables}
                         from={getTimeRange()?.from}

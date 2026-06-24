@@ -32,7 +32,7 @@ type Interface interface {
 	// UpdateVariable 更新变量
 	UpdateVariable(ctx *gin.Context, req *VariableReq) (*VariableRes, error)
 	// DeleteVariable 删除变量
-	DeleteVariable(ctx *gin.Context, req *VariableReq) error
+	DeleteVariable(ctx *gin.Context, id string) error
 	// GetVariableValues 获取变量的可选值（用于 query 类型动态查询）
 	GetVariableValues(ctx *gin.Context, req *VariableValuesReq) (*VariableValuesRes, error)
 }
@@ -161,8 +161,8 @@ func (s *Server) UpdateVariable(ctx *gin.Context, req *VariableReq) (*VariableRe
 }
 
 // DeleteVariable 软删除变量。
-func (s *Server) DeleteVariable(ctx *gin.Context, req *VariableReq) error {
-	return s.db.Where("id = ?", req.ID).Delete(&model.Variable{}).Error
+func (s *Server) DeleteVariable(ctx *gin.Context, id string) error {
+	return s.db.Where("id = ?", id).Delete(&model.Variable{}).Error
 }
 
 // GetVariableValues 获取变量的可选值。
