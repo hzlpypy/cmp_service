@@ -14,6 +14,11 @@ import "github.com/gin-gonic/gin"
 //   - POST /update  - 更新仪表板（修改 dashboard_json 完整定义）
 //   - POST /delete  - 删除仪表板（软删除）
 //   - POST /data    - 查询仪表板数据（根据 dashboard_json 中的面板配置查询实际数据）
+//   - POST /versions/list    - 获取版本历史列表
+//   - POST /versions/get     - 获取指定版本详情
+//   - POST /versions/restore - 还原到指定版本
+//   - POST /versions/compare - 对比两个版本差异
+//   - POST /versions/delete  - 删除指定版本
 func RegisterDashboardsRouter(e *gin.Engine, c *Controller) {
 	api := e.Group("/api/v1/dashboards")
 	{
@@ -23,6 +28,12 @@ func RegisterDashboardsRouter(e *gin.Engine, c *Controller) {
 		api.POST("/update", c.UpdateDashboardController)
 		api.POST("/delete", c.DeleteDashboardController)
 		api.POST("/data", c.GetDashboardDataController)
+		// 版本管理
+		api.POST("/versions/list", c.ListVersionsController)
+		api.POST("/versions/get", c.GetVersionController)
+		api.POST("/versions/restore", c.RestoreVersionController)
+		api.POST("/versions/compare", c.CompareVersionsController)
+		api.POST("/versions/delete", c.DeleteVersionController)
 	}
 	// 面板独立路由：查询单个面板数据
 	e.POST("/api/v1/panels/data", c.GetPanelDataController)

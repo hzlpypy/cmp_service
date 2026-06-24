@@ -6,9 +6,11 @@ interface QueryInspectorProps {
   dashboardId: string
   rawSql: string
   variables: VariableRes[]
+  from?: string
+  to?: string
 }
 
-export default function QueryInspector({ dashboardId, rawSql, variables }: QueryInspectorProps) {
+export default function QueryInspector({ dashboardId, rawSql, variables, from, to }: QueryInspectorProps) {
   const [result, setResult] = useState<api.QueryInspectRes | null>(null)
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -16,7 +18,7 @@ export default function QueryInspector({ dashboardId, rawSql, variables }: Query
   const handleRefresh = async () => {
     setLoading(true)
     try {
-      // 构建变量值映射
+      // 构建变量值映射（用户变量 + 系统变量）
       const varMap: Record<string, string | string[]> = {}
       variables.forEach((v) => {
         if (v.current && (v.current as any).value) {
@@ -25,11 +27,15 @@ export default function QueryInspector({ dashboardId, rawSql, variables }: Query
           varMap[v.name] = v.default
         }
       })
+      // 合并系统内置变量（$__from, $__to 等）
+      if (from && to) Object.assign(varMap, api.getSystemVars(from, to))
 
       const res = await api.queryInspect({
         raw_sql: rawSql,
         dashboard_id: dashboardId,
         variables: varMap,
+        from,
+        to,
       })
       setResult(res)
     } catch (e: any) {

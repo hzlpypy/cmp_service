@@ -1,6 +1,111 @@
 import { useRef, useEffect, useMemo, useState, memo } from 'react'
 import * as echarts from 'echarts'
-import type { MetricRow, TargetDef } from '../api'
+import type { MetricRow, TargetDef, DataLinkDef } from '../api'
+
+/**
+ * 判断值是否为毫秒时间戳。
+ * 毫秒时间戳范围：1000000000000 (2001-09-09) 到 2000000000000 (2033-05-18)
+ */
+function isMillisecondTimestamp(val: unknown): boolean {
+  if (typeof val !== 'number') return false
+  return val > 1000000000000 && val < 2000000000000
+}
+
+/**
+ * 时间格式配置（参考 Grafana）
+ */
+interface TimeFormatConfig {
+  format: string
+  splitType: 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'
+  interval: number // 建议的刻度间隔（单位取决于 splitType）
+}
+
+/**
+ * 根据时间范围和数据点数量确定时间格式和刻度间隔（参考 Grafana）
+ */
+function getTimeFormatConfig(rangeMs: number, dataPoints: number): TimeFormatConfig {
+  const SECOND = 1000
+  const MINUTE = 60 * SECOND
+  const HOUR = 60 * MINUTE
+  const DAY = 24 * HOUR
+  const WEEK = 7 * DAY
+  const MONTH = 30 * DAY
+  const YEAR = 365 * DAY
+
+  // 根据时间范围选择基础格式
+  if (rangeMs <= 1 * MINUTE) {
+    // 1分钟内：秒级精度
+    return { format: '{HH}:{mm}:{ss}', splitType: 'second', interval: Math.max(1, Math.ceil(rangeMs / SECOND / 10)) }
+  } else if (rangeMs <= 15 * MINUTE) {
+    // 15分钟内：秒级精度
+    return { format: '{HH}:{mm}:{ss}', splitType: 'second', interval: Math.max(5, Math.ceil(rangeMs / SECOND / 10)) }
+  } else if (rangeMs <= 1 * HOUR) {
+    // 1小时内：分钟级精度
+    return { format: '{HH}:{mm}', splitType: 'minute', interval: Math.max(1, Math.ceil(rangeMs / MINUTE / 10)) }
+  } else if (rangeMs <= 6 * HOUR) {
+    // 6小时内：分钟级精度
+    return { format: '{HH}:{mm}', splitType: 'minute', interval: Math.max(5, Math.ceil(rangeMs / MINUTE / 10)) }
+  } else if (rangeMs <= 12 * HOUR) {
+    // 12小时内：小时级精度
+    return { format: '{HH}:{mm}', splitType: 'hour', interval: 1 }
+  } else if (rangeMs <= 1 * DAY) {
+    // 24小时内：小时级精度
+    return { format: '{HH}:{mm}', splitType: 'hour', interval: Math.max(2, Math.ceil(rangeMs / HOUR / 10)) }
+  } else if (rangeMs <= 2 * DAY) {
+    // 2天内：小时级精度，显示日期
+    return { format: '{MM}/{dd} {HH}:{mm}', splitType: 'hour', interval: Math.max(4, Math.ceil(rangeMs / HOUR / 10)) }
+  } else if (rangeMs <= 7 * DAY) {
+    // 7天内：小时级精度
+    return { format: '{MM}/{dd} {HH}:{mm}', splitType: 'hour', interval: Math.max(6, Math.ceil(rangeMs / HOUR / 10)) }
+  } else if (rangeMs <= 30 * DAY) {
+    // 30天内：天级精度
+    return { format: '{MM}/{dd}', splitType: 'day', interval: Math.max(1, Math.ceil(rangeMs / DAY / 10)) }
+  } else if (rangeMs <= 90 * DAY) {
+    // 90天内：天级精度
+    return { format: '{MM}/{dd}', splitType: 'day', interval: Math.max(3, Math.ceil(rangeMs / DAY / 10)) }
+  } else if (rangeMs <= 1 * YEAR) {
+    // 1年内：周级精度
+    return { format: '{MM}/{dd}', splitType: 'week', interval: Math.max(1, Math.ceil(rangeMs / WEEK / 10)) }
+  } else {
+    // 超过1年：月级精度
+    return { format: '{yyyy}-{MM}', splitType: 'month', interval: Math.max(1, Math.ceil(rangeMs / MONTH / 10)) }
+  }
+}
+
+/**
+ * 将毫秒时间戳转换为指定格式的日期字符串。
+ */
+function formatTimestamp(ms: number, format?: string): string {
+  const date = new Date(ms)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+
+  if (!format) {
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+  }
+
+  return format
+    .replace('{yyyy}', String(year))
+    .replace('{MM}', month)
+    .replace('{dd}', day)
+    .replace('{HH}', hours)
+    .replace('{mm}', minutes)
+    .replace('{ss}', seconds)
+}
+
+/**
+ * 格式化值：如果是毫秒时间戳则转换为日期字符串，否则返回原值。
+ */
+function formatValue(val: unknown): string {
+  if (isMillisecondTimestamp(val)) {
+    return formatTimestamp(val as number)
+  }
+  return String(val ?? '')
+}
 
 interface ChartPanelProps {
   type: 'bar' | 'line' | 'pie' | 'gauge' | 'table'
@@ -21,6 +126,8 @@ interface ChartPanelProps {
   panelKey?: string
   /** 后端返回的列名顺序，用于保持表头与 SQL 查询一致 */
   columns?: string[]
+  /** Data Links 配置（仿照 Grafana） */
+  dataLinks?: DataLinkDef[]
 }
 
 /**
@@ -78,10 +185,11 @@ function shortName(name: string): string {
 
 const SERIES_COLORS = ['#5794f2', '#e24d4d', '#55bd6a', '#ff9830', '#b877d9', '#eca846']
 
-export default memo(function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, panelKey, columns }: ChartPanelProps) {
+export default memo(function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, panelKey, columns, dataLinks }: ChartPanelProps) {
   const chartRef = useRef<HTMLDivElement>(null)
   const chartInstanceRef = useRef<echarts.ECharts | null>(null)
   const [chartError, setChartError] = useState<string | null>(null)
+  const [linkMenu, setLinkMenu] = useState<{ x: number; y: number; links: DataLinkDef[]; data: Record<string, any> } | null>(null)
 
   // 合并所有 target 数据为扁平数组（用于表格和列探测）
   const allData = useMemo(() => {
@@ -114,9 +222,32 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
 
       // X 轴名称：从第一个 target 数据中取
       const firstRows = data[0] || []
+      
+      // 检测是否为时间序列数据（X轴是时间戳）
+      const isTimeSeries = nameCol && firstRows.length > 0 && isMillisecondTimestamp(firstRows[0][nameCol!])
+      
+      // 计算时间范围和格式配置（如果是时间序列）
+      let timeFormat = ''
+      let timeConfig: TimeFormatConfig | null = null
+      if (isTimeSeries && firstRows.length > 1) {
+        const timestamps = firstRows.map((m) => m[nameCol!] as number).filter((t) => isMillisecondTimestamp(t))
+        if (timestamps.length >= 2) {
+          const minTs = Math.min(...timestamps)
+          const maxTs = Math.max(...timestamps)
+          const rangeMs = maxTs - minTs
+          timeConfig = getTimeFormatConfig(rangeMs, timestamps.length)
+          timeFormat = timeConfig.format
+        }
+      }
+      
       const names = nameCol ? firstRows.map((m) => {
-        const v = m[nameCol!] || ''
-        return v.length > 15 ? shortName(v) : v
+        const v = m[nameCol!]
+        // 如果是毫秒时间戳，根据时间范围转换为对应格式的日期字符串
+        if (isMillisecondTimestamp(v)) {
+          return formatTimestamp(v as number, timeFormat)
+        }
+        const str = String(v || '')
+        return str.length > 15 ? shortName(str) : str
       }) : []
 
       let option: echarts.EChartsOption
@@ -127,6 +258,8 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
           // 多 target 模式：每个 target 作为一个独立的 series
           const isMultiTarget = data.length > 1
           const series: echarts.SeriesOption[] = []
+          const barOrientation = (options?.barOrientation as string) || 'vertical'
+          const isHorizontal = type === 'bar' && barOrientation === 'horizontal'
 
           data.forEach((targetRows, ti) => {
             const tdef = targets[ti]
@@ -140,7 +273,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
                 data: targetRows.map((m) => parseFloat(m[col]) || 0),
                 ...(type === 'bar'
                   ? {
-                      itemStyle: { color: SERIES_COLORS[(ti * tValCols.length + ci) % SERIES_COLORS.length], borderRadius: [3, 3, 0, 0] },
+                      itemStyle: { color: SERIES_COLORS[(ti * tValCols.length + ci) % SERIES_COLORS.length], borderRadius: isHorizontal ? [0, 3, 3, 0] : [3, 3, 0, 0] },
                       barMaxWidth: 30,
                     }
                   : {
@@ -154,6 +287,18 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
 
           const legendData = series.map((s) => s.name as string)
 
+          // 计算xAxis标签间隔（避免重叠）
+          const calculateLabelInterval = (): number => {
+            if (!isTimeSeries || names.length <= 10) return 0
+            // 根据数据点数量和图表宽度估算可显示的标签数量
+            // 假设每个标签需要约60px宽度
+            const maxLabels = Math.floor(800 / 60) // 假设图表宽度800px
+            if (names.length > maxLabels) {
+              return Math.ceil(names.length / maxLabels) - 1
+            }
+            return 0
+          }
+
           option = {
             backgroundColor: 'transparent',
             tooltip: { trigger: 'axis', ...(type === 'bar' ? { axisPointer: { type: 'shadow' } } : {}), backgroundColor: '#22252b', borderColor: '#33363d', textStyle: { color: '#d8d9da' } },
@@ -161,8 +306,27 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
               ? { data: legendData, bottom: 0, textStyle: { color: '#a0a3a8', fontSize: 11 } }
               : undefined,
             grid: { left: '3%', right: '4%', bottom: legendData.length > 1 ? '15%' : '8%', top: '8%', containLabel: true },
-            xAxis: { type: 'category', data: names, ...(type === 'line' ? { boundaryGap: false } : {}), axisLabel: { rotate: names.length > 8 ? 30 : 0, fontSize: 10, color: '#a0a3a8' }, axisLine: { lineStyle: { color: '#33363d' } }, axisTick: { show: false } },
-            yAxis: { type: 'value', name: valueCols[0] || '', nameTextStyle: { color: '#6e7178' }, axisLabel: { color: '#6e7178' }, splitLine: { lineStyle: { color: '#2c2f36' } } },
+            // 横向柱状图：交换 xAxis 和 yAxis
+            xAxis: isHorizontal
+              ? { type: 'value', name: valueCols[0] || '', nameTextStyle: { color: '#6e7178' }, axisLabel: { color: '#6e7178' }, splitLine: { lineStyle: { color: '#2c2f36' } } }
+              : {
+                  type: 'category',
+                  data: names,
+                  ...(type === 'line' ? { boundaryGap: false } : {}),
+                  axisLabel: {
+                    rotate: isTimeSeries && names.length > 15 ? 30 : 0,
+                    fontSize: 11,
+                    color: '#a0a3a8',
+                    interval: calculateLabelInterval(),
+                    // 时间序列数据：隐藏部分标签避免重叠
+                    hideOverlap: isTimeSeries && names.length > 20,
+                  },
+                  axisLine: { lineStyle: { color: '#33363d' } },
+                  axisTick: { show: false },
+                },
+            yAxis: isHorizontal
+              ? { type: 'category', data: names, axisLabel: { fontSize: 10, color: '#a0a3a8' }, axisLine: { lineStyle: { color: '#33363d' } }, axisTick: { show: false } }
+              : { type: 'value', name: valueCols[0] || '', nameTextStyle: { color: '#6e7178' }, axisLabel: { color: '#6e7178' }, splitLine: { lineStyle: { color: '#2c2f36' } } },
             series,
           }
           break
@@ -212,12 +376,41 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
       }
 
       chart.setOption(option)
+
+      // 添加点击事件处理（Data Links）
+      if (dataLinks && dataLinks.length > 0) {
+        chart.on('click', (params: any) => {
+          if (!dataLinks || dataLinks.length === 0) return
+
+          // 构建变量替换数据
+          const linkData: Record<string, any> = {
+            '__value': params.value,
+            '__series.name': params.seriesName,
+            '__series.index': params.seriesIndex,
+            '__data.name': params.name,
+            '__data.index': params.dataIndex,
+          }
+
+          // 显示链接菜单
+          setLinkMenu({
+            x: params.event?.event?.clientX || 0,
+            y: params.event?.event?.clientY || 0,
+            links: dataLinks,
+            data: linkData,
+          })
+        })
+      }
+
       const handleResize = () => {
         try { chart.resize() } catch {}
       }
       window.addEventListener('resize', handleResize)
       return () => {
         window.removeEventListener('resize', handleResize)
+        // 移除点击事件
+        if (dataLinks && dataLinks.length > 0) {
+          chart.off('click')
+        }
         try {
           chart.dispose()
           chartInstanceRef.current = null
@@ -234,7 +427,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
         }
       } catch {}
     }
-  }, [type, data, nameCol, valueCols, targets])
+  }, [type, data, nameCol, valueCols, targets, options])
 
   // 表格：合并所有 target 数据
   // 优先使用后端返回的列顺序（columns），保证与 SQL 查询一致
@@ -618,11 +811,44 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
                     if (cellMergeInfo && cellMergeInfo[i][ci].skip) return null
                     const rowSpan = cellMergeInfo ? cellMergeInfo[i][ci].rowSpan : 1
                     const alertColor = getCellAlertColor(h, m[h])
+
+                    // 检查是否有 Data Link 配置
+                    const dataLink = (dataLinks || []).find((link) => link.field === h)
+                    if (dataLink && dataLink.url) {
+                      // 替换 URL 变量
+                      let url = dataLink.url
+                      url = url.replace(/\$\{__value\}/g, String(m[h] ?? ''))
+                      url = url.replace(/\$\{__field\.name\}/g, h)
+                      // 替换 ${__row.xxx} 变量
+                      url = url.replace(/\$\{__row\.(\w+)\}/g, (_, fieldName) => String(m[fieldName] ?? ''))
+
+                      const linkTitle = dataLink.title || String(m[h] ?? '')
+                      return (
+                        <td key={h} rowSpan={rowSpan > 1 ? rowSpan : undefined}
+                          style={alertColor ? { color: alertColor, fontWeight: 600 } : undefined}
+                        >
+                          <a
+                            href={url}
+                            target={dataLink.target || '_blank'}
+                            rel="noopener noreferrer"
+                            style={{
+                              color: alertColor || 'var(--primary)',
+                              textDecoration: 'none',
+                              cursor: 'pointer',
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {linkTitle}
+                          </a>
+                        </td>
+                      )
+                    }
+
                     return (
                       <td key={h} rowSpan={rowSpan > 1 ? rowSpan : undefined}
                         style={alertColor ? { color: alertColor, fontWeight: 600 } : undefined}
                       >
-                        {m[h] != null ? String(m[h]) : ''}
+                        {formatValue(m[h])}
                       </td>
                     )
                   })}
@@ -685,6 +911,83 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
             </div>
           )}
         </div>
+      )}
+
+      {/* Data Links 菜单 */}
+      {linkMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            left: linkMenu.x,
+            top: linkMenu.y,
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 6,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            zIndex: 9999,
+            minWidth: 150,
+            padding: 4,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {linkMenu.links.map((link, idx) => {
+            // 替换URL中的变量
+            let url = link.url
+            Object.entries(linkMenu.data).forEach(([key, value]) => {
+              url = url.replace(`\${${key}}`, String(value))
+            })
+
+            return (
+              <button
+                key={idx}
+                onClick={() => {
+                  window.open(url, link.target || '_blank')
+                  setLinkMenu(null)
+                }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: 12,
+                  background: 'transparent',
+                  color: 'var(--text-primary)',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                {link.title || link.url}
+              </button>
+            )
+          })}
+          <button
+            onClick={() => setLinkMenu(null)}
+            style={{
+              display: 'block',
+              width: '100%',
+              padding: '6px 12px',
+              fontSize: 11,
+              background: 'transparent',
+              color: 'var(--text-muted)',
+              border: 'none',
+              borderRadius: 4,
+              cursor: 'pointer',
+              textAlign: 'left',
+              marginTop: 4,
+            }}
+          >
+            关闭
+          </button>
+        </div>
+      )}
+
+      {/* 点击其他区域关闭链接菜单 */}
+      {linkMenu && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 9998 }}
+          onClick={() => setLinkMenu(null)}
+        />
       )}
     </div>
   )

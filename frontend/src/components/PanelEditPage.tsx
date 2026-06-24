@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import ChartPanel from './ChartPanel'
 import QueryInspector from './QueryInspector'
-import type { PanelDef, TargetDef, DatasourceRes, DashboardJSON, PanelDataRes, MetricRow, VariableRes } from '../api'
+import VariableSelector from './VariableSelector'
+import type { PanelDef, TargetDef, DatasourceRes, DashboardJSON, PanelDataRes, MetricRow, VariableRes, DataLinkDef } from '../api'
 import * as api from '../api'
 
 export interface PanelEditPageProps {
@@ -10,6 +11,10 @@ export interface PanelEditPageProps {
   dashboardId: string
   draftJson?: any
   panelsData?: PanelDataRes[]
+  variables?: VariableRes[]
+  timePreset?: string
+  customFrom?: string
+  customTo?: string
   onSave: (updated: PanelDef) => void
   onBack: () => void
 }
@@ -48,21 +53,239 @@ function Section({ title, defaultOpen = true, children, badge }: {
   )
 }
 
-export default function PanelEditPage({ panel, datasources, dashboardId, draftJson, panelsData, onSave, onBack }: PanelEditPageProps) {
+export default function PanelEditPage({ panel, datasources, dashboardId, draftJson, panelsData, variables: initialVariables, timePreset: initialTimePreset, customFrom: initialCustomFrom, customTo: initialCustomTo, onSave, onBack }: PanelEditPageProps) {
   const [p, setP] = useState<PanelDef>(clonePanel(panel))
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('query')
   const [liveData, setLiveData] = useState<MetricRow[][]>([])
   const [liveColumns, setLiveColumns] = useState<string[]>([])
   const [queryLoading, setQueryLoading] = useState(false)
   const [hasUnsaved, setHasUnsaved] = useState(false)
-  const [variables, setVariables] = useState<VariableRes[]>([])
+  const [variables, setVariables] = useState<VariableRes[]>(initialVariables || [])
+
+  // 时间范围选择（使用传入的初始值，若没有则从 localStorage 恢复）
+  type TimePreset = '5m' | '30m' | '1h' | '6h' | '12h' | '24h' | '2d' | '7d' | '30d' | 'today' | 'yesterday' | 'day_before_yesterday' | 'last_week_today' | 'custom'
+  const resolveTimePreset = (): TimePreset => {
+    if (initialTimePreset) return initialTimePreset as TimePreset
+    try {
+      const saved = localStorage.getItem(`dash_time_${dashboardId}`)
+      if (saved) return (JSON.parse(saved).timePreset as TimePreset) || '6h'
+    } catch {}
+    return '6h'
+  }
+  const resolveCustomFrom = (): string => {
+    if (initialCustomFrom) return initialCustomFrom
+    try {
+      const saved = localStorage.getItem(`dash_time_${dashboardId}`)
+      if (saved) return JSON.parse(saved).customFrom || ''
+    } catch {}
+    return ''
+  }
+  const resolveCustomTo = (): string => {
+    if (initialCustomTo) return initialCustomTo
+    try {
+      const saved = localStorage.getItem(`dash_time_${dashboardId}`)
+      if (saved) return JSON.parse(saved).customTo || ''
+    } catch {}
+    return ''
+  }
+  const [timePreset, setTimePresetState] = useState<TimePreset>(resolveTimePreset)
+  const [customFrom, setCustomFrom] = useState(resolveCustomFrom)
+  const [customTo, setCustomTo] = useState(resolveCustomTo)
+  const [timePickerOpen, setTimePickerOpen] = useState(false)
+  // 自定义时间的草稿状态：输入时只更新草稿，点击"应用"才提交
+  const [draftCustomFrom, setDraftCustomFrom] = useState('')
+  const [draftCustomTo, setDraftCustomTo] = useState('')
+
+  // 打开时间选择器时，将草稿初始化为当前已保存值
+  useEffect(() => {
+    if (timePickerOpen) {
+      setDraftCustomFrom(customFrom)
+      setDraftCustomTo(customTo)
+    }
+  }, [timePickerOpen])
+
+  // 持久化时间范围到 localStorage
+  const setTimePreset = (preset: TimePreset) => {
+    setTimePresetState(preset)
+    try {
+      localStorage.setItem(`dash_time_${dashboardId}`, JSON.stringify({ timePreset: preset, customFrom, customTo }))
+    } catch {}
+  }
+  // 提交自定义时间（从草稿→正式）并持久化
+  const applyCustomTime = () => {
+    setCustomFrom(draftCustomFrom)
+    setCustomTo(draftCustomTo)
+    setTimePresetState('custom')
+    try {
+      localStorage.setItem(`dash_time_${dashboardId}`, JSON.stringify({ timePreset: 'custom', customFrom: draftCustomFrom, customTo: draftCustomTo }))
+    } catch {}
+  }
+
+  const getTimeRangeDisplay = (): string => {
+    if (timePreset === 'custom') {
+      if (customFrom && customTo) {
+        return `${customFrom} 至 ${customTo}`
+      }
+      return '自定义'
+    }
+    const labels: Record<TimePreset, string> = {
+      '5m': '最近5分钟',
+      '30m': '最近30分钟',
+      '1h': '最近1小时',
+      '6h': '最近6小时',
+      '12h': '最近12小时',
+      '24h': '最近24小时',
+      '2d': '最近2天',
+      '7d': '最近7天',
+      '30d': '最近30天',
+      'today': '今天',
+      'yesterday': '昨天',
+      'day_before_yesterday': '前天',
+      'last_week_today': '上周今天',
+      'custom': '自定义',
+    }
+    return labels[timePreset] || '最近6小时'
+  }
+
+  const getTimeRange = (): { from: string; to: string } | null => {
+    if (timePreset === 'custom') {
+      if (!customFrom && !customTo) return null
+      return {
+        from: customFrom ? new Date(customFrom).toISOString() : '',
+        to: customTo ? new Date(customTo).toISOString() : '',
+      }
+    }
+
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
+    // 绝对时间范围（整天）
+    if (timePreset === 'today') {
+      return { from: today.toISOString(), to: now.toISOString() }
+    }
+    if (timePreset === 'yesterday') {
+      const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000)
+      const yesterdayEnd = new Date(today.getTime() - 1)
+      return { from: yesterday.toISOString(), to: yesterdayEnd.toISOString() }
+    }
+    if (timePreset === 'day_before_yesterday') {
+      const dayBeforeYesterday = new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000)
+      const dayBeforeYesterdayEnd = new Date(today.getTime() - 24 * 60 * 60 * 1000 - 1)
+      return { from: dayBeforeYesterday.toISOString(), to: dayBeforeYesterdayEnd.toISOString() }
+    }
+    if (timePreset === 'last_week_today') {
+      const lastWeekToday = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+      const lastWeekTodayEnd = new Date(lastWeekToday.getTime() + 24 * 60 * 60 * 1000 - 1)
+      return { from: lastWeekToday.toISOString(), to: lastWeekTodayEnd.toISOString() }
+    }
+
+    // 相对时间范围
+    const to = now.toISOString()
+    let ms = 0
+    switch (timePreset) {
+      case '5m': ms = 5 * 60 * 1000; break
+      case '30m': ms = 30 * 60 * 1000; break
+      case '1h': ms = 60 * 60 * 1000; break
+      case '6h': ms = 6 * 60 * 60 * 1000; break
+      case '12h': ms = 12 * 60 * 60 * 1000; break
+      case '24h': ms = 24 * 60 * 60 * 1000; break
+      case '2d': ms = 2 * 24 * 60 * 60 * 1000; break
+      case '7d': ms = 7 * 24 * 60 * 60 * 1000; break
+      case '30d': ms = 30 * 24 * 60 * 60 * 1000; break
+      default: ms = 6 * 60 * 60 * 1000
+    }
+    const from = new Date(now.getTime() - ms).toISOString()
+    return { from, to }
+  }
+
+  const handleTimePresetSelect = (preset: TimePreset) => {
+    setTimePreset(preset)
+    setTimePickerOpen(false)
+    // 非自定义预设：立即刷新预览
+    handleRefreshPreview()
+  }
+
+  // 应用自定义时间并关闭下拉、刷新预览
+  const handleApplyCustomTime = () => {
+    if (!draftCustomFrom || !draftCustomTo) return
+    applyCustomTime()
+    setTimePickerOpen(false)
+    handleRefreshPreview()
+  }
+
+  // 点击外部关闭时间选择器
+  useEffect(() => {
+    if (!timePickerOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.time-picker-dropdown') && !target.closest('.time-picker-button')) {
+        setTimePickerOpen(false)
+      }
+    }
+    const timer = setTimeout(() => {
+      document.addEventListener('click', handleClickOutside)
+    }, 0)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('click', handleClickOutside)
+    }
+  }, [timePickerOpen])
+
+  // 构建变量值映射（用户变量 + 系统变量）
+  const getVariableMap = (): Record<string, string | string[]> => {
+    const varMap: Record<string, string | string[]> = {}
+    variables.forEach((v) => {
+      if (v.current && (v.current as any).value) {
+        varMap[v.name] = (v.current as any).value
+      } else if (v.default) {
+        varMap[v.name] = v.default
+      } else if (v.type === 'custom' && v.options?.length > 0) {
+        const firstOpt = v.options.find((o) => o.selected) || v.options[0]
+        varMap[v.name] = firstOpt.value
+      }
+    })
+    // 合并系统内置变量
+    const tr = getTimeRange()
+    if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
+    return varMap
+  }
+
+  // 处理变量值变化
+  const handleVariableChange = async (variableId: string, value: string | string[]) => {
+    const updatedVars = variables.map((v) => {
+      if (v.id !== variableId) return v
+      const text = Array.isArray(value)
+        ? value.map((val) => v.options.find((o) => o.value === val)?.text || val)
+        : (v.options.find((o) => o.value === value)?.text || value)
+      return {
+        ...v,
+        current: { text: text as any, value: value as any },
+      }
+    })
+    setVariables(updatedVars)
+
+    // 保存变量当前值到后端
+    try {
+      await api.updateVariable(variableId, {
+        dashboard_id: dashboardId,
+        current: Array.isArray(value)
+          ? { text: value.join(','), value }
+          : { text: value, value },
+      } as any)
+    } catch {}
+
+    // 刷新预览数据
+    handleRefreshPreviewWithVars(updatedVars)
+  }
 
   useEffect(() => { setP(clonePanel(panel)) }, [panel])
 
-  // 加载变量列表
+  // 加载变量列表（只有在没有传入初始变量时才从API加载）
   useEffect(() => {
-    api.listVariables(dashboardId).then((list) => setVariables(list.sort((a, b) => a.sort_order - b.sort_order))).catch(() => {})
-  }, [dashboardId])
+    if (!initialVariables || initialVariables.length === 0) {
+      api.listVariables(dashboardId).then((list) => setVariables(list.sort((a, b) => a.sort_order - b.sort_order))).catch(() => {})
+    }
+  }, [dashboardId, initialVariables])
 
   // 从 panelsData 中获取当前面板的数据用于预览
   useEffect(() => {
@@ -104,8 +327,10 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
       let latestData: MetricRow[][] = liveData
 
       // 2. 尝试获取最新的面板查询结果
+      const tr = getTimeRange()
+      const varMap = getVariableMap()
       try {
-        const dr = await api.getDashboardData(dashboardId, undefined, undefined, mergedJson as DashboardJSON)
+        const dr = await api.getDashboardData(dashboardId, tr?.from, tr?.to, mergedJson as DashboardJSON, varMap)
         const pd = dr.panels_data?.find((d) => d.panel_id === panel.id)
         if (pd && pd.target && pd.target.length > 0) {
           latestData = pd.target
@@ -166,7 +391,9 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
         panels.push({ ...p })
       }
       const mergedJson = { ...draftJson, panels }
-      const dr = await api.getDashboardData(dashboardId, undefined, undefined, mergedJson as DashboardJSON)
+      const tr = getTimeRange()
+      const varMap = getVariableMap()
+      const dr = await api.getDashboardData(dashboardId, tr?.from, tr?.to, mergedJson as DashboardJSON, varMap)
       const pd = dr.panels_data?.find((d) => d.panel_id === panel.id)
       if (pd) {
         setLiveData(pd.target || [])
@@ -174,6 +401,41 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
       }
     } catch (e: any) {
       alert('查询失败: ' + (e.message || '未知错误'))
+    } finally {
+      setQueryLoading(false)
+    }
+  }
+
+  // 刷新预览数据（带指定变量列表）
+  const handleRefreshPreviewWithVars = async (vars: VariableRes[]) => {
+    if (!draftJson) return
+    setQueryLoading(true)
+    try {
+      const panels: any[] = (draftJson.panels || []).map((dp: any) =>
+        dp.id === p.id ? { ...p } : dp
+      )
+      if (!panels.find((dp: any) => dp.id === p.id)) {
+        panels.push({ ...p })
+      }
+      const mergedJson = { ...draftJson, panels }
+      const tr = getTimeRange()
+      const varMap: Record<string, string | string[]> = {}
+      vars.forEach((v) => {
+        if (v.current && (v.current as any).value) {
+          varMap[v.name] = (v.current as any).value
+        } else if (v.default) {
+          varMap[v.name] = v.default
+        }
+      })
+      if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
+      const dr = await api.getDashboardData(dashboardId, tr?.from, tr?.to, mergedJson as DashboardJSON, varMap)
+      const pd = dr.panels_data?.find((d) => d.panel_id === panel.id)
+      if (pd) {
+        setLiveData(pd.target || [])
+        setLiveColumns(pd.columns || [])
+      }
+    } catch (e: any) {
+      // 静默失败
     } finally {
       setQueryLoading(false)
     }
@@ -253,6 +515,154 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
           </div>
         </div>
         <div className="pe-toolbar-right">
+          {/* 时间范围选择器 */}
+          <div style={{ position: 'relative', marginRight: 12 }}>
+            <button
+              className="pe-toolbar-btn time-picker-button"
+              onClick={() => setTimePickerOpen(!timePickerOpen)}
+              style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+            >
+              <span>🕐</span>
+              <span>{getTimeRangeDisplay()}</span>
+              <span style={{ fontSize: 10 }}>▼</span>
+            </button>
+            {timePickerOpen && (
+              <div
+                className="time-picker-dropdown"
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  right: 0,
+                  marginTop: 4,
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 6,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  zIndex: 1000,
+                  minWidth: 200,
+                  padding: 8,
+                }}
+              >
+                {/* 快速选择 */}
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, fontWeight: 500 }}>快速选择</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                  {[
+                    { key: '5m', label: '最近5分钟' },
+                    { key: '30m', label: '最近30分钟' },
+                    { key: '1h', label: '最近1小时' },
+                    { key: '6h', label: '最近6小时' },
+                    { key: '12h', label: '最近12小时' },
+                    { key: '24h', label: '最近24小时' },
+                    { key: '2d', label: '最近2天' },
+                    { key: '7d', label: '最近7天' },
+                    { key: '30d', label: '最近30天' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.key}
+                      onClick={() => handleTimePresetSelect(opt.key as TimePreset)}
+                      style={{
+                        padding: '6px 8px',
+                        fontSize: 11,
+                        background: timePreset === opt.key ? 'var(--primary)' : 'transparent',
+                        color: timePreset === opt.key ? '#fff' : 'var(--text-primary)',
+                        border: 'none',
+                        borderRadius: 4,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 分隔线 */}
+                <div style={{ height: 1, background: 'var(--border-color)', margin: '8px 0' }} />
+
+                {/* 绝对时间 */}
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, fontWeight: 500 }}>绝对时间</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                  {[
+                    { key: 'today', label: '今天' },
+                    { key: 'yesterday', label: '昨天' },
+                    { key: 'day_before_yesterday', label: '前天' },
+                    { key: 'last_week_today', label: '上周今天' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.key}
+                      onClick={() => handleTimePresetSelect(opt.key as TimePreset)}
+                      style={{
+                        padding: '6px 8px',
+                        fontSize: 11,
+                        background: timePreset === opt.key ? 'var(--primary)' : 'transparent',
+                        color: timePreset === opt.key ? '#fff' : 'var(--text-primary)',
+                        border: 'none',
+                        borderRadius: 4,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 分隔线 */}
+                <div style={{ height: 1, background: 'var(--border-color)', margin: '8px 0' }} />
+
+                {/* 自定义 */}
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, fontWeight: 500 }}>自定义范围</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      type="datetime-local"
+                      value={draftCustomFrom}
+                      onChange={(e) => setDraftCustomFrom(e.target.value)}
+                      style={{
+                        fontSize: 10,
+                        padding: '4px 6px',
+                        width: 140,
+                        background: 'var(--bg-input)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 4,
+                      }}
+                    />
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>至</span>
+                    <input
+                      type="datetime-local"
+                      value={draftCustomTo}
+                      onChange={(e) => setDraftCustomTo(e.target.value)}
+                      style={{
+                        fontSize: 10,
+                        padding: '4px 6px',
+                        width: 140,
+                        background: 'var(--bg-input)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 4,
+                      }}
+                    />
+                  </div>
+                  <button
+                    onClick={handleApplyCustomTime}
+                    disabled={!draftCustomFrom || !draftCustomTo}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: 10,
+                      background: draftCustomFrom && draftCustomTo ? 'var(--primary)' : 'var(--bg-input)',
+                      color: draftCustomFrom && draftCustomTo ? '#fff' : 'var(--text-muted)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 4,
+                      cursor: draftCustomFrom && draftCustomTo ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    应用时间范围
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
           {hasUnsaved && (
             <button className="pe-toolbar-btn pe-btn-discard" onClick={handleDiscard} title="丢弃更改">
               丢弃
@@ -270,6 +680,14 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
           </button>
         </div>
       </div>
+
+      {/* ── 变量选择器 ── */}
+      {variables.length > 0 && (
+        <VariableSelector
+          variables={variables}
+          onChange={handleVariableChange}
+        />
+      )}
 
       {/* ── 主体区域：左预览 + 右侧边栏 ── */}
       <div className="pe-body">
@@ -337,6 +755,64 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                       ))}
                     </select>
                   </div>
+                </Section>
+
+                <Section title="可用变量" defaultOpen={false}>
+                  {/* 系统内置变量 */}
+                  <div style={{ marginBottom: 12 }}>
+                    <div className="pe-label-sm" style={{ marginBottom: 4 }}>系统内置变量（时间范围）</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__from</code>
+                        <span style={{ color: 'var(--text-muted)' }}>开始时间（ISO格式，自动加引号）</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__to</code>
+                        <span style={{ color: 'var(--text-muted)' }}>结束时间（ISO格式，自动加引号）</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__fromUnix</code>
+                        <span style={{ color: 'var(--text-muted)' }}>开始时间（Unix秒，数字）</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__toUnix</code>
+                        <span style={{ color: 'var(--text-muted)' }}>结束时间（Unix秒，数字）</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__fromMs</code>
+                        <span style={{ color: 'var(--text-muted)' }}>开始时间（毫秒，数字）</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__toMs</code>
+                        <span style={{ color: 'var(--text-muted)' }}>结束时间（毫秒，数字）</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__timeFilter(column)</code>
+                        <span style={{ color: 'var(--text-muted)' }}>时间过滤宏</span>
+                      </div>
+                    </div>
+                    <div className="pe-hint-text" style={{ marginTop: 4 }}>
+                      示例：WHERE date &gt; $__from（自动替换为 WHERE date &gt; '2026-06-21T10:00:00Z'）
+                    </div>
+                  </div>
+                  {/* 用户自定义变量 */}
+                  {variables.length > 0 && (
+                    <div>
+                      <div className="pe-label-sm" style={{ marginBottom: 4 }}>仪表盘变量</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11 }}>
+                        {variables.map((v) => (
+                          <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>${v.name}</code>
+                            <span style={{ color: 'var(--text-muted)' }}>{v.label || v.name}</span>
+                            {v.multi && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>(多选)</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {variables.length === 0 && (
+                    <div className="pe-hint-text">暂无自定义变量，可在仪表盘设置中添加</div>
+                  )}
                 </Section>
 
                 <Section title="SQL 查询" defaultOpen={true} badge={p.targets.length > 1 ? `${p.targets.length}` : undefined}>
@@ -407,6 +883,8 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                         dashboardId={dashboardId}
                         rawSql={target.rawSql || ''}
                         variables={variables}
+                        from={getTimeRange()?.from}
+                        to={getTimeRange()?.to}
                       />
                     </div>
                   ))}
@@ -451,6 +929,32 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                     {currentChartInfo?.hint}
                   </div>
                 </Section>
+
+                {p.type === 'bar' && (
+                  <Section title="柱状图方向" defaultOpen={true}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        className={`pe-chart-type-card ${(p.options?.barOrientation || 'vertical') === 'vertical' ? 'active' : ''}`}
+                        onClick={() => update({ options: { ...p.options, barOrientation: 'vertical' } })}
+                        style={{ flex: 1, padding: '8px 12px' }}
+                      >
+                        <span style={{ fontSize: 18 }}>▐</span>
+                        <span style={{ fontSize: 12, marginLeft: 8 }}>纵向柱状图</span>
+                      </button>
+                      <button
+                        className={`pe-chart-type-card ${(p.options?.barOrientation || 'vertical') === 'horizontal' ? 'active' : ''}`}
+                        onClick={() => update({ options: { ...p.options, barOrientation: 'horizontal' } })}
+                        style={{ flex: 1, padding: '8px 12px' }}
+                      >
+                        <span style={{ fontSize: 18 }}>▬</span>
+                        <span style={{ fontSize: 12, marginLeft: 8 }}>横向柱状图</span>
+                      </button>
+                    </div>
+                    <div className="pe-hint-text" style={{ marginTop: 4, marginLeft: 0 }}>
+                      纵向：分类在X轴，数值在Y轴。横向：分类在Y轴，数值在X轴。
+                    </div>
+                  </Section>
+                )}
 
                 <Section title="布局" defaultOpen={false}>
                   <div className="pe-grid-fields">
@@ -715,6 +1219,154 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                     </div>
                   </Section>
                 )}
+
+                {/* Data Links 配置 */}
+                <Section title="Data Links" defaultOpen={false}>
+                  <p className="pe-section-desc" style={{ marginBottom: 12 }}>
+                    配置字段链接，表格中该字段会显示为超链接，点击可跳转。
+                  </p>
+                  {/* 可用变量提示 */}
+                  <div className="pe-hint-block" style={{ marginBottom: 12 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 6 }}>可用变量：</div>
+                    <div style={{ fontSize: 11, lineHeight: 1.6 }}>
+                      <div><code style={{ background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 3 }}>${"{"}__value{"}"}</code> - 当前字段的值</div>
+                      <div><code style={{ background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 3 }}>${"{"}__field.name{"}"}</code> - 当前字段名</div>
+                      <div><code style={{ background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 3 }}>${"{"}__row.field{"}"}</code> - 当前行其他字段的值（如 ${"{"}__row.id{"}"}）</div>
+                    </div>
+                  </div>
+                  {/* 链接列表 */}
+                  {((p.dataLinks || []) as DataLinkDef[]).map((link, idx) => (
+                    <div key={idx} style={{
+                      padding: '8px 10px',
+                      background: 'var(--bg-input)',
+                      borderRadius: 6,
+                      marginBottom: 8,
+                    }}>
+                      {/* 字段选择 */}
+                      <div style={{ marginBottom: 6 }}>
+                        <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>目标字段</label>
+                        <select
+                          value={link.field || ''}
+                          onChange={(e) => {
+                            const links = [...(p.dataLinks || [])]
+                            links[idx] = { ...links[idx], field: e.target.value }
+                            update({ dataLinks: links })
+                          }}
+                          style={{
+                            width: '100%',
+                            fontSize: 12,
+                            padding: '4px 8px',
+                            background: 'var(--bg-card)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 4,
+                          }}
+                        >
+                          <option value="">选择字段</option>
+                          {liveColumns.map((col) => (
+                            <option key={col} value={col}>{col}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {/* 标题和打开方式 */}
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                        <input
+                          value={link.title}
+                          onChange={(e) => {
+                            const links = [...(p.dataLinks || [])]
+                            links[idx] = { ...links[idx], title: e.target.value }
+                            update({ dataLinks: links })
+                          }}
+                          placeholder="链接标题（可选，默认显示字段值）"
+                          style={{
+                            flex: 1,
+                            fontSize: 12,
+                            padding: '4px 8px',
+                            background: 'var(--bg-card)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 4,
+                          }}
+                        />
+                        <select
+                          value={link.target || '_blank'}
+                          onChange={(e) => {
+                            const links = [...(p.dataLinks || [])]
+                            links[idx] = { ...links[idx], target: e.target.value as '_blank' | '_self' }
+                            update({ dataLinks: links })
+                          }}
+                          style={{
+                            fontSize: 11,
+                            padding: '4px 6px',
+                            background: 'var(--bg-card)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 4,
+                          }}
+                        >
+                          <option value="_blank">新标签页</option>
+                          <option value="_self">当前页</option>
+                        </select>
+                        <button
+                          onClick={() => {
+                            const links = (p.dataLinks || []).filter((_: any, i: number) => i !== idx)
+                            update({ dataLinks: links })
+                          }}
+                          title="删除链接"
+                          style={{
+                            fontSize: 11,
+                            padding: '4px 8px',
+                            background: 'transparent',
+                            color: 'var(--text-muted)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {/* URL */}
+                      <input
+                        value={link.url}
+                        onChange={(e) => {
+                          const links = [...(p.dataLinks || [])]
+                          links[idx] = { ...links[idx], url: e.target.value }
+                          update({ dataLinks: links })
+                        }}
+                        placeholder="URL（如 https://example.com?id=${__value}）"
+                        style={{
+                          width: '100%',
+                          fontSize: 11,
+                          padding: '4px 8px',
+                          background: 'var(--bg-card)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: 4,
+                        }}
+                      />
+                    </div>
+                  ))}
+                  {/* 添加链接按钮 */}
+                  <button
+                    onClick={() => {
+                      const links = [...(p.dataLinks || []), { field: '', title: '', url: '', target: '_blank' as '_blank' }]
+                      update({ dataLinks: links })
+                    }}
+                    style={{
+                      fontSize: 11,
+                      padding: '6px 12px',
+                      background: 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      border: '1px dashed var(--border-color)',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      width: '100%',
+                    }}
+                  >
+                    + 添加 Data Link
+                  </button>
+                </Section>
               </>
             )}
 

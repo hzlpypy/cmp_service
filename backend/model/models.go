@@ -285,3 +285,25 @@ type Variable struct {
 
 // TableName 指定变量表名。
 func (Variable) TableName() string { return "variables" }
+
+// DashboardVersion 仪表盘版本历史表，存储仪表盘的版本快照。
+// 每次保存仪表盘时自动创建新版本，支持版本对比和回滚。
+// 对应数据库表：dashboard_versions
+type DashboardVersion struct {
+	Base
+	// DashboardID 所属仪表盘ID（外键关联 dashboards 表）
+	DashboardID string `gorm:"column:dashboard_id;type:varchar(19);not null;index" json:"dashboard_id"`
+	// Version 版本号（从1开始递增）
+	Version int `gorm:"type:int;not null" json:"version"`
+	// Title 该版本的仪表盘标题
+	Title string `gorm:"type:varchar(256);not null" json:"title"`
+	// DashboardJSON 该版本的仪表盘完整JSON定义
+	DashboardJSON JSONMap `gorm:"column:dashboard_json;type:json" json:"dashboard_json"`
+	// Message 版本说明（可选）
+	Message string `gorm:"type:varchar(512);default:''" json:"message"`
+	// CreatedBy 创建者（预留字段）
+	CreatedBy string `gorm:"column:created_by;type:varchar(64);default:''" json:"created_by"`
+}
+
+// TableName 指定版本表名。
+func (DashboardVersion) TableName() string { return "dashboard_versions" }
