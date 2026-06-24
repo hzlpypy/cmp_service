@@ -431,6 +431,8 @@ export interface VersionBriefRes {
   message: string
   created_by: string
   created_at: string
+  /** 是否为当前生效版本 */
+  is_current?: boolean
 }
 
 export interface VersionRes {

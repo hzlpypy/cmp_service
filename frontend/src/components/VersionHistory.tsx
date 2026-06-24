@@ -227,10 +227,10 @@ export default function VersionHistory({ dashboardId, onClose, onRestore }: Vers
                       key={v.id}
                       style={{
                         padding: '10px 12px',
-                        border: `2px solid ${isSelectedForCompare ? 'var(--primary)' : 'var(--border-color)'}`,
+                        border: `2px solid ${isSelectedForCompare ? 'var(--primary)' : v.is_current ? 'var(--primary)' : 'var(--border-color)'}`,
                         borderRadius: 6,
                         cursor: 'pointer',
-                        background: isSelectedForView ? 'var(--bg-input)' : isSelectedForCompare ? 'rgba(var(--primary-rgb), 0.1)' : 'transparent',
+                        background: isSelectedForView ? 'var(--bg-input)' : isSelectedForCompare ? 'rgba(var(--primary-rgb), 0.1)' : v.is_current ? 'rgba(var(--primary-rgb), 0.05)' : 'transparent',
                       }}
                       onClick={() => handleViewVersion(v.version)}
                     >
@@ -244,6 +244,12 @@ export default function VersionHistory({ dashboardId, onClose, onRestore }: Vers
                             title="选择用于对比"
                           />
                           <span style={{ fontWeight: 500 }}>V{v.version}</span>
+                          {v.is_current && (
+                            <span style={{
+                              fontSize: 10, padding: '1px 6px', borderRadius: 10,
+                              background: 'var(--primary)', color: '#fff', fontWeight: 500,
+                            }}>当前</span>
+                          )}
                         </div>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                           {new Date(v.created_at).toLocaleString('zh-CN')}

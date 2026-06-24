@@ -268,6 +268,8 @@ type VersionBriefRes struct {
 	CreatedBy string `json:"created_by"`
 	// CreatedAt 创建时间
 	CreatedAt string `json:"created_at"`
+	// IsCurrent 是否为当前生效版本
+	IsCurrent bool `json:"is_current"`
 }
 
 // VersionDiffRes 版本差异对比响应。

@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
+import type { ReactNode } from 'react'
 import * as api from '../api'
 import type { FolderRes } from '../api'
 import { sampleDashboards } from '../mock/dashboardSamples'
 
-interface BrowsePageProps {
-  onOpenDashboard: (id: string) => void
+/** 将标题转换为 URL slug */
+function titleToSlug(title: string): string {
+  return encodeURIComponent(title.replace(/\s+/g, '-').toLowerCase())
 }
 
-const SVG_ICONS: Record<string, JSX.Element> = {
+const SVG_ICONS: Record<string, ReactNode> = {
   folder: (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="#fc9908">
       <path d="M1.5 3a.5.5 0 0 1 .5-.5h4.25l1.5 1.5H14a.5.5 0 0 1 .5.5v.5H1.5V3z" />
@@ -23,7 +26,8 @@ const SVG_ICONS: Record<string, JSX.Element> = {
   ),
 }
 
-export default function BrowsePage({ onOpenDashboard }: BrowsePageProps) {
+export default function BrowsePage() {
+  const navigate = useNavigate()
   const [folders, setFolders] = useState<FolderRes[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
@@ -94,7 +98,8 @@ export default function BrowsePage({ onOpenDashboard }: BrowsePageProps) {
       setNewDashboardTitle('')
       setShowNewDashboard(false)
       loadFolders()
-      onOpenDashboard(db.id)
+      // 跳转到新创建的仪表盘详情页
+      navigate(`/d/${db.id}/${titleToSlug(db.title)}`)
     } catch (e: any) { alert('创建仪表板失败: ' + e.message) }
   }
 
@@ -252,7 +257,7 @@ export default function BrowsePage({ onOpenDashboard }: BrowsePageProps) {
           ) : (
             <div className="dashboard-card-grid">
               {filteredDashboards.map((db) => (
-                <div key={db.id} className="dashboard-card" onClick={() => onOpenDashboard(db.id)}>
+                <Link key={db.id} to={`/d/${db.id}/${titleToSlug(db.title)}`} className="dashboard-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                   <div className="dashboard-card-top">
                     <div className="dashboard-card-icon">{SVG_ICONS.dash}</div>
                     <div className="dashboard-card-info">
@@ -260,7 +265,7 @@ export default function BrowsePage({ onOpenDashboard }: BrowsePageProps) {
                       <div className="dashboard-card-folder">{db.folderTitle}</div>
                     </div>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}
@@ -295,7 +300,7 @@ export default function BrowsePage({ onOpenDashboard }: BrowsePageProps) {
                 {dashboards.length > 0 ? (
                   <div className="dashboard-card-grid">
                     {dashboards.map((db) => (
-                      <div key={db.id} className="dashboard-card" onClick={() => onOpenDashboard(db.id)}>
+                      <Link key={db.id} to={`/d/${db.id}/${titleToSlug(db.title)}`} className="dashboard-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                         <div className="dashboard-card-top">
                           <div className="dashboard-card-icon">{SVG_ICONS.dash}</div>
                           <div className="dashboard-card-info">
@@ -303,10 +308,10 @@ export default function BrowsePage({ onOpenDashboard }: BrowsePageProps) {
                           </div>
                         </div>
                         <div className="dashboard-card-actions-inline" style={{ marginTop: 8, display: 'flex', gap: 4 }}>
-                          <button className="btn-sm" onClick={(e) => { e.stopPropagation(); handleEditDashboardJson(db.id) }} style={{ fontSize: 10 }}>编辑JSON</button>
-                          <button className="btn-sm" onClick={(e) => { e.stopPropagation(); handleDeleteDashboard(db.id) }} style={{ fontSize: 10, color: 'var(--red)', borderColor: 'transparent' }}>删除</button>
+                          <button className="btn-sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleEditDashboardJson(db.id) }} style={{ fontSize: 10 }}>编辑JSON</button>
+                          <button className="btn-sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleDeleteDashboard(db.id) }} style={{ fontSize: 10, color: 'var(--red)', borderColor: 'transparent' }}>删除</button>
                         </div>
-                      </div>
+                      </Link>
                     ))}
                   </div>
                 ) : (
