@@ -12,9 +12,24 @@ function titleToSlug(title: string): string {
 
 const SVG_ICONS: Record<string, ReactNode> = {
   folder: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="#fc9908">
-      <path d="M1.5 3a.5.5 0 0 1 .5-.5h4.25l1.5 1.5H14a.5.5 0 0 1 .5.5v.5H1.5V3z" />
-      <path d="M1.5 5h13v7.5a.5.5 0 0 1-.5.5H2a.5.5 0 0 1-.5-.5V5z" opacity="0.6" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e53935" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </svg>
+  ),
+  folderOpen: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e53935" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 19a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v1" />
+      <path d="M3 10h18l-2 9H5l-2-9z" fill="rgba(229, 57, 53, 0.1)" />
+    </svg>
+  ),
+  arrowDown: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  ),
+  arrowRight: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 18 15 12 9 6" />
     </svg>
   ),
   dash: (
@@ -22,6 +37,20 @@ const SVG_ICONS: Record<string, ReactNode> = {
       <rect x="1" y="1" width="5" height="14" rx="1" />
       <rect x="8" y="6" width="7" height="9" rx="1" />
       <rect x="8" y="2" width="3" height="3" rx="0.5" />
+    </svg>
+  ),
+  edit: (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+  ),
+  delete: (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
     </svg>
   ),
 }
@@ -143,10 +172,15 @@ export default function BrowsePage() {
   return (
     <div className="browse-page">
       <div className="browse-header">
-        <h1 className="browse-title">仪表板</h1>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <h1 className="browse-title">仪表板</h1>
           <div className="search-wrap">
-            <span className="search-icon">&#x1F50D;</span>
+            <span className="search-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <path d="M21 21l-4.35-4.35" />
+              </svg>
+            </span>
             <input
               className="browse-search"
               placeholder="按名称搜索仪表板..."
@@ -154,8 +188,10 @@ export default function BrowsePage() {
               onChange={(e) => setSearchText(e.target.value)}
             />
           </div>
-          <button className="btn-sm" onClick={() => setShowNewFolder(true)}>+ 新建文件夹</button>
-          <button className="btn-sm" onClick={() => setShowNewDashboard(true)}>+ 新建仪表板</button>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn-sm btn-danger" onClick={() => setShowNewFolder(true)}>+ 新建文件夹</button>
+          <button className="btn-sm btn-danger" onClick={() => setShowNewDashboard(true)}>+ 新建仪表板</button>
         </div>
       </div>
 
@@ -279,8 +315,8 @@ export default function BrowsePage() {
         return (
           <div key={folder.id} className="folder-group">
             <div className="folder-header" onClick={() => toggleFolder(folder.id)}>
-              <span className="folder-arrow">{isExpanded ? '▼' : '▶'}</span>
-              <span className="folder-icon">{SVG_ICONS.folder}</span>
+              <span className="folder-arrow">{isExpanded ? SVG_ICONS.arrowDown : SVG_ICONS.arrowRight}</span>
+              <span className="folder-icon">{isExpanded ? SVG_ICONS.folderOpen : SVG_ICONS.folder}</span>
               <span className="folder-title">{folder.title}</span>
               <span className="folder-count">{dashboards.length} 个仪表板</span>
               <div className="folder-actions">
@@ -307,9 +343,9 @@ export default function BrowsePage() {
                             <div className="dashboard-card-name">{db.title}</div>
                           </div>
                         </div>
-                        <div className="dashboard-card-actions-inline" style={{ marginTop: 8, display: 'flex', gap: 4 }}>
-                          <button className="btn-sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleEditDashboardJson(db.id) }} style={{ fontSize: 10 }}>编辑JSON</button>
-                          <button className="btn-sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleDeleteDashboard(db.id) }} style={{ fontSize: 10, color: 'var(--red)', borderColor: 'transparent' }}>删除</button>
+                        <div className="dashboard-card-actions-inline">
+                          <button className="btn-sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleEditDashboardJson(db.id) }} style={{ fontSize: 10 }}>{SVG_ICONS.edit} 编辑JSON</button>
+                          <button className="btn-sm btn-delete" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleDeleteDashboard(db.id) }} style={{ fontSize: 10 }}>{SVG_ICONS.delete} 删除</button>
                         </div>
                       </Link>
                     ))}

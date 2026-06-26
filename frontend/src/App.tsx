@@ -102,10 +102,7 @@ function App() {
           className="sidebar-logo"
           onClick={() => { setCurrentPage('browse') }}
         >
-          <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
-            <rect width="28" height="28" rx="6" fill="#fc9908" />
-            <path d="M8 13.5l5 5L20 9" stroke="#111" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <span className="sidebar-title">报表管理平台</span>
         </div>
         <nav className="sidebar-nav">
           <div
