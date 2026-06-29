@@ -242,6 +242,7 @@ type Snapshot struct {
 	Name          string    `gorm:"type:varchar(256);default:''" json:"name"`
 	DashboardJSON JSONMap   `gorm:"column:dashboard_json;type:json" json:"dashboard_json"`
 	PanelsData    JSONArray  `gorm:"column:panels_data;type:json" json:"panels_data"`
+	AIInsights    JSONMap   `gorm:"column:ai_insights;type:json" json:"ai_insights"` // AI 洞察内容：score, conclusion, risks, evaluation, plan
 	ExpiresAt     *time.Time `gorm:"column:expires_at" json:"expires_at,omitempty"`
 }
 
