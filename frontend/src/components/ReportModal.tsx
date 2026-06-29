@@ -13,8 +13,6 @@ interface ReportModalProps {
 
 /** AI Agent WebSocket 地址 */
 const WS_URL = 'ws://127.0.0.1:8764'
-/** 流式沉默超时：超过此时间无新消息则认为报告完成 */
-const SILENCE_TIMEOUT_MS = 8000
 
 export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary, onClose }: ReportModalProps) {
   const [loading, setLoading] = useState(true)
@@ -23,19 +21,14 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
   const wsRef = useRef<WebSocket | null>(null)
   const reportRef = useRef('')
   const startedRef = useRef(false)
-  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const contentRef = useRef<HTMLDivElement | null>(null)
 
-  /** 重置沉默计时器：每次收到消息都重新计时 */
-  const resetSilenceTimer = useCallback(() => {
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-    silenceTimerRef.current = setTimeout(() => {
-      // 超过静默时间仍无新消息，认为报告生成完成
-      if (reportRef.current) {
-        reportCache.set(dashboardId, reportRef.current)
-        setLoading(false)
-      }
-    }, SILENCE_TIMEOUT_MS)
-  }, [dashboardId])
+  /** 自动滚动到底部 */
+  const scrollToBottom = useCallback(() => {
+    if (contentRef.current) {
+      contentRef.current.scrollTop = contentRef.current.scrollHeight
+    }
+  }, [])
 
   useEffect(() => {
     // 防止 React StrictMode 双重调用
@@ -54,7 +47,6 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
     generateReport()
 
     return () => {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.close()
       }
@@ -111,17 +103,25 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
           // 忽略心跳
           if (data.type === 'heartbeat') return
 
+          // 检测 end 消息：代表已全部完成，一次性展示报告
+          if (data.type === 'end') {
+            if (reportRef.current) {
+              reportCache.set(dashboardId, reportRef.current)
+              setReport(reportRef.current)
+              setLoading(false)
+              scrollToBottom()
+            }
+            return
+          }
+
           const chunk: string = data.message || ''
           const category: string = data.msg_category || ''
 
           // 只收集 model 类型的内容
           if (category !== 'model' || !chunk) return
 
-          // 有任何 model 消息都重置沉默计时器（agent 仍在工作）
-          resetSilenceTimer()
-
+          // 只累积数据，不实时显示（block 模式：接收完后一次性展示）
           reportRef.current += chunk
-          setReport(reportRef.current)
         } catch {
           // 非 JSON，忽略
         }
@@ -135,11 +135,12 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
       }
 
       ws.onclose = () => {
-        // 关闭沉默计时器
-        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
         if (reportRef.current) {
+          // 接收完成，一次性显示完整报告
           reportCache.set(dashboardId, reportRef.current)
+          setReport(reportRef.current)
           setLoading(false)
+          scrollToBottom()
         } else if (!error) {
           setLoading(false)
           setError('连接已关闭，未收到报告内容。请检查 AI Agent 是否正常运行。')
@@ -173,7 +174,6 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
   }
 
   const handleRetry = () => {
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.close()
     }
@@ -326,7 +326,7 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
       </div>
 
       {/* 内容区 */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '24px 48px' }}>
+      <div ref={contentRef} style={{ flex: 1, overflow: 'auto', padding: '24px 48px' }}>
         {error && !report ? (
           <div style={{ textAlign: 'center', padding: 80 }}>
             <div style={{ color: 'var(--danger)', marginBottom: 16 }}>{error}</div>
@@ -334,21 +334,6 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
           </div>
         ) : (
           <>
-            {/* 加载中：纯转圈 */}
-            {loading && !report && (
-              <div style={{ textAlign: 'center', padding: 80 }}>
-                <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 16 }}>
-                  正在生成分析报告...
-                </div>
-                <div style={{
-                  width: 40, height: 40, border: '3px solid var(--border-color)',
-                  borderTopColor: 'var(--primary)', borderRadius: '50%',
-                  animation: 'spin 1s linear infinite', margin: '0 auto',
-                }} />
-                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-              </div>
-            )}
-
             {/* 报告内容 */}
             {report && (
               <div style={{
@@ -359,19 +344,26 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
               </div>
             )}
 
-            {/* 生成中的指示器 */}
-            {loading && report && (
+            {/* AI生成中指示器：loading 时始终显示 */}
+            {loading && (
               <div style={{
-                textAlign: 'center', padding: '16px 0', color: 'var(--text-muted)', fontSize: 12,
+                textAlign: 'center', padding: report ? '16px 0' : 80, color: 'var(--text-muted)', fontSize: 12,
                 maxWidth: 900, margin: '0 auto',
               }}>
+                {!report && (
+                  <div style={{
+                    width: 40, height: 40, border: '3px solid var(--border-color)',
+                    borderTopColor: 'var(--primary)', borderRadius: '50%',
+                    animation: 'spin 1s linear infinite', margin: '0 auto 16px',
+                  }} />
+                )}
                 <span style={{
                   display: 'inline-block', width: 8, height: 8,
                   background: 'var(--primary)', borderRadius: '50%',
                   animation: 'pulse 1s ease-in-out infinite', marginRight: 8,
                 }} />
                 AI 正在生成中...
-                <style>{`@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }`}</style>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } } @keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }`}</style>
               </div>
             )}
           </>

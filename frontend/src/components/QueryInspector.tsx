@@ -4,13 +4,14 @@ import type { VariableRes } from '../api'
 
 interface QueryInspectorProps {
   dashboardId: string
+  datasourceId?: string
   rawSql: string
   variables: VariableRes[]
   from?: string
   to?: string
 }
 
-export default function QueryInspector({ dashboardId, rawSql, variables, from, to }: QueryInspectorProps) {
+export default function QueryInspector({ dashboardId, datasourceId, rawSql, variables, from, to }: QueryInspectorProps) {
   const [result, setResult] = useState<api.QueryInspectRes | null>(null)
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -33,6 +34,7 @@ export default function QueryInspector({ dashboardId, rawSql, variables, from, t
       const res = await api.queryInspect({
         raw_sql: rawSql,
         dashboard_id: dashboardId,
+        datasource_id: datasourceId,
         variables: varMap,
         from,
         to,
