@@ -24,6 +24,7 @@ type Interface interface {
 	Get(ctx *gin.Context, key string) (*SnapshotRes, error)
 	List(ctx *gin.Context, dashboardID, panelID string) ([]*SnapshotRes, error)
 	Delete(ctx *gin.Context, key string) error
+	Update(ctx *gin.Context, req *UpdateReq) (*SnapshotRes, error)
 }
 
 // NewServer creates a snapshot service instance.
@@ -33,24 +34,33 @@ func NewServer(db *gorm.DB, log *logrus.Logger) Interface {
 
 // CreateReq snapshot create request.
 type CreateReq struct {
-	DashboardID   string                 `json:"dashboard_id" binding:"required"`
-	PanelID       string                 `json:"panel_id"`
-	Name          string                 `json:"name"`
-	DashboardJSON map[string]interface{} `json:"dashboard_json"`
+	DashboardID   string                   `json:"dashboard_id" binding:"required"`
+	PanelID       string                   `json:"panel_id"`
+	Name          string                   `json:"name"`
+	DashboardJSON map[string]interface{}   `json:"dashboard_json"`
 	PanelsData    []map[string]interface{} `json:"panels_data"`
+	AIInsights    map[string]interface{}   `json:"ai_insights"` // AI 洞察内容
+}
+
+// UpdateReq snapshot update request.
+type UpdateReq struct {
+	Key        string                 `json:"snapshot_key" binding:"required"`
+	Name       string                 `json:"name"`
+	AIInsights map[string]interface{} `json:"ai_insights"` // AI 洞察内容
 }
 
 // SnapshotRes snapshot response.
 type SnapshotRes struct {
-	ID            string                 `json:"id"`
-	DashboardID   string                 `json:"dashboard_id"`
-	PanelID       string                 `json:"panel_id"`
-	Key           string                 `json:"snapshot_key"`
-	Name          string                 `json:"name"`
-	DashboardJSON map[string]interface{} `json:"dashboard_json"`
+	ID            string                   `json:"id"`
+	DashboardID   string                   `json:"dashboard_id"`
+	PanelID       string                   `json:"panel_id"`
+	Key           string                   `json:"snapshot_key"`
+	Name          string                   `json:"name"`
+	DashboardJSON map[string]interface{}   `json:"dashboard_json"`
 	PanelsData    []map[string]interface{} `json:"panels_data,omitempty"`
-	CreatedAt     string                 `json:"created_at"`
-	ExpiresAt     string                 `json:"expires_at,omitempty"`
+	AIInsights    map[string]interface{}   `json:"ai_insights,omitempty"` // AI 洞察内容
+	CreatedAt     string                   `json:"created_at"`
+	ExpiresAt     string                   `json:"expires_at,omitempty"`
 }
 
 func generateKey() string {
@@ -69,6 +79,7 @@ func (s *Server) Create(ctx *gin.Context, req *CreateReq) (*SnapshotRes, error) 
 		Name:          req.Name,
 		DashboardJSON: req.DashboardJSON,
 		PanelsData:    req.PanelsData,
+		AIInsights:    req.AIInsights,
 	}
 	snap.ID = fmt.Sprintf("snap-%d", time.Now().UnixMilli())
 	if err := s.db.Create(&snap).Error; err != nil {
@@ -116,6 +127,25 @@ func (s *Server) Delete(ctx *gin.Context, key string) error {
 	return nil
 }
 
+// Update updates a snapshot (mainly for AI insights).
+func (s *Server) Update(ctx *gin.Context, req *UpdateReq) (*SnapshotRes, error) {
+	var snap model.Snapshot
+	if err := s.db.Where("snapshot_key = ? AND deleted_at IS NULL", req.Key).First(&snap).Error; err != nil {
+		return nil, fmt.Errorf("snapshot not found")
+	}
+	// 更新字段
+	if req.Name != "" {
+		snap.Name = req.Name
+	}
+	if req.AIInsights != nil {
+		snap.AIInsights = req.AIInsights
+	}
+	if err := s.db.Save(&snap).Error; err != nil {
+		return nil, fmt.Errorf("update snapshot failed: %v", err)
+	}
+	return toRes(&snap), nil
+}
+
 func toRes(m *model.Snapshot) *SnapshotRes {
 	r := &SnapshotRes{
 		ID:            m.ID,
@@ -125,6 +155,7 @@ func toRes(m *model.Snapshot) *SnapshotRes {
 		Name:          m.Name,
 		DashboardJSON: m.DashboardJSON,
 		PanelsData:    m.PanelsData,
+		AIInsights:    m.AIInsights,
 		CreatedAt:     m.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
 	}
 	return r

@@ -66,3 +66,18 @@ func (c *Controller) DeleteController(ctx *gin.Context) {
 	}
 	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true})
 }
+
+// UpdateController POST /api/v1/snapshots/update
+func (c *Controller) UpdateController(ctx *gin.Context) {
+	var req UpdateReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
+		return
+	}
+	resp, err := c.Update(ctx, &req)
+	if err != nil {
+		ctx.JSON(500, gin.H{"errorCode": "50000", "errorMessage": err.Error(), "success": false})
+		return
+	}
+	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
+}

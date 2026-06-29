@@ -283,6 +283,7 @@ export interface SnapshotRes {
   name: string
   dashboard_json: DashboardJSON
   panels_data?: PanelDataRes[]
+  ai_insights?: { score?: number; conclusion?: string; risks?: string[]; evaluation?: string; plan?: string }
   created_at: string
   expires_at?: string
 }
@@ -293,10 +294,21 @@ export interface SnapshotCreateReq {
   name?: string
   dashboard_json: DashboardJSON
   panels_data?: PanelDataRes[]
+  ai_insights?: { score?: number; conclusion?: string; risks?: string[]; evaluation?: string; plan?: string }
+}
+
+export interface SnapshotUpdateReq {
+  snapshot_key: string
+  name?: string
+  ai_insights?: { score?: number; conclusion?: string; risks?: string[]; evaluation?: string; plan?: string }
 }
 
 export async function createSnapshot(req: SnapshotCreateReq): Promise<SnapshotRes> {
   return request('/api/v1/snapshots/create', { method: 'POST', body: JSON.stringify(req) })
+}
+
+export async function updateSnapshot(req: SnapshotUpdateReq): Promise<SnapshotRes> {
+  return request('/api/v1/snapshots/update', { method: 'POST', body: JSON.stringify(req) })
 }
 
 export async function getSnapshot(key: string): Promise<SnapshotRes> {

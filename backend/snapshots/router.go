@@ -9,6 +9,7 @@ func RegisterSnapshotsRouter(e *gin.Engine, c *Controller) {
 		api.POST("/create", c.CreateController)
 		api.POST("/list", c.ListController)
 		api.POST("/delete", c.DeleteController)
+		api.POST("/update", c.UpdateController)
 	}
 	e.GET("/api/v1/snapshots/:key", c.GetController)
 }

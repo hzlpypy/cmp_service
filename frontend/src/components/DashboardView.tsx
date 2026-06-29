@@ -615,6 +615,8 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     return map
   }, [panels])
 
+  // 时间选择器时间范围计算
+
   const { dataMap, columnMap } = useMemo(() => {
     const dMap = new Map<string, MetricRow[][]>()
     const cMap = new Map<string, string[]>()
