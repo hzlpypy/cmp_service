@@ -97,13 +97,19 @@ function App() {
   return (
     <div className="app">
       {!isInSnapshot && !isInDashboard && (
-      <aside className="sidebar">
-        <div
-          className="sidebar-logo"
-          onClick={() => { setCurrentPage('browse') }}
-        >
-          <span className="sidebar-title">报表管理平台</span>
-        </div>
+        <header className="top-header">
+          <div
+            className="top-header-logo"
+            onClick={() => { setCurrentPage('browse') }}
+          >
+            <span className="top-header-title">报表管理平台</span>
+          </div>
+        </header>
+      )}
+
+      <div className="app-body">
+        {!isInSnapshot && !isInDashboard && (
+        <aside className="sidebar">
         <nav className="sidebar-nav">
           <div
             className={`nav-item ${currentPage === 'browse' ? 'active' : ''}`}
@@ -164,6 +170,7 @@ function App() {
             <Route path="/snapshot/:key" element={<SnapshotPageWrapper />} />
           </Routes>
         </main>
+      </div>
       </div>
     </div>
   )

@@ -295,7 +295,6 @@ export default function BrowsePage() {
               {filteredDashboards.map((db) => (
                 <Link key={db.id} to={`/d/${db.id}/${titleToSlug(db.title)}`} className="dashboard-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                   <div className="dashboard-card-top">
-                    <div className="dashboard-card-icon">{SVG_ICONS.dash}</div>
                     <div className="dashboard-card-info">
                       <div className="dashboard-card-name">{db.title}</div>
                       <div className="dashboard-card-folder">{db.folderTitle}</div>
@@ -338,7 +337,6 @@ export default function BrowsePage() {
                     {dashboards.map((db) => (
                       <Link key={db.id} to={`/d/${db.id}/${titleToSlug(db.title)}`} className="dashboard-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                         <div className="dashboard-card-top">
-                          <div className="dashboard-card-icon">{SVG_ICONS.dash}</div>
                           <div className="dashboard-card-info">
                             <div className="dashboard-card-name">{db.title}</div>
                           </div>
