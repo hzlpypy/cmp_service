@@ -52,20 +52,27 @@ body {
   border-bottom: 1px solid #eee;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   z-index: 100;
 }
 
 .top-header-logo {
   display: flex;
   align-items: center;
+  gap: 12px;
   cursor: pointer;
-  padding: 8px 20px;
+  padding: 8px 16px;
   transition: background 0.15s;
 }
 
 .top-header-logo:hover {
   background: rgba(229, 57, 53, 0.04);
+}
+
+.top-header-logo-img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
 }
 
 .top-header-title {

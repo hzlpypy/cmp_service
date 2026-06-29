@@ -10,6 +10,7 @@ import SettingsPage from './components/SettingsPage'
 import type { PanelDef, DatasourceRes, PanelDataRes } from './api'
 import { initTheme } from './themes'
 import './App.css'
+import logo from './assets/logo.png'
 
 type Page = 'browse' | 'snapshots' | 'datasources' | 'settings'
 
@@ -102,6 +103,7 @@ function App() {
             className="top-header-logo"
             onClick={() => { setCurrentPage('browse') }}
           >
+            <img src={logo} alt="Logo" className="top-header-logo-img" />
             <span className="top-header-title">报表管理平台</span>
           </div>
         </header>
