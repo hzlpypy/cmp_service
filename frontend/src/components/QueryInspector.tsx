@@ -1,17 +1,25 @@
 import { useState } from 'react'
 import * as api from '../api'
-import type { VariableRes } from '../api'
+import type { VariableRes, DatasourceRes } from '../api'
 
 interface QueryInspectorProps {
   dashboardId: string
   datasourceId?: string
-  rawSql: string
+  datasources: DatasourceRes[]
+  rawSql: string // MySQL数据源使用
+  httpPath?: string // HTTP数据源使用
+  httpMethod?: string
+  httpBody?: string
+  httpDataFormat?: string
+  httpDataPath?: string
   variables: VariableRes[]
   from?: string
   to?: string
 }
 
-export default function QueryInspector({ dashboardId, datasourceId, rawSql, variables, from, to }: QueryInspectorProps) {
+export default function QueryInspector({ 
+  dashboardId, datasourceId, datasources, rawSql, httpPath, httpMethod, httpBody, httpDataFormat, httpDataPath, variables, from, to 
+}: QueryInspectorProps) {
   const [result, setResult] = useState<api.QueryInspectRes | null>(null)
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -31,18 +39,35 @@ export default function QueryInspector({ dashboardId, datasourceId, rawSql, vari
       // 合并系统内置变量（$__from, $__to 等）
       if (from && to) Object.assign(varMap, api.getSystemVars(from, to))
 
-      const res = await api.queryInspect({
-        raw_sql: rawSql,
+      // 根据数据源类型发送不同的参数
+      const selectedDs = datasources.find(ds => ds.id === datasourceId)
+      let requestBody: any = {
         dashboard_id: dashboardId,
         datasource_id: datasourceId,
         variables: varMap,
         from,
         to,
-      })
+      }
+
+      if (selectedDs && selectedDs.type === 'http') {
+        // HTTP数据源 - 发送HTTP查询参数
+        requestBody.http_path = httpPath || ''
+        requestBody.http_method = httpMethod || 'GET'
+        requestBody.http_body = httpBody || ''
+        requestBody.http_data_format = httpDataFormat || 'json'
+        requestBody.http_data_path = httpDataPath || ''
+      } else {
+        // MySQL数据源 - 发送SQL参数
+        requestBody.raw_sql = rawSql
+      }
+
+      const res = await api.queryInspect(requestBody)
       setResult(res)
     } catch (e: any) {
       setResult({
-        processed_sql: rawSql,
+        processed_sql: selectedDs && selectedDs.type === 'http' 
+          ? (selectedDs.url + (httpPath || '')) 
+          : rawSql,
         columns: [],
         rows: [],
         row_count: 0,
@@ -53,6 +78,9 @@ export default function QueryInspector({ dashboardId, datasourceId, rawSql, vari
       setExpanded(true)
     }
   }
+
+  // 判断当前数据源类型
+  const selectedDs = datasources.find(ds => ds.id === datasourceId)
 
   return (
     <div className="query-inspector" style={{ marginTop: 12, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
@@ -81,10 +109,10 @@ export default function QueryInspector({ dashboardId, datasourceId, rawSql, vari
 
       {result && expanded && (
         <div className="inspect-result">
-          {/* 执行的 SQL */}
+          {/* 执行的查询 */}
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
-              实际执行的 SQL:
+              {selectedDs && selectedDs.type === 'http' ? '实际请求的 URL:' : '实际执行的 SQL:'}
             </div>
             <pre style={{
               background: 'var(--bg-input)',

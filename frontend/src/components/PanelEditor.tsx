@@ -172,6 +172,7 @@ export default function PanelEditor({ panel, datasources, dashboardId, draftJson
           <div className="form-group">
             <label>数据源</label>
             <select value={p.datasource_id || ''} onChange={(e) => update({ datasource_id: e.target.value || undefined, datasource: undefined } as any)}>
+              <option value="">请选择数据源</option>
               {datasources.map((ds) => (<option key={ds.id} value={ds.id}>{ds.name} ({ds.type === 'mysql' ? 'MySQL' : 'HTTP'})</option>))}
             </select>
           </div>
@@ -270,15 +271,110 @@ export default function PanelEditor({ panel, datasources, dashboardId, draftJson
                 </div>
               )}
 
-              <textarea
-                value={target.rawSql || ''}
-                onChange={(e) => updateTarget(ti, { rawSql: e.target.value })}
-                placeholder={'SELECT market, date, weekday FROM calendar LIMIT 100'}
-                style={{ width: '100%', minHeight: 80, fontFamily: 'monospace', fontSize: 12,
-                  background: '#1e1e2e', color: '#cdd6f4', border: '1px solid var(--border-color)',
-                  borderRadius: 4, padding: 10, resize: 'vertical', outline: 'none', lineHeight: 1.6 }}
-                spellCheck={false}
-              />
+              {/* 根据数据源类型显示不同的查询配置 */}
+              {(() => {
+                const selectedDs = datasources.find(ds => ds.id === p.datasource_id)
+                if (!p.datasource_id) {
+                  // 未选择数据源 - 提示选择
+                  return (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '20px', textAlign: 'center', background: 'var(--bg-input)', borderRadius: 4 }}>
+                      请先在上方选择数据源
+                    </div>
+                  )
+                } else if (!selectedDs || selectedDs.type === 'mysql') {
+                  // MySQL数据源 - 显示SQL输入框
+                  return (
+                    <>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>SQL 查询</div>
+                      <textarea
+                        value={target.rawSql || ''}
+                        onChange={(e) => updateTarget(ti, { rawSql: e.target.value })}
+                        placeholder={'SELECT market, date, weekday FROM calendar LIMIT 100'}
+                        style={{ width: '100%', minHeight: 80, fontFamily: 'monospace', fontSize: 12,
+                          background: '#1e1e2e', color: '#cdd6f4', border: '1px solid var(--border-color)',
+                          borderRadius: 4, padding: 10, resize: 'vertical', outline: 'none', lineHeight: 1.6 }}
+                        spellCheck={false}
+                      />
+                    </>
+                  )
+                } else if (selectedDs.type === 'http') {
+                  // HTTP数据源 - 显示HTTP配置表单
+                  return (
+                    <>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>HTTP API 查询</div>
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                        <div style={{ flex: 1 }}>
+                          <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 2 }}>API路径</label>
+                          <input
+                            value={target.http_path || ''}
+                            onChange={(e) => updateTarget(ti, { http_path: e.target.value })}
+                            placeholder="/api/v1/users"
+                            style={{ width: '100%', fontSize: 12, padding: '4px 8px' }}
+                          />
+                          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+                            最终URL: {selectedDs.url}{target.http_path || ''}
+                          </div>
+                        </div>
+                        <div style={{ flex: 0.3 }}>
+                          <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 2 }}>方法</label>
+                          <select
+                            value={target.http_method || 'GET'}
+                            onChange={(e) => updateTarget(ti, { http_method: e.target.value as any })}
+                            style={{ width: '100%', fontSize: 12, padding: '4px 8px' }}
+                          >
+                            <option value="GET">GET</option>
+                            <option value="POST">POST</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {target.http_method === 'POST' && (
+                        <div style={{ marginBottom: 6 }}>
+                          <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 2 }}>请求体</label>
+                          <textarea
+                            value={target.http_body || ''}
+                            onChange={(e) => updateTarget(ti, { http_body: e.target.value })}
+                            placeholder='{"key": "value"}'
+                            rows={2}
+                            style={{ width: '100%', fontFamily: 'monospace', fontSize: 12,
+                              background: '#1e1e2e', color: '#cdd6f4', border: '1px solid var(--border-color)',
+                              borderRadius: 4, padding: 8, resize: 'vertical', outline: 'none' }}
+                          />
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                        <div style={{ flex: 0.4 }}>
+                          <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 2 }}>数据格式</label>
+                          <select
+                            value={target.http_data_format || 'json'}
+                            onChange={(e) => updateTarget(ti, { http_data_format: e.target.value as any })}
+                            style={{ width: '100%', fontSize: 12, padding: '4px 8px' }}
+                          >
+                            <option value="json">JSON</option>
+                            <option value="xml">XML</option>
+                            <option value="csv">CSV</option>
+                          </select>
+                        </div>
+                        <div style={{ flex: 0.6 }}>
+                          <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 2 }}>数据路径 (JSONPath)</label>
+                          <input
+                            value={target.http_data_path || ''}
+                            onChange={(e) => updateTarget(ti, { http_data_path: e.target.value })}
+                            placeholder="data.results"
+                            style={{ width: '100%', fontSize: 12, padding: '4px 8px' }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-input)', padding: '4px 6px', borderRadius: 3, marginTop: 4 }}>
+                        支持变量替换: $from, $to, $var_name
+                      </div>
+                    </>
+                  )
+                }
+                return null
+              })()}
 
               <div style={{ marginTop: 6 }}>
                 <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>

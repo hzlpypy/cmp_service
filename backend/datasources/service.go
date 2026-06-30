@@ -81,11 +81,16 @@ func (s *Server) CreateDatasource(ctx *gin.Context, req *DatasourceReq) (*Dataso
 		Username:     req.Username,
 		Password:     req.Password,
 		Headers:      req.Headers,
+		Config:       req.Config,
 		Enabled:      true, // 新创建的数据源默认启用
 	}
 	// 确保 Headers 不为 nil
 	if record.Headers == nil {
 		record.Headers = model.JSONMap{}
+	}
+	// 确保 Config 不为 nil
+	if record.Config == nil {
+		record.Config = model.JSONMap{}
 	}
 	// 生成数据源唯一ID
 	record.ID = generateDSID()
@@ -97,7 +102,7 @@ func (s *Server) CreateDatasource(ctx *gin.Context, req *DatasourceReq) (*Dataso
 
 // UpdateDatasource 更新数据源配置。
 // 仅更新提供的字段和未软删除的记录。
-// 如果 Headers 为 nil 则不更新该字段。
+// 如果 Headers 或 Config 为 nil 则不更新该字段。
 func (s *Server) UpdateDatasource(ctx *gin.Context, req *DatasourceReq) (*DatasourceRes, error) {
 	updates := map[string]interface{}{
 		"name":          req.Name,
@@ -111,6 +116,10 @@ func (s *Server) UpdateDatasource(ctx *gin.Context, req *DatasourceReq) (*Dataso
 	// Headers 非 nil 时才更新
 	if req.Headers != nil {
 		updates["headers"] = req.Headers
+	}
+	// Config 非 nil 时才更新
+	if req.Config != nil {
+		updates["config"] = req.Config
 	}
 	if err := s.db.Model(&model.Datasource{}).Where("id = ? AND deleted_at IS NULL", req.ID).Updates(updates).Error; err != nil {
 		return nil, err
