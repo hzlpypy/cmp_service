@@ -158,6 +158,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   // 导出为图像
   const canvasRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const moreMenuRef = useRef<HTMLDivElement>(null)
   const [exporting, setExporting] = useState(false)
   const handleExportImage = async () => {
     if (!canvasRef.current) return
@@ -321,6 +322,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     return ''
   })
   const [timePickerOpen, setTimePickerOpen] = useState(false)
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   // 自定义时间的草稿状态：输入时只更新草稿，点击"应用"才提交
   const [draftCustomFrom, setDraftCustomFrom] = useState('')
   const [draftCustomTo, setDraftCustomTo] = useState('')
@@ -332,6 +334,21 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       setDraftCustomTo(customTo)
     }
   }, [timePickerOpen])
+
+  // 点击外部关闭更多操作菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target as Node)) {
+        setMoreMenuOpen(false)
+      }
+    }
+    if (moreMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [moreMenuOpen])
 
   /** 更新 URL 参数（时间范围和变量） */
   const updateUrlParams = useCallback((newPreset?: TimePreset, newFrom?: string, _newTo?: string, newVars?: Record<string, string>) => {
@@ -860,7 +877,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     return (
       <div className="dashboard-view">
         <div className="dashboard-toolbar">
-          <div className="toolbar-left"><button className="btn-sm" onClick={onBack}>← 返回</button></div>
+          <div className="toolbar-left"><button className="btn-sm" onClick={onBack}>&lt; 返回</button></div>
         </div>
         <div className="empty-state">加载中...</div>
       </div>
@@ -871,7 +888,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     return (
       <div className="dashboard-view">
         <div className="dashboard-toolbar">
-          <div className="toolbar-left"><button className="btn-sm" onClick={onBack}>← 返回</button></div>
+          <div className="toolbar-left"><button className="btn-sm" onClick={onBack}>&lt; 返回</button></div>
         </div>
         <div className="empty-state" style={{ color: 'var(--red)' }}>{error || '仪表板不存在'}</div>
       </div>
@@ -883,9 +900,9 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       {/* ---- Toolbar ---- */}
       <div className="dashboard-toolbar">
         <div className="toolbar-left">
-          <button className="btn-sm" onClick={onBack}>← 返回</button>
+          <button className="btn-sm" onClick={onBack}>&lt; 返回</button>
           <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)' }}>{displayTitle}</span>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{panels.length} 个面板</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: '1px' }}>{panels.length} 个面板</span>
           {hasUnsaved && (
             <span style={{
               fontSize: 11, color: '#f5a623', background: 'rgba(245,166,35,0.12)',
@@ -895,13 +912,15 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         </div>
         <div className="toolbar-right">
           {/* 时间范围选择器 - 类似 Grafana 风格 */}
-          <div style={{ position: 'relative', marginRight: 12 }}>
+          <div style={{ position: 'relative' }}>
             <button
               className="btn-sm time-picker-button"
               onClick={() => setTimePickerOpen(!timePickerOpen)}
-              style={{ display: 'flex', alignItems: 'center', gap: 4 }}
             >
-              <span>🕐</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
               <span>{getTimeRangeDisplay()}</span>
               <span style={{ fontSize: 10 }}>▼</span>
             </button>
@@ -1056,39 +1075,149 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
               </div>
             )}
           </div>
-          <button className="btn-sm" onClick={() => setShowNewPanel(true)}>+ 添加面板</button>
-          <button className="btn-sm" onClick={() => setShowEditor(true)} title="编辑仪表盘">&#x270E; 编辑仪表盘</button>
-          <button className="btn-sm" onClick={() => setShowJson(true)} title="查看仪表板JSON">{'{ }'} 查看JSON</button>
-          <button className="btn-sm" onClick={handleExportImage} disabled={exporting} title="导出仪表板为PNG图像">
-            {exporting ? '导出中...' : '📷 导出图像'}
+
+          {/* 常用按钮 */}
+          <button className="btn-sm add-panel" onClick={() => setShowNewPanel(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '-3px' }}>
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            添加面板
           </button>
-          <button className="btn-sm" onClick={() => { setSnapName(''); setSnapModalOpen(true); loadSnapshots() }} title="创建仪表盘快照">
-            📸 创建快照
+          <button className="btn-sm" onClick={loadData} title="刷新数据">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+            刷新
           </button>
-          <button className="btn-sm" onClick={() => setShowVersionHistory(true)} title="查看版本历史">
-            📜 版本历史
-          </button>
-          <button className="btn-sm" onClick={() => setShowReport(true)} title="生成分析报告">
-            📊 生成报告
-          </button>
-          <button className="btn-sm" onClick={loadData} title="刷新数据">&#x1F504; 刷新</button>
-          <button className="btn-sm" onClick={() => setChatOpen(!chatOpen)} title="AI 智能助手"
-            style={chatOpen ? { background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' } : undefined}
-          >{chatOpen ? '✕ 关闭AI' : '💬 AI 助手'}</button>
+
+          {/* 更多操作下拉菜单 */}
+          <div ref={moreMenuRef} style={{ position: 'relative' }}>
+            <button
+              className="btn-sm"
+              onClick={() => setMoreMenuOpen(!moreMenuOpen)}
+            >
+              <span>⋮</span>
+              <span>更多</span>
+              <span style={{ fontSize: 10 }}>▼</span>
+            </button>
+            {moreMenuOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  right: 0,
+                  marginTop: 4,
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 8,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+                  zIndex: 1000,
+                  minWidth: 200,
+                  padding: 8,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                }}
+              >
+                <button
+                  className="btn-sm"
+                  onClick={() => { setShowEditor(true); setMoreMenuOpen(false) }}
+                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                  编辑仪表盘
+                </button>
+                <button
+                  className="btn-sm"
+                  onClick={() => { setShowJson(true); setMoreMenuOpen(false) }}
+                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="16 18 22 12 16 6" />
+                    <polyline points="8 6 2 12 8 18" />
+                  </svg>
+                  查看JSON
+                </button>
+                <button
+                  className="btn-sm"
+                  onClick={() => { handleExportImage(); setMoreMenuOpen(false) }}
+                  disabled={exporting}
+                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <polyline points="21 15 16 10 5 21" />
+                  </svg>
+                  {exporting ? '导出中...' : '导出图像'}
+                </button>
+                <button
+                  className="btn-sm"
+                  onClick={() => { setSnapName(''); setSnapModalOpen(true); loadSnapshots(); setMoreMenuOpen(false) }}
+                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                  </svg>
+                  创建快照
+                </button>
+                <button
+                  className="btn-sm"
+                  onClick={() => { setShowVersionHistory(true); setMoreMenuOpen(false) }}
+                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  版本历史
+                </button>
+                <button
+                  className="btn-sm"
+                  onClick={() => { setShowReport(true); setMoreMenuOpen(false) }}
+                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="20" x2="18" y2="10" />
+                    <line x1="12" y1="20" x2="12" y2="4" />
+                    <line x1="6" y1="20" x2="6" y2="14" />
+                  </svg>
+                  生成报告
+                </button>
+                <button
+                  className="btn-sm"
+                  onClick={() => { setChatOpen(!chatOpen); setMoreMenuOpen(false) }}
+                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                  {chatOpen ? '关闭AI' : 'AI 助手'}
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* 保存按钮：有未保存变更时高亮 */}
           <button
-            className="btn-sm"
+            className="btn-sm save-btn"
             onClick={handleSaveDashboard}
             disabled={saving}
             title="保存仪表板（将所有面板变更持久化）"
-            style={hasUnsaved ? {
-              background: 'var(--primary)',
-              color: '#fff',
-              borderColor: 'var(--primary)',
-              fontWeight: 600,
-            } : undefined}
           >
-            {saving ? '保存中...' : hasUnsaved ? '\u{1F4BE} 保存仪表板' : '保存仪表板'}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+              <polyline points="17 21 17 13 7 13 7 21" />
+              <polyline points="7 3 7 8 15 8" />
+            </svg>
+            {saving ? '保存中...' : '保存仪表板'}
           </button>
         </div>
       </div>

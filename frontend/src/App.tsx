@@ -84,6 +84,7 @@ function SnapshotPageWrapper() {
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('browse')
   const [snapshotListKey, setSnapshotListKey] = useState(0)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const location = useLocation()
 
   // 判断当前是否在仪表盘详情页或快照页
@@ -97,21 +98,32 @@ function App() {
 
   return (
     <div className="app">
-      {!isInSnapshot && !isInDashboard && (
-        <header className="top-header">
-          <div
-            className="top-header-logo"
-            onClick={() => { setCurrentPage('browse') }}
-          >
-            <img src={logo} alt="Logo" className="top-header-logo-img" />
-            <span className="top-header-title">报表管理平台</span>
-          </div>
-        </header>
-      )}
+      <header className="top-header">
+        <div
+          className="top-header-logo"
+          onClick={() => { setCurrentPage('browse') }}
+        >
+          <img src={logo} alt="Logo" className="top-header-logo-img" />
+          <span className="top-header-title">容量管理平台</span>
+        </div>
+      </header>
 
       <div className="app-body">
         {!isInSnapshot && !isInDashboard && (
-        <aside className="sidebar">
+        <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+          <button
+            className="sidebar-toggle-btn"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {sidebarCollapsed ? (
+                <path d="M9 18l6-6-6-6" />
+              ) : (
+                <path d="M15 18l-6-6 6-6" />
+              )}
+            </svg>
+          </button>
         <nav className="sidebar-nav">
           <div
             className={`nav-item ${currentPage === 'browse' ? 'active' : ''}`}
