@@ -19,7 +19,7 @@ const CHART_TYPES: { value: PanelDef['type']; label: string; hint: string }[] = 
   { value: 'bar', label: '柱状图', hint: '第一列作为X轴(分类)，数值列作为Y轴(柱高)' },
   { value: 'line', label: '折线图', hint: '第一列作为X轴，数值列作为Y轴(折线)' },
   { value: 'pie', label: '饼图', hint: '第一列作为扇形名称，数值列作为扇形大小' },
-  { value: 'gauge', label: '仪表盘', hint: '第一行第一列数值作为仪表值' },
+  { value: 'gauge', label: '仪表板', hint: '第一行第一列数值作为仪表值' },
 ]
 
 export default function PanelEditor({ panel, datasources, dashboardId, draftJson, panelsData, onSave, onClose }: PanelEditorProps) {

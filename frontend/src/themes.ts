@@ -214,11 +214,10 @@ export function applyTheme(themeName: string) {
 
 // 获取当前主题名称
 export function getCurrentTheme(): string {
-  return localStorage.getItem('theme') || 'dark'
+  return localStorage.getItem('theme') || 'light'
 }
 
 // 初始化主题（应用启动时调用）
 export function initTheme() {
-  const themeName = getCurrentTheme()
-  applyTheme(themeName)
+  applyTheme('light')
 }

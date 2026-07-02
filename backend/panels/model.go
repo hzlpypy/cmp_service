@@ -1,5 +1,5 @@
 // Package panels 提供面板管理功能的数据模型定义。
-// 面板是仪表板中的可视化图表单元，支持柱状图、折线图、饼图、仪表盘、表格等多种类型。
+// 面板是仪表板中的可视化图表单元，支持柱状图、折线图、饼图、仪表板、表格等多种类型。
 package panels
 
 import "cmp_service_backend/model"
@@ -13,7 +13,7 @@ type PanelReq struct {
 	DashboardID string `json:"dashboard_id"`
 	// Title 面板标题
 	Title string `json:"title"`
-	// Type 图表类型：bar（柱状图）、line（折线图）、pie（饼图）、gauge（仪表盘）、table（表格）
+	// Type 图表类型：bar（柱状图）、line（折线图）、pie（饼图）、gauge（仪表板）、table（表格）
 	Type string `json:"type"`
 	// GridPosX 网格布局X坐标（列起始位置）
 	GridPosX int `json:"grid_pos_x"`

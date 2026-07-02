@@ -104,7 +104,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   // AI 对话面板
   const [chatOpen, setChatOpen] = useState(false)
 
-  // 创建仪表盘快照
+  // 创建仪表板快照
   const [snapModalOpen, setSnapModalOpen] = useState(false)
   const [snapName, setSnapName] = useState('')
   const [snapping, setSnapping] = useState(false)
@@ -134,7 +134,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       const snap = await api.createSnapshot({
         dashboard_id: dashboardId,
         panel_id: '',
-        name: snapName || `${displayTitle || '仪表盘'} 快照`,
+        name: snapName || `${displayTitle || '仪表板'} 快照`,
         dashboard_json: draftJson as DashboardJSON,
         panels_data: panelDataList,
       })
@@ -183,7 +183,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     const origRootOverflow = viewRoot?.style.overflow || ''
 
     try {
-      // 临时展开整个仪表盘面板区域，确保所有内容可见
+      // 临时展开整个仪表板面板区域，确保所有内容可见
       if (wrapperEl) {
         wrapperEl.style.height = 'auto'
         wrapperEl.style.flex = 'none'
@@ -232,7 +232,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   }
 
   // 单面板编辑器
-  // 仪表盘编辑器（包含变量管理）
+  // 仪表板编辑器（包含变量管理）
   const [showEditor, setShowEditor] = useState(false)
   // 添加面板
   const [showNewPanel, setShowNewPanel] = useState(false)
@@ -578,7 +578,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       setDraftJson(dj)
 
       // 更新 URL slug（如果当前 URL 没有 slug 或 slug 不匹配）
-      const title = db.title || '仪表盘'
+      const title = db.title || '仪表板'
       const expectedSlug = titleToSlug(title)
       if (!slug || slug !== expectedSlug) {
         navigate(`/d/${dashboardId}/${expectedSlug}${window.location.search}`, { replace: true })
@@ -708,7 +708,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         setDashboard({ ...dashboard, title, dashboard_json: saved })
       }
       // 不重新加载变量，保留用户当前选择的变量值
-      // 只重新加载仪表盘数据（使用当前变量和时间范围）
+      // 只重新加载仪表板数据（使用当前变量和时间范围）
       const tr = getTimeRange()
       const varMap: Record<string, string | string[]> = {}
       variables.forEach((v) => {
@@ -758,7 +758,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     }
   }
 
-  // ---- 仪表盘编辑器保存 ----
+  // ---- 仪表板编辑器保存 ----
   const handleEditorSave = async (updated: DashboardJSON) => {
     setDraftJson(updated)
     // 重新加载变量列表
@@ -1131,7 +1131,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                   </svg>
-                  编辑仪表盘
+                  编辑仪表板
                 </button>
                 <button
                   className="btn-sm"
@@ -1230,7 +1230,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         />
       )}
 
-      {/* ---- 仪表盘编辑器（包含变量管理） ---- */}
+      {/* ---- 仪表板编辑器（包含变量管理） ---- */}
       {showEditor && (
         <DashboardEditor
           title={displayTitle}
@@ -1246,21 +1246,21 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         <div className="modal-overlay" onClick={() => setSnapModalOpen(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ width: 480 }}>
             <div className="modal-header">
-              <h2>创建仪表盘快照</h2>
+              <h2>创建仪表板快照</h2>
               <button className="modal-close" onClick={() => setSnapModalOpen(false)}>&times;</button>
             </div>
             <div className="modal-body" style={{ maxHeight: '60vh', overflow: 'auto' }}>
               <div className="form-group">
                 <label>快照名称（可选）</label>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <input value={snapName} onChange={(e) => setSnapName(e.target.value)} placeholder={`${displayTitle || '仪表盘'} 快照`} autoFocus style={{ flex: 1 }} />
+                  <input value={snapName} onChange={(e) => setSnapName(e.target.value)} placeholder={`${displayTitle || '仪表板'} 快照`} autoFocus style={{ flex: 1 }} />
                   <button className="btn-primary" onClick={handleCreateDashboardSnapshot} disabled={snapping} style={{ whiteSpace: 'nowrap' }}>
                     {snapping ? '创建中...' : '创建快照'}
                   </button>
                 </div>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 16 }}>
-                快照将保存当前仪表盘中所有面板的数据和配置。
+                快照将保存当前仪表板中所有面板的数据和配置。
               </div>
 
               <div>
@@ -1332,7 +1332,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       {showReport && (
         <ReportModal
           dashboardId={dashboardId}
-          dashboardTitle={dashboard?.title || '仪表盘'}
+          dashboardTitle={dashboard?.title || '仪表板'}
           panelsSummary={panels.map((p: any) => ({
             id: p.id,
             title: p.title,

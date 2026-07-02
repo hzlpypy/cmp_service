@@ -73,12 +73,12 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
     const summary = `${panelList.length} 个面板: ${JSON.stringify(panelList)}`
 
     const prompt = [
-      `【仪表盘上下文】`,
-      `仪表盘ID: ${dashboardId}`,
+      `【仪表板上下文】`,
+      `仪表板ID: ${dashboardId}`,
       `标题: ${dashboardTitle}`,
       summary,
       `---`,
-      `【用户指令】请基于当前仪表盘的所有面板数据，生成一份专业的分析报告。`,
+      `【用户指令】请基于当前仪表板的所有面板数据，生成一份专业的分析报告。`,
       `要求：`,
       `1. 数据概览和关键发现`,
       `2. 趋势分析（如适用）`,
@@ -159,7 +159,7 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${dashboardTitle || '仪表盘'}-分析报告.md`
+    a.download = `${dashboardTitle || '仪表板'}-分析报告.md`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)

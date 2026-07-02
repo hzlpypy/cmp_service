@@ -372,8 +372,8 @@ export default function AIChatDialog({
     const summary = `${count} 个面板: ${JSON.stringify(panelList)}`
 
     return [
-      `【仪表盘上下文】`,
-      `仪表盘ID: ${dashboardId}`,
+      `【仪表板上下文】`,
+      `仪表板ID: ${dashboardId}`,
       `标题: ${dashboardTitle}`,
       summary,
       `---`,

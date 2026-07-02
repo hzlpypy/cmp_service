@@ -1,4 +1,4 @@
-// Package variables 提供仪表盘变量管理功能的数据模型定义。
+// Package variables 提供仪表板变量管理功能的数据模型定义。
 // 包含请求/响应结构体以及模型转换函数。
 package variables
 
@@ -9,7 +9,7 @@ import "cmp_service_backend/model"
 type VariableReq struct {
 	// ID 变量主键ID（更新/删除时必填）
 	ID string `json:"id"`
-	// DashboardID 所属仪表盘ID（必填）
+	// DashboardID 所属仪表板ID（必填）
 	DashboardID string `json:"dashboard_id" binding:"required"`
 	// Name 变量名（用于 $varname 引用）
 	Name string `json:"name" binding:"required"`
@@ -54,7 +54,7 @@ type VariableOption struct {
 type VariableRes struct {
 	// ID 变量主键ID
 	ID string `json:"id"`
-	// DashboardID 所属仪表盘ID
+	// DashboardID 所属仪表板ID
 	DashboardID string `json:"dashboard_id"`
 	// Name 变量名
 	Name string `json:"name"`
@@ -97,7 +97,7 @@ type VariableDeleteReq struct {
 
 // VariableListReq 变量列表查询请求参数。
 type VariableListReq struct {
-	// DashboardID 仪表盘ID（必填，按仪表盘过滤变量）
+	// DashboardID 仪表板ID（必填，按仪表板过滤变量）
 	DashboardID string `json:"dashboard_id" binding:"required"`
 }
 
@@ -106,7 +106,7 @@ type VariableListReq struct {
 type VariableValuesReq struct {
 	// ID 变量ID（可选，如果提供则从数据库加载变量配置）
 	ID string `json:"id"`
-	// DashboardID 仪表盘ID（与 ID 配合使用）
+	// DashboardID 仪表板ID（与 ID 配合使用）
 	DashboardID string `json:"dashboard_id"`
 	// Query 查询语句（可选，直接指定查询）
 	Query string `json:"query"`

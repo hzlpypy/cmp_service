@@ -6,7 +6,7 @@ import DataSourcesPage from './components/DataSourcesPage'
 import SnapshotView from './components/SnapshotView'
 import SnapshotList from './components/SnapshotList'
 import PanelEditPage from './components/PanelEditPage'
-import SettingsPage from './components/SettingsPage'
+
 import type { PanelDef, DatasourceRes, PanelDataRes } from './api'
 import { initTheme } from './themes'
 import './App.css'
@@ -87,7 +87,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const location = useLocation()
 
-  // 判断当前是否在仪表盘详情页或快照页
+  // 判断当前是否在仪表板详情页或快照页
   const isInDashboard = location.pathname.startsWith('/d/')
   const isInSnapshot = location.pathname.startsWith('/snapshot/')
 
@@ -156,18 +156,6 @@ function App() {
             <span className="nav-label">数据源</span>
           </div>
         </nav>
-        <div className="sidebar-footer">
-          <div
-            className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}
-            onClick={() => setCurrentPage('settings')}
-            title="设置"
-          >
-            <span className="nav-icon">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v1.07a7.002 7.002 0 015.94 5.93H18a1 1 0 110 2h-1.07a7.002 7.002 0 01-5.93 5.94V18a1 1 0 11-2 0v-1.07a7.002 7.002 0 01-5.94-5.93H2a1 1 0 110-2h1.07a7.002 7.002 0 015.93-5.94V3a1 1 0 011-1zm0 4a4 4 0 100 8 4 4 0 000-8z" /></svg>
-            </span>
-            <span className="nav-label">设置</span>
-          </div>
-        </div>
       </aside>
       )}
 
@@ -177,7 +165,6 @@ function App() {
             <Route path="/" element={
               currentPage === 'browse' ? <BrowsePage /> :
               currentPage === 'snapshots' ? <SnapshotList key={snapshotListKey} /> :
-              currentPage === 'settings' ? <SettingsPage /> :
               <DataSourcesPage />
             } />
             <Route path="/d/:uid/:slug?" element={<DashboardPageWrapper />} />

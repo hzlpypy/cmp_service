@@ -492,7 +492,7 @@ export default function VersionHistory({ dashboardId, onClose, onRestore }: Vers
 
         <div className="modal-footer">
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}>
-            每次保存仪表盘时会自动创建版本记录
+            每次保存仪表板时会自动创建版本记录
           </div>
           <button className="btn-secondary" onClick={onClose}>关闭</button>
         </div>

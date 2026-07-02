@@ -104,7 +104,7 @@ func (cont *Controller) GetDashboardDataController(ctx *gin.Context) {
 	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
 }
 
-// GetPanelDataController 查询指定仪表盘中单个面板的实际数据。
+// GetPanelDataController 查询指定仪表板中单个面板的实际数据。
 // POST /api/v1/panels/data
 func (cont *Controller) GetPanelDataController(ctx *gin.Context) {
 	var req PanelDataReq
@@ -140,7 +140,7 @@ func (cont *Controller) QueryInspectController(ctx *gin.Context) {
 // 版本管理控制器
 // ============================================================
 
-// ListVersionsController 获取仪表盘版本历史列表。
+// ListVersionsController 获取仪表板版本历史列表。
 // POST /api/v1/dashboards/versions/list
 func (cont *Controller) ListVersionsController(ctx *gin.Context) {
 	var req VersionListReq

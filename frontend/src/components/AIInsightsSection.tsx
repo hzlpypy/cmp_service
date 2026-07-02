@@ -199,7 +199,7 @@ function buildDataSummary(panelsData: any[], panelsConfig: any[]): string {
     } else if (type === 'gauge' || type === 'line' || type === 'bar' || type === 'pie') {
       const nums: number[] = []
       p.data.forEach((row: any) => { if (Array.isArray(row)) row.forEach((v: any) => { const val = deepExtractValue(v); const num = parseFloat(val); if (!isNaN(num)) nums.push(num) }); else { const val = deepExtractValue(row); const num = parseFloat(val); if (!isNaN(num)) nums.push(num) } })
-      if (nums.length > 0) { if (type === 'gauge') { summaries.push(`【${title}】仪表盘: 当前值=${nums[nums.length - 1].toFixed(2)}`) } else { const recent = nums.slice(-5).map((v: number) => v.toFixed(2)).join(', '); summaries.push(`【${title}】图表: 最近值=[${recent}], 最小=${Math.min(...nums).toFixed(2)}, 最大=${Math.max(...nums).toFixed(2)}, 平均=${(nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2)}`) } }
+      if (nums.length > 0) { if (type === 'gauge') { summaries.push(`【${title}】仪表板: 当前值=${nums[nums.length - 1].toFixed(2)}`) } else { const recent = nums.slice(-5).map((v: number) => v.toFixed(2)).join(', '); summaries.push(`【${title}】图表: 最近值=[${recent}], 最小=${Math.min(...nums).toFixed(2)}, 最大=${Math.max(...nums).toFixed(2)}, 平均=${(nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2)}`) } }
     }
   })
   return summaries.join('\n\n')
@@ -251,7 +251,7 @@ export function AIInsightsPanel({ dashboardId, dashboardTitle, panelsData, panel
     setContents({ score: 75, conclusion: '', risks: [], evaluation: '', plan: '' })
     const dataSummary = buildDataSummary(panelsData, panelsConfig)
     
-    const scorePrompt = `你是运维监控专家。分析以下仪表盘数据，给出健康度评分和结论：\n仪表盘名称: "${dashboardTitle}"\n报表数据:\n${dataSummary}\n请分析每个报表的数据，综合评估系统健康度：\n严格按以下格式输出：\n分数:XX\n- 基于数据分析得出的结论\n规则：\n- 分数范围0-100\n- 结论要具体\n- 不要其他任何文字`
+    const scorePrompt = `你是运维监控专家。分析以下仪表板数据，给出健康度评分和结论：\n仪表板名称: "${dashboardTitle}"\n报表数据:\n${dataSummary}\n请分析每个报表的数据，综合评估系统健康度：\n严格按以下格式输出：\n分数:XX\n- 基于数据分析得出的结论\n规则：\n- 分数范围0-100\n- 结论要具体\n- 不要其他任何文字`
     const conclusionResult = await generateSingle(scorePrompt)
     const score = extractScore(conclusionResult)
     const summary = extractShortSummary(conclusionResult)
@@ -260,7 +260,7 @@ export function AIInsightsPanel({ dashboardId, dashboardTitle, panelsData, panel
     
     await new Promise(r => setTimeout(r, 1000))
     
-    const risksPrompt = `你是运维监控专家。分析以下仪表盘数据，识别关键风险：\n仪表盘名称: "${dashboardTitle}"\n报表数据:\n${dataSummary}\n请分析每个报表的数据，识别具体风险：\n严格按以下格式输出风险要点：\n- 具体风险点（指出哪个报表、什么问题）\n规则：\n- 只输出 "- "开头的要点行\n- 每条风险要具体\n- 最多输出3-5条`
+    const risksPrompt = `你是运维监控专家。分析以下仪表板数据，识别关键风险：\n仪表板名称: "${dashboardTitle}"\n报表数据:\n${dataSummary}\n请分析每个报表的数据，识别具体风险：\n严格按以下格式输出风险要点：\n- 具体风险点（指出哪个报表、什么问题）\n规则：\n- 只输出 "- "开头的要点行\n- 每条风险要具体\n- 最多输出3-5条`
     const risksResult = await generateSingle(risksPrompt)
     const risks = extractBullets(risksResult).slice(0, 5)
     setContents(prev => ({ ...prev, risks }))
@@ -268,14 +268,14 @@ export function AIInsightsPanel({ dashboardId, dashboardTitle, panelsData, panel
     
     await new Promise(r => setTimeout(r, 1000))
     
-    const evalPrompt = `你是运维监控专家。分析以下仪表盘数据，给出核心评估：\n仪表盘名称: "${dashboardTitle}"\n报表数据:\n${dataSummary}\n请综合所有报表数据，给出整体评估：\n严格按以下格式输出：\n- 评估结论\n规则：\n- 只输出 "- "开头的要点\n- 最多2条`
+    const evalPrompt = `你是运维监控专家。分析以下仪表板数据，给出核心评估：\n仪表板名称: "${dashboardTitle}"\n报表数据:\n${dataSummary}\n请综合所有报表数据，给出整体评估：\n严格按以下格式输出：\n- 评估结论\n规则：\n- 只输出 "- "开头的要点\n- 最多2条`
     const evalResult = await generateSingle(evalPrompt)
     setContents(prev => ({ ...prev, evaluation: evalResult }))
     setLoading(prev => ({ ...prev, evaluation: false, plan: true }))
     
     await new Promise(r => setTimeout(r, 1000))
     
-    const planPrompt = `你是运维监控专家。基于以下仪表盘数据分析结果，给出下一步计划：\n仪表盘名称: "${dashboardTitle}"\n报表数据:\n${dataSummary}\n请基于数据分析结果，给出具体的改进计划：\n严格按以下格式输出：\n- 具体行动计划\n规则：\n- 只输出 "- "开头的要点\n- 计划要具体可行\n- 最多2条`
+    const planPrompt = `你是运维监控专家。基于以下仪表板数据分析结果，给出下一步计划：\n仪表板名称: "${dashboardTitle}"\n报表数据:\n${dataSummary}\n请基于数据分析结果，给出具体的改进计划：\n严格按以下格式输出：\n- 具体行动计划\n规则：\n- 只输出 "- "开头的要点\n- 计划要具体可行\n- 最多2条`
     const planResult = await generateSingle(planPrompt)
     setContents(prev => ({ ...prev, plan: planResult }))
     setLoading(prev => ({ ...prev, plan: false }))

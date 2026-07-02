@@ -27,7 +27,7 @@ const CHART_TYPES: { value: PanelDef['type']; label: string; icon: string; hint:
   { value: 'bar', label: '柱状图', icon: '▐', hint: '第一列作为X轴(分类)，数值列作为Y轴(柱高)' },
   { value: 'line', label: '折线图', icon: '⌇', hint: '第一列作为X轴，数值列作为Y轴(折线)' },
   { value: 'pie', label: '饼图', icon: '◉', hint: '第一列作为扇形名称，数值列作为扇形大小' },
-  { value: 'gauge', label: '仪表盘', icon: '◎', hint: '第一行第一列数值作为仪表值' },
+  { value: 'gauge', label: '仪表板', icon: '◎', hint: '第一行第一列数值作为仪表值' },
 ]
 
 const refLabels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -506,11 +506,11 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
       {/* ── 顶部工具栏 ── */}
       <div className="pe-toolbar">
         <div className="pe-toolbar-left">
-          <button className="btn-sm" onClick={onBack} title="返回仪表盘">
+          <button className="btn-sm" onClick={onBack} title="返回仪表板">
             &lt; 返回
           </button>
           <div className="pe-breadcrumb">
-            <span className="pe-breadcrumb-link" onClick={onBack}>仪表盘</span>
+            <span className="pe-breadcrumb-link" onClick={onBack}>仪表板</span>
             <span className="pe-breadcrumb-sep">/</span>
             <span className="pe-breadcrumb-current">{p.title || '未命名面板'}</span>
           </div>
@@ -791,7 +791,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                   {/* 用户自定义变量 */}
                   {variables.length > 0 && (
                     <div>
-                      <div className="pe-label-sm">仪表盘变量</div>
+                      <div className="pe-label-sm">仪表板变量</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
                         {variables.map((v) => (
                           <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
@@ -804,7 +804,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                     </div>
                   )}
                   {variables.length === 0 && (
-                    <div className="pe-hint-text" style={{ background: 'transparent', borderLeft: 'none', padding: '4px 0' }}>暂无自定义变量，可在仪表盘设置中添加</div>
+                    <div className="pe-hint-text" style={{ background: 'transparent', borderLeft: 'none', padding: '4px 0' }}>暂无自定义变量，可在仪表板设置中添加</div>
                   )}
                 </Section>
 

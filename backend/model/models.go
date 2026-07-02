@@ -212,7 +212,7 @@ type Panel struct {
 	DashboardID string `gorm:"column:dashboard_id;type:varchar(19);not null" json:"dashboard_id"`
 	// Title 面板标题
 	Title string `gorm:"type:varchar(256);not null" json:"title"`
-	// Type 图表类型：bar（柱状图）、line（折线图）、pie（饼图）、gauge（仪表盘）、table（表格）
+	// Type 图表类型：bar（柱状图）、line（折线图）、pie（饼图）、gauge（仪表板）、table（表格）
 	Type string `gorm:"type:varchar(16);not null" json:"type"`
 	// GridPosX 面板在网格布局中的X坐标（列起始位置）
 	GridPosX int `gorm:"column:grid_pos_x;not null;default:0" json:"grid_pos_x"`
@@ -249,12 +249,12 @@ type Snapshot struct {
 // TableName 指定快照表名。
 func (Snapshot) TableName() string { return "snapshots" }
 
-// Variable 仪表盘变量表，存储仪表盘级别的模板变量。
+// Variable 仪表板变量表，存储仪表板级别的模板变量。
 // 变量可在 SQL 查询中使用 $varname 或 ${varname} 语法引用。
 // 对应数据库表：variables
 type Variable struct {
 	Base
-	// DashboardID 所属仪表盘ID（外键关联 dashboards 表）
+	// DashboardID 所属仪表板ID（外键关联 dashboards 表）
 	DashboardID string `gorm:"column:dashboard_id;type:varchar(19);not null" json:"dashboard_id"`
 	// Name 变量名（用于 $varname 引用）
 	Name string `gorm:"type:varchar(64);not null" json:"name"`
@@ -287,18 +287,18 @@ type Variable struct {
 // TableName 指定变量表名。
 func (Variable) TableName() string { return "variables" }
 
-// DashboardVersion 仪表盘版本历史表，存储仪表盘的版本快照。
-// 每次保存仪表盘时自动创建新版本，支持版本对比和回滚。
+// DashboardVersion 仪表板版本历史表，存储仪表板的版本快照。
+// 每次保存仪表板时自动创建新版本，支持版本对比和回滚。
 // 对应数据库表：dashboard_versions
 type DashboardVersion struct {
 	Base
-	// DashboardID 所属仪表盘ID（外键关联 dashboards 表）
+	// DashboardID 所属仪表板ID（外键关联 dashboards 表）
 	DashboardID string `gorm:"column:dashboard_id;type:varchar(19);not null;index" json:"dashboard_id"`
 	// Version 版本号（从1开始递增）
 	Version int `gorm:"type:int;not null" json:"version"`
-	// Title 该版本的仪表盘标题
+	// Title 该版本的仪表板标题
 	Title string `gorm:"type:varchar(256);not null" json:"title"`
-	// DashboardJSON 该版本的仪表盘完整JSON定义
+	// DashboardJSON 该版本的仪表板完整JSON定义
 	DashboardJSON JSONMap `gorm:"column:dashboard_json;type:json" json:"dashboard_json"`
 	// Message 版本说明（可选）
 	Message string `gorm:"type:varchar(512);default:''" json:"message"`
