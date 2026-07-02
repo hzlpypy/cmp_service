@@ -38,6 +38,59 @@ func convertValue(val interface{}) interface{} {
 	return val
 }
 
+// buildCurlCommand 根据HTTP请求详情生成等效的curl命令
+func buildCurlCommand(info *HTTPRequestInfo) string {
+	var parts []string
+	parts = append(parts, "curl")
+
+	// 方法
+	method := strings.ToUpper(info.Method)
+	if method != "" && method != "GET" {
+		parts = append(parts, fmt.Sprintf("-X %s", method))
+	}
+
+	// Headers
+	for k, v := range info.Headers {
+		parts = append(parts, fmt.Sprintf("-H '%s: %s'", k, v))
+	}
+
+	// Content-Type for form data
+	if info.BodyType == "form-data" && len(info.FormData) > 0 {
+		// 不需要额外设置，curl -F 会自动处理
+	} else if info.BodyType == "x-www-form-urlencoded" && len(info.FormData) > 0 {
+		parts = append(parts, "-H 'Content-Type: application/x-www-form-urlencoded'")
+	}
+
+	// Body
+	switch info.BodyType {
+	case "raw":
+		if info.Body != "" {
+			parts = append(parts, fmt.Sprintf("-d '%s'", info.Body))
+		}
+	case "graphql":
+		if info.Body != "" {
+			parts = append(parts, fmt.Sprintf("-d '{\"query\": \"%s\"}'", strings.ReplaceAll(info.Body, "\"", "\\\"")))
+		}
+	case "form-data":
+		for _, fd := range info.FormData {
+			parts = append(parts, fmt.Sprintf("-F '%s=%s'", fd["key"], fd["value"]))
+		}
+	case "x-www-form-urlencoded":
+		var pairs []string
+		for _, fd := range info.FormData {
+			pairs = append(pairs, fmt.Sprintf("%s=%s", fd["key"], fd["value"]))
+		}
+		if len(pairs) > 0 {
+			parts = append(parts, fmt.Sprintf("-d '%s'", strings.Join(pairs, "&")))
+		}
+	}
+
+	// URL
+	parts = append(parts, fmt.Sprintf("'%s'", info.URL))
+
+	return strings.Join(parts, " \\\n  ")
+}
+
 // Server 仪表板业务服务，持有数据库连接和日志记录器。
 type Server struct {
 	db              *gorm.DB
@@ -467,7 +520,10 @@ func (s *Server) QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryIns
 		queryConfig := &datasources.HTTPQueryConfig{
 			Method:      req.HTTPMethod,
 			Path:        req.HTTPPath,
+			BodyType:    req.HTTPBodyType,
 			Body:        req.HTTPBody,
+			FormData:    req.HTTPFormData,
+			Headers:     req.HTTPHeaders,
 			DataFormat:  req.HTTPDataFormat,
 			DataPath:    req.HTTPDataPath,
 		}
@@ -477,6 +533,11 @@ func (s *Server) QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryIns
 		if queryConfig.DataFormat == "" {
 			queryConfig.DataFormat = "json"
 		}
+
+		s.log.Infof("QueryInspect HTTP: BodyType=%s, Body=%s, FormData=%v, Headers=%v", queryConfig.BodyType, queryConfig.Body, queryConfig.FormData, queryConfig.Headers)
+
+		// 解析认证配置（用于构建请求详情）
+		authConfig := s.httpQueryExec.ParseAuthConfig(ds.Config)
 
 		// 应用变量替换到URL（与实际查询保持一致）
 		fullURL := ds.URL + queryConfig.Path
@@ -534,6 +595,49 @@ func (s *Server) QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryIns
 		res.Columns = result.Columns
 		res.Rows = result.Rows
 		res.RowCount = len(result.Rows)
+
+		// 构建HTTP请求详情
+		reqInfo := &HTTPRequestInfo{
+			Method:   queryConfig.Method,
+			URL:      url,
+			BodyType: queryConfig.BodyType,
+			Headers:  make(map[string]string),
+		}
+		// 合并数据源Headers + 查询Headers
+		if ds.Headers != nil {
+			for k, v := range ds.Headers {
+				if sv, ok := v.(string); ok {
+					reqInfo.Headers[k] = sv
+				}
+			}
+		}
+		if queryConfig.Headers != nil {
+			for k, v := range queryConfig.Headers {
+				if sv, ok := v.(string); ok {
+					reqInfo.Headers[k] = sv
+				}
+			}
+		}
+		// 认证Headers
+		if authConfig.AuthType == "bearer" && authConfig.AuthToken != "" {
+			reqInfo.Headers["Authorization"] = "Bearer " + authConfig.AuthToken
+		} else if authConfig.AuthType == "api_key" && authConfig.AuthToken != "" {
+			reqInfo.Headers["X-API-Key"] = authConfig.AuthToken
+		}
+		// 请求体
+		switch queryConfig.BodyType {
+		case "raw", "graphql":
+			reqInfo.Body = queryConfig.Body
+		case "form-data", "x-www-form-urlencoded":
+			for _, fd := range queryConfig.FormData {
+				if fd.Key != "" {
+					reqInfo.FormData = append(reqInfo.FormData, map[string]string{"key": fd.Key, "value": fd.Value})
+				}
+			}
+		}
+		// 生成curl命令
+		reqInfo.CurlCommand = buildCurlCommand(reqInfo)
+		res.RequestInfo = reqInfo
 	} else {
 		// MySQL数据源查询
 		// 使用共享的 SQL 处理逻辑（变量替换、系统变量、时间过滤）
@@ -731,9 +835,34 @@ func (s *Server) queryHTTPTarget(ds *model.Datasource, tMap map[string]interface
 	queryConfig := &datasources.HTTPQueryConfig{
 		Method:      getStringField(tMap, "http_method"),
 		Path:        getStringField(tMap, "http_path"),
+		BodyType:    getStringField(tMap, "http_body_type"),
 		Body:        getStringField(tMap, "http_body"),
 		DataFormat:  getStringField(tMap, "http_data_format"),
 		DataPath:    getStringField(tMap, "http_data_path"),
+	}
+
+	// 解析http_headers（可选）
+	if headersVal, ok := tMap["http_headers"]; ok {
+		if headersMap, ok := headersVal.(map[string]interface{}); ok {
+			queryConfig.Headers = headersMap
+		}
+	}
+
+	// 解析http_form_data（可选，用于form-data和x-www-form-urlencoded）
+	if formDataVal, ok := tMap["http_form_data"]; ok {
+		if formDataArr, ok := formDataVal.([]interface{}); ok {
+			var formData []datasources.FormDataField
+			for _, item := range formDataArr {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					field := datasources.FormDataField{
+						Key:   getStringField(itemMap, "key"),
+						Value: getStringField(itemMap, "value"),
+					}
+					formData = append(formData, field)
+				}
+			}
+			queryConfig.FormData = formData
+		}
 	}
 
 	// 解析timeout（可选）

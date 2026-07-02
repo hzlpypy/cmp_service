@@ -2,7 +2,10 @@
 // 包含请求/响应结构体、面板简要信息以及模型转换函数。
 package dashboards
 
-import "cmp_service_backend/model"
+import (
+	"cmp_service_backend/model"
+	"cmp_service_backend/datasources"
+)
 
 // DashboardReq 仪表板操作请求参数。
 // 用于创建、更新仪表板，dashboard_json 为仪表板的完整 JSON 定义。
@@ -121,8 +124,14 @@ type QueryInspectReq struct {
 	HTTPPath string `json:"http_path,omitempty"`
 	// HTTPMethod HTTP请求方法
 	HTTPMethod string `json:"http_method,omitempty"`
-	// HTTPBody 请求体
+	// HTTPBodyType 请求体类型：raw, form-data, x-www-form-urlencoded, graphql
+	HTTPBodyType string `json:"http_body_type,omitempty"`
+	// HTTPBody 请求体（raw/graphql类型使用）
 	HTTPBody string `json:"http_body,omitempty"`
+	// HTTPFormData 表单数据（form-data/x-www-form-urlencoded类型使用）
+	HTTPFormData []datasources.FormDataField `json:"http_form_data,omitempty"`
+	// HTTPHeaders 自定义HTTP请求头（JSON对象）
+	HTTPHeaders model.JSONMap `json:"http_headers,omitempty"`
 	// HTTPDataFormat 数据格式
 	HTTPDataFormat string `json:"http_data_format,omitempty"`
 	// HTTPDataPath 数据提取路径
@@ -141,6 +150,26 @@ type QueryInspectRes struct {
 	RowCount int `json:"row_count"`
 	// Error 查询错误信息（如有）
 	Error string `json:"error,omitempty"`
+	// RequestInfo HTTP请求详情（仅HTTP数据源时返回）
+	RequestInfo *HTTPRequestInfo `json:"request_info,omitempty"`
+}
+
+// HTTPRequestInfo HTTP请求详细信息
+type HTTPRequestInfo struct {
+	// Method 请求方法
+	Method string `json:"method"`
+	// URL 完整请求URL（变量替换后）
+	URL string `json:"url"`
+	// Headers 请求头
+	Headers map[string]string `json:"headers"`
+	// BodyType 请求体类型
+	BodyType string `json:"body_type"`
+	// Body 请求体内容（raw/graphql）
+	Body string `json:"body,omitempty"`
+	// FormData 表单数据（form-data/x-www-form-urlencoded）
+	FormData []map[string]string `json:"form_data,omitempty"`
+	// CurlCommand 等效的curl命令
+	CurlCommand string `json:"curl_command"`
 }
 
 // PanelData 单个面板的数据查询结果。

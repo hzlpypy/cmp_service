@@ -464,6 +464,18 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
     }))
   }
 
+  // 使用回调更新target的headers，确保基于最新state而非闭包中的旧数据
+  const updateTargetHeaders = (ti: number, updater: (headers: Record<string, string>) => Record<string, string> | undefined) => {
+    setP((prev) => ({
+      ...prev,
+      targets: prev.targets.map((t, i) => {
+        if (i !== ti) return t
+        const curHeaders = (t.http_headers as Record<string, string> | undefined) || {}
+        return { ...t, http_headers: updater(curHeaders) }
+      }),
+    }))
+  }
+
   const setAlias = (ti: number, col: string, alias: string) => {
     setP((prev) => ({
       ...prev,
@@ -934,19 +946,112 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                                 {/* 请求体（POST才显示） */}
                                 {target.http_method === 'POST' && (
                                   <div style={{ marginBottom: 12 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-                                      <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', marginRight: 8 }}>请求体</label>
-                                      <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-input)', padding: '1px 6px', borderRadius: 3 }}>JSON格式</span>
+                                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6, gap: 12 }}>
+                                      <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>请求体</label>
+                                      <select
+                                        value={target.http_body_type || 'raw'}
+                                        onChange={(e) => updateTarget(ti, { http_body_type: e.target.value as any })}
+                                        className="pe-select-sm"
+                                        style={{ fontSize: 11 }}
+                                      >
+                                        <option value="raw">Raw (JSON)</option>
+                                        <option value="form-data">Form Data</option>
+                                        <option value="x-www-form-urlencoded">x-www-form-urlencoded</option>
+                                        <option value="graphql">GraphQL</option>
+                                      </select>
                                     </div>
-                                    <textarea
-                                      value={target.http_body || ''}
-                                      onChange={(e) => updateTarget(ti, { http_body: e.target.value })}
-                                      placeholder='{"key": "value"}'
-                                      className="pe-sql-editor"
-                                      spellCheck={false}
-                                      rows={3}
-                                      style={{ fontSize: 12 }}
-                                    />
+
+                                    {/* Raw格式 - JSON文本 */}
+                                    {(target.http_body_type === 'raw' || !target.http_body_type) && (
+                                      <textarea
+                                        value={target.http_body || ''}
+                                        onChange={(e) => updateTarget(ti, { http_body: e.target.value })}
+                                        placeholder='{"key": "value"}'
+                                        className="pe-sql-editor"
+                                        spellCheck={false}
+                                        rows={3}
+                                        style={{ fontSize: 12 }}
+                                      />
+                                    )}
+
+                                    {/* GraphQL格式 */}
+                                    {target.http_body_type === 'graphql' && (
+                                      <div>
+                                        <textarea
+                                          value={target.http_body || ''}
+                                          onChange={(e) => updateTarget(ti, { http_body: e.target.value })}
+                                          placeholder='query { users { id name } }'
+                                          className="pe-sql-editor"
+                                          spellCheck={false}
+                                          rows={3}
+                                          style={{ fontSize: 12 }}
+                                        />
+                                        <div className="pe-hint-text" style={{ marginTop: 4, fontSize: 9 }}>
+                                          GraphQL查询语句，会自动包装成 {"{ \"query\": \"...\" }"} 格式发送
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Form Data 和 x-www-form-urlencoded - key-value列表 */}
+                                    {(target.http_body_type === 'form-data' || target.http_body_type === 'x-www-form-urlencoded') && (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                        {(() => {
+                                          const formData = target.http_form_data || []
+                                          return (
+                                            <>
+                                              {formData.map((field, idx) => (
+                                                <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                                  <input
+                                                    value={field.key}
+                                                    onChange={(e) => {
+                                                      const newData = [...formData]
+                                                      newData[idx] = { ...newData[idx], key: e.target.value }
+                                                      updateTarget(ti, { http_form_data: newData })
+                                                    }}
+                                                    placeholder="字段名"
+                                                    className="pe-input-sm"
+                                                    style={{ flex: 1, fontSize: 11 }}
+                                                  />
+                                                  <input
+                                                    value={field.value}
+                                                    onChange={(e) => {
+                                                      const newData = [...formData]
+                                                      newData[idx] = { ...newData[idx], value: e.target.value }
+                                                      updateTarget(ti, { http_form_data: newData })
+                                                    }}
+                                                    placeholder="值"
+                                                    className="pe-input-sm"
+                                                    style={{ flex: 1, fontSize: 11 }}
+                                                  />
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                      const newData = formData.filter((_, i) => i !== idx)
+                                                      updateTarget(ti, { http_form_data: newData.length > 0 ? newData : undefined })
+                                                    }}
+                                                    className="pe-link-btn"
+                                                    style={{ fontSize: 10, padding: '2px 6px' }}
+                                                  >
+                                                    删除
+                                                  </button>
+                                                </div>
+                                              ))}
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  const newData = [...formData, { key: '', value: '' }]
+                                                  updateTarget(ti, { http_form_data: newData })
+                                                }}
+                                                className="pe-link-btn"
+                                                style={{ fontSize: 10 }}
+                                              >
+                                                + 添加字段
+                                              </button>
+                                            </>
+                                          )
+                                        })()}
+                                      </div>
+                                    )}
                                   </div>
                                 )}
 
@@ -980,6 +1085,100 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                                         style={{ fontSize: 12 }}
                                       />
                                     </div>
+                                  </div>
+                                </div>
+
+                                {/* 自定义Headers */}
+                                <div style={{ marginTop: 8 }}>
+                                  <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>
+                                    自定义Headers [可选]
+                                  </label>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                    {(() => {
+                                      const headersObj = target.http_headers as Record<string, unknown> | undefined
+                                      const entries = headersObj
+                                        ? Object.entries(headersObj) as Array<[string, string]>
+                                        : []
+                                      return (
+                                        <>
+                                          {entries.map(([key, value], idx) => (
+                                            <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                              <input
+                                                value={key.startsWith('__new_') ? '' : key}
+                                                onChange={(e) => {
+                                                  const val = e.target.value
+                                                  updateTargetHeaders(ti, (curHeaders) => {
+                                                    const objEntries = Object.entries(curHeaders)
+                                                    const newObj: Record<string, string> = {}
+                                                    objEntries.forEach(([k, v], i) => {
+                                                      if (i === idx) {
+                                                        if (val) newObj[val] = v
+                                                      } else {
+                                                        newObj[k] = v
+                                                      }
+                                                    })
+                                                    return newObj
+                                                  })
+                                                }}
+                                                placeholder="Key"
+                                                className="pe-input-sm"
+                                                style={{ flex: 1, fontSize: 11 }}
+                                              />
+                                              <input
+                                                value={value}
+                                                onChange={(e) => {
+                                                  const val = e.target.value
+                                                  updateTargetHeaders(ti, (curHeaders) => {
+                                                    const objEntries = Object.entries(curHeaders)
+                                                    const newObj: Record<string, string> = {}
+                                                    objEntries.forEach(([k, v], i) => {
+                                                      newObj[k] = (i === idx) ? val : v
+                                                    })
+                                                    return newObj
+                                                  })
+                                                }}
+                                                placeholder="Value"
+                                                className="pe-input-sm"
+                                                style={{ flex: 1, fontSize: 11 }}
+                                              />
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  updateTargetHeaders(ti, (curHeaders) => {
+                                                    const objEntries = Object.entries(curHeaders)
+                                                    const newObj: Record<string, string> = {}
+                                                    objEntries.forEach(([k, v], i) => {
+                                                      if (i !== idx) newObj[k] = v
+                                                    })
+                                                    return Object.keys(newObj).length > 0 ? newObj : undefined
+                                                  })
+                                                }}
+                                                className="pe-link-btn"
+                                                style={{ fontSize: 10, padding: '2px 6px' }}
+                                              >
+                                                删除
+                                              </button>
+                                            </div>
+                                          ))}
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              updateTargetHeaders(ti, (curHeaders) => {
+                                                const tempKey = `__new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+                                                return { ...curHeaders, [tempKey]: '' }
+                                              })
+                                            }}
+                                            className="pe-link-btn"
+                                            style={{ fontSize: 10 }}
+                                          >
+                                            + 添加Header
+                                          </button>
+                                        </>
+                                      )
+                                    })()}
+                                  </div>
+                                  <div className="pe-hint-text" style={{ marginTop: 2, fontSize: 9 }}>
+                                    优先级：认证Headers {'>'} 查询Headers {'>'} 数据源Headers
                                   </div>
                                 </div>
 
@@ -1049,7 +1248,10 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                         rawSql={target.rawSql || ''}
                         httpPath={target.http_path || ''}
                         httpMethod={target.http_method || ''}
+                        httpBodyType={target.http_body_type}
                         httpBody={target.http_body || ''}
+                        httpFormData={target.http_form_data}
+                        httpHeaders={target.http_headers}
                         httpDataFormat={target.http_data_format || ''}
                         httpDataPath={target.http_data_path || ''}
                         variables={variables}

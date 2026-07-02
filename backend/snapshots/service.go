@@ -100,6 +100,12 @@ func (s *Server) Get(ctx *gin.Context, key string) (*SnapshotRes, error) {
 // List returns snapshots for a dashboard or panel.
 func (s *Server) List(ctx *gin.Context, dashboardID, panelID string) ([]*SnapshotRes, error) {
 	var snaps []model.Snapshot
+	h := ctx.Request.Header
+	for k, vs := range h {
+		for _, v := range vs {
+			println(fmt.Sprintf("k=%s, v=%s", k, v))
+		}
+	}
 	q := s.db.Where("deleted_at IS NULL")
 	if dashboardID != "" {
 		q = q.Where("dashboard_id = ?", dashboardID)
