@@ -160,8 +160,14 @@ export interface TargetDef {
   http_path?: string
   /** HTTP请求方法 - HTTP数据源使用 */
   http_method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
-  /** HTTP请求体 - HTTP数据源使用，POST/PUT等方法 */
+  /** HTTP请求体类型 - HTTP数据源使用：raw, form-data, x-www-form-urlencoded, graphql */
+  http_body_type?: 'raw' | 'form-data' | 'x-www-form-urlencoded' | 'graphql'
+  /** HTTP请求体 - HTTP数据源使用，raw/graphql类型使用 */
   http_body?: string
+  /** HTTP表单数据 - HTTP数据源使用，form-data/x-www-form-urlencoded类型使用 */
+  http_form_data?: Array<{ key: string; value: string }>
+  /** HTTP自定义Headers - HTTP数据源使用，JSON对象 */
+  http_headers?: Record<string, unknown>
   /** HTTP数据格式 - HTTP数据源使用 */
   http_data_format?: 'json' | 'xml' | 'csv'
   /** HTTP数据提取路径 - HTTP数据源使用，JSONPath表达式 */
@@ -417,6 +423,32 @@ export interface QueryInspectReq {
   variables?: Record<string, string | string[]>
   from?: string
   to?: string
+  /** HTTP API路径 - HTTP数据源使用 */
+  http_path?: string
+  /** HTTP请求方法 - HTTP数据源使用 */
+  http_method?: string
+  /** HTTP请求体类型 - HTTP数据源使用 */
+  http_body_type?: 'raw' | 'form-data' | 'x-www-form-urlencoded' | 'graphql'
+  /** HTTP请求体 - HTTP数据源使用 */
+  http_body?: string
+  /** HTTP表单数据 - HTTP数据源使用 */
+  http_form_data?: Array<{ key: string; value: string }>
+  /** HTTP自定义Headers - HTTP数据源使用 */
+  http_headers?: Record<string, unknown>
+  /** HTTP数据格式 - HTTP数据源使用 */
+  http_data_format?: string
+  /** HTTP数据提取路径 - HTTP数据源使用 */
+  http_data_path?: string
+}
+
+export interface HTTPRequestInfo {
+  method: string
+  url: string
+  headers: Record<string, string>
+  body_type: string
+  body?: string
+  form_data?: Array<{ key: string; value: string }>
+  curl_command: string
 }
 
 export interface QueryInspectRes {
@@ -425,6 +457,7 @@ export interface QueryInspectRes {
   rows: Record<string, unknown>[]
   row_count: number
   error?: string
+  request_info?: HTTPRequestInfo
 }
 
 export async function queryInspect(data: QueryInspectReq): Promise<QueryInspectRes> {

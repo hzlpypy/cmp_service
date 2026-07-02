@@ -168,7 +168,7 @@ func main() {
 	file.RegisterFileRouter(e, fnc)
 
 	// Auto-migrate new tables
-	db.AutoMigrate(&model.Snapshot{}, &model.Variable{}, &model.DashboardVersion{})
+	db.AutoMigrate(&model.Snapshot{}, &model.Variable{}, &model.DashboardVersion{}, &model.Datasource{})
 
 	// 启动 HTTP 服务器
 	l.Infof("Server starting on port %d", cfg.Server.Port)

@@ -10,7 +10,9 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -25,14 +27,27 @@ type HTTPQueryConfig struct {
 	Method string `json:"http_method"`
 	// Path API路径，会与数据源Base URL拼接
 	Path string `json:"http_path"`
-	// Body 请求体（用于POST/PUT等）
+	// BodyType 请求体类型：raw, form-data, x-www-form-urlencoded, graphql
+	BodyType string `json:"http_body_type"`
+	// Body 请求体（用于POST/PUT等，raw/graphql类型使用）
 	Body string `json:"http_body"`
+	// FormData 表单数据（用于form-data类型，JSON对象数组）
+	// 格式：[{"key": "field1", "value": "value1"}, {"key": "field2", "value": "value2"}]
+	FormData []FormDataField `json:"http_form_data"`
+	// Headers 自定义HTTP请求头（JSON对象，如 {"X-Custom-Header": "value"}）
+	Headers model.JSONMap `json:"http_headers"`
 	// DataFormat 数据格式：json, xml, csv
 	DataFormat string `json:"http_data_format"`
 	// DataPath 数据提取路径（JSONPath或XPath表达式）
 	DataPath string `json:"http_data_path"`
 	// Timeout 请求超时时间（秒），优先使用target配置，否则使用数据源默认值
 	Timeout int `json:"timeout"`
+}
+
+// FormDataField 表单数据字段
+type FormDataField struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 // HTTPQueryResult HTTP查询结果
@@ -69,8 +84,10 @@ func (e *HTTPQueryExecutor) QueryHTTPDatasource(ds *model.Datasource, queryConfi
 		Rows:    []map[string]interface{}{},
 	}
 
+	e.log.Infof("HTTP查询: Method=%s, Path=%s, BodyType=%s, FormData=%v", queryConfig.Method, queryConfig.Path, queryConfig.BodyType, queryConfig.FormData)
+
 	// 解析数据源认证配置
-	authConfig := e.parseAuthConfig(ds.Config)
+	authConfig := e.ParseAuthConfig(ds.Config)
 
 	// 拼接完整URL: Base URL + Path
 	fullURL := ds.URL + queryConfig.Path
@@ -133,6 +150,30 @@ func (e *HTTPQueryExecutor) QueryHTTPDatasource(ds *model.Datasource, queryConfi
 		body = strings.ReplaceAll(body, "$__toMs", fmt.Sprintf("%d", toMs))
 	}
 
+	// 应用变量替换到FormData字段
+	if queryConfig.FormData != nil {
+		for i, field := range queryConfig.FormData {
+			queryConfig.FormData[i].Key = variables.ReplaceVariables(field.Key, varValues)
+			queryConfig.FormData[i].Value = variables.ReplaceVariables(field.Value, varValues)
+
+			// 手动替换系统变量到FormData（不添加引号）
+			if from != "" && to != "" {
+				queryConfig.FormData[i].Key = strings.ReplaceAll(queryConfig.FormData[i].Key, "${__from}", from)
+				queryConfig.FormData[i].Key = strings.ReplaceAll(queryConfig.FormData[i].Key, "$__from", from)
+				queryConfig.FormData[i].Key = strings.ReplaceAll(queryConfig.FormData[i].Key, "${__to}", to)
+				queryConfig.FormData[i].Key = strings.ReplaceAll(queryConfig.FormData[i].Key, "$__to", to)
+
+				queryConfig.FormData[i].Value = strings.ReplaceAll(queryConfig.FormData[i].Value, "${__from}", from)
+				queryConfig.FormData[i].Value = strings.ReplaceAll(queryConfig.FormData[i].Value, "$__from", from)
+				queryConfig.FormData[i].Value = strings.ReplaceAll(queryConfig.FormData[i].Value, "${__to}", to)
+				queryConfig.FormData[i].Value = strings.ReplaceAll(queryConfig.FormData[i].Value, "$__to", to)
+			}
+		}
+	}
+
+	// 更新queryConfig.Body为已替换变量的版本
+	queryConfig.Body = body
+
 	// 确定超时时间（优先使用查询配置，否则使用数据源默认）
 	timeout := queryConfig.Timeout
 	if timeout <= 0 {
@@ -143,14 +184,15 @@ func (e *HTTPQueryExecutor) QueryHTTPDatasource(ds *model.Datasource, queryConfi
 	}
 
 	// 创建HTTP请求
-	req, err := e.createHTTPRequest(url, queryConfig.Method, body)
+	req, err := e.createHTTPRequest(url, queryConfig.Method, queryConfig)
 	if err != nil {
 		result.Error = fmt.Sprintf("创建HTTP请求失败: %v", err)
 		return result
 	}
 
-	// 设置请求头（数据源Headers + 认证头）
-	e.setRequestHeaders(req, ds.Headers, authConfig)
+	// 设置请求头（数据源Headers + 查询配置Headers + 认证头）
+	// Headers优先级：认证Headers > 查询配置Headers > 数据源Headers
+	e.setRequestHeaders(req, ds.Headers, queryConfig.Headers, authConfig)
 
 	// 发送请求
 	client := &http.Client{
@@ -195,8 +237,8 @@ type HTTPAuthConfig struct {
 	Timeout int `json:"timeout"`
 }
 
-// parseAuthConfig 解析数据源认证配置
-func (e *HTTPQueryExecutor) parseAuthConfig(config model.JSONMap) *HTTPAuthConfig {
+// ParseAuthConfig 解析数据源认证配置
+func (e *HTTPQueryExecutor) ParseAuthConfig(config model.JSONMap) *HTTPAuthConfig {
 	result := &HTTPAuthConfig{
 		AuthType: "none",
 		Timeout:  10,
@@ -229,7 +271,7 @@ func (e *HTTPQueryExecutor) parseAuthConfig(config model.JSONMap) *HTTPAuthConfi
 }
 
 // createHTTPRequest 创建HTTP请求对象
-func (e *HTTPQueryExecutor) createHTTPRequest(url string, method string, body string) (*http.Request, error) {
+func (e *HTTPQueryExecutor) createHTTPRequest(url string, method string, queryConfig *HTTPQueryConfig) (*http.Request, error) {
 	// 默认方法为GET
 	if method == "" {
 		method = "GET"
@@ -244,8 +286,45 @@ func (e *HTTPQueryExecutor) createHTTPRequest(url string, method string, body st
 		req, err = http.NewRequest(method, url, nil)
 	} else {
 		// POST, PUT等方法需要请求体
-		reqBody := []byte(body)
+		// 根据BodyType构建不同格式的请求体
+		var reqBody []byte
+		var contentType string
+
+		switch queryConfig.BodyType {
+		case "raw":
+			// Raw: 原始文本，默认application/json
+			reqBody = []byte(queryConfig.Body)
+			contentType = "application/json"
+		case "x-www-form-urlencoded":
+			// URL编码表单
+			formData := e.buildURLEncodedForm(queryConfig.FormData)
+			reqBody = []byte(formData)
+			contentType = "application/x-www-form-urlencoded"
+		case "form-data":
+			// multipart/form-data
+			body, ct := e.buildMultipartForm(queryConfig.FormData)
+			reqBody = body
+			contentType = ct
+			e.log.Infof("createHTTPRequest: form-data body长度=%d, contentType=%s", len(reqBody), contentType)
+		case "graphql":
+			// GraphQL查询，包装成JSON格式
+			graphQLBody := map[string]string{
+				"query": queryConfig.Body,
+			}
+			jsonBody, _ := json.Marshal(graphQLBody)
+			reqBody = jsonBody
+			contentType = "application/json"
+		default:
+			// 默认使用raw模式
+			reqBody = []byte(queryConfig.Body)
+			contentType = "application/json"
+		}
+
 		req, err = http.NewRequest(method, url, bytes.NewBuffer(reqBody))
+		if err == nil && contentType != "" {
+			// 使用直接赋值，避免Header.Set将boundary转为小写导致multipart解析失败
+			req.Header["Content-Type"] = []string{contentType}
+		}
 	}
 
 	if err != nil {
@@ -255,18 +334,69 @@ func (e *HTTPQueryExecutor) createHTTPRequest(url string, method string, body st
 	return req, nil
 }
 
+// buildURLEncodedForm 构建URL编码表单数据
+func (e *HTTPQueryExecutor) buildURLEncodedForm(formData []FormDataField) string {
+	if formData == nil || len(formData) == 0 {
+		return ""
+	}
+	form := url.Values{}
+	for _, field := range formData {
+		if field.Key != "" {
+			form.Set(field.Key, field.Value)
+		}
+	}
+	return form.Encode()
+}
+
+// buildMultipartForm 构建multipart/form-data请求体
+func (e *HTTPQueryExecutor) buildMultipartForm(formData []FormDataField) ([]byte, string) {
+	if formData == nil || len(formData) == 0 {
+		e.log.Warnf("buildMultipartForm: formData为空")
+		return []byte{}, ""
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	for _, field := range formData {
+		if field.Key != "" {
+			e.log.Infof("buildMultipartForm: 写入字段 key=%s, value=%s", field.Key, field.Value)
+			_ = writer.WriteField(field.Key, field.Value)
+		}
+	}
+	_ = writer.Close()
+
+	// 生成Content-Type：手动拼接确保boundary大小写与body中一致
+	// multipart.NewWriter生成的boundary含大写hex，但Go的Header.Set会转为小写，导致不匹配
+	contentType := fmt.Sprintf("multipart/form-data; boundary=%s", writer.Boundary())
+
+	e.log.Infof("buildMultipartForm: 生成body长度=%d, ContentType=%s", body.Len(), contentType)
+	return body.Bytes(), contentType
+}
+
 // setRequestHeaders 设置请求头
-func (e *HTTPQueryExecutor) setRequestHeaders(req *http.Request, headers model.JSONMap, authConfig *HTTPAuthConfig) {
-	// 设置数据源配置的Headers
-	if headers != nil {
-		for key, value := range headers {
+// Headers优先级：认证Headers > 查询配置Headers > 数据源Headers
+func (e *HTTPQueryExecutor) setRequestHeaders(req *http.Request, dsHeaders model.JSONMap, queryHeaders model.JSONMap, authConfig *HTTPAuthConfig) {
+	// 1. 设置数据源配置的Headers（最低优先级）
+	// 使用直接赋值绕过Go的header key自动canonicalization，保持用户输入的大小写
+	if dsHeaders != nil {
+		for key, value := range dsHeaders {
 			if strValue, ok := value.(string); ok {
-				req.Header.Set(key, strValue)
+				req.Header[key] = []string{strValue}
 			}
 		}
 	}
 
-	// 根据认证类型设置认证头
+	// 2. 设置查询配置的Headers（可以覆盖数据源Headers）
+	if queryHeaders != nil {
+		for key, value := range queryHeaders {
+			if strValue, ok := value.(string); ok {
+				req.Header[key] = []string{strValue}
+			}
+		}
+	}
+
+	// 3. 根据认证类型设置认证头（最高优先级，确保认证信息不被覆盖）
 	switch authConfig.AuthType {
 	case "bearer":
 		if authConfig.AuthToken != "" {
