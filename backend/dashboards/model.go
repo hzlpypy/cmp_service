@@ -104,8 +104,8 @@ type PanelDataReq struct {
 // QueryInspectReq 查询检查器请求。
 // 用于 Grafana 风格的 Query Inspector 功能，展示实际执行的 SQL 和查询结果。
 type QueryInspectReq struct {
-	// RawSQL 用户输入的原始 SQL（含 $var 变量引用）
-	RawSQL string `json:"raw_sql" binding:"required"`
+	// RawSQL 用户输入的原始 SQL（含 $var 变量引用） - MySQL数据源使用
+	RawSQL string `json:"raw_sql"`
 	// DashboardID 仪表盘 ID，用于获取变量值
 	DashboardID string `json:"dashboard_id" binding:"required"`
 	// DatasourceID 数据源 ID，SQL 将在该数据源上执行；为空则使用主数据库
@@ -116,6 +116,17 @@ type QueryInspectReq struct {
 	From string `json:"from,omitempty"`
 	// To 时间范围结束（ISO格式），用于系统变量替换和时间过滤
 	To string `json:"to,omitempty"`
+	// HTTP查询字段 - HTTP数据源使用
+	// HTTPPath API路径，会与数据源Base URL拼接
+	HTTPPath string `json:"http_path,omitempty"`
+	// HTTPMethod HTTP请求方法
+	HTTPMethod string `json:"http_method,omitempty"`
+	// HTTPBody 请求体
+	HTTPBody string `json:"http_body,omitempty"`
+	// HTTPDataFormat 数据格式
+	HTTPDataFormat string `json:"http_data_format,omitempty"`
+	// HTTPDataPath 数据提取路径
+	HTTPDataPath string `json:"http_data_path,omitempty"`
 }
 
 // QueryInspectRes 查询检查器响应。

@@ -99,9 +99,19 @@ export interface DatasourceRes {
   database_name: string
   username: string
   headers: Record<string, unknown>
+  config: HTTPDatasourceConfig
   enabled: boolean
   created_at: string
   updated_at: string
+}
+
+export interface HTTPDatasourceConfig {
+  // 数据源层仅配置认证信息
+  auth_type?: 'none' | 'basic' | 'bearer' | 'api_key'
+  auth_token?: string
+  auth_username?: string
+  auth_password?: string
+  timeout?: number
 }
 
 // DashboardJSON is the complete dashboard definition (Grafana-style)
@@ -136,7 +146,7 @@ export interface DataLinkDef {
 
 export interface TargetDef {
   refId: string
-  /** 用户自定义 SQL 语句（如 SELECT date FROM calendar） */
+  /** 用户自定义 SQL 语句（如 SELECT date FROM calendar） - MySQL数据源 */
   rawSql?: string
   /** 列名别名映射，如 {"date": "日期", "market": "市场"} */
   aliasMap?: Record<string, string>
@@ -146,6 +156,16 @@ export interface TargetDef {
   fields?: string
   category: string
   metricName: string
+  /** HTTP API路径 - HTTP数据源使用，会与数据源Base URL拼接 */
+  http_path?: string
+  /** HTTP请求方法 - HTTP数据源使用 */
+  http_method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+  /** HTTP请求体 - HTTP数据源使用，POST/PUT等方法 */
+  http_body?: string
+  /** HTTP数据格式 - HTTP数据源使用 */
+  http_data_format?: 'json' | 'xml' | 'csv'
+  /** HTTP数据提取路径 - HTTP数据源使用，JSONPath表达式 */
+  http_data_path?: string
 }
 
 export interface DashboardDataRes {
@@ -257,6 +277,7 @@ export async function createDatasource(data: {
   username?: string
   password?: string
   headers?: Record<string, unknown>
+  config?: HTTPDatasourceConfig
 }): Promise<DatasourceRes> {
   return request('/api/v1/datasources/create', { method: 'POST', body: JSON.stringify(data) })
 }
