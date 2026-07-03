@@ -117,7 +117,7 @@ type Interface interface {
 	GetPanelData(ctx *gin.Context, req *PanelDataReq) (*PanelData, error)
 	// QueryInspect 查询检查器：返回变量替换后的 SQL 和查询结果
 	QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryInspectRes, error)
-	// ListVersions 获取仪表盘版本历史列表
+	// ListVersions 获取仪表板版本历史列表
 	ListVersions(ctx *gin.Context, req *VersionListReq) ([]*VersionBriefRes, error)
 	// GetVersion 获取指定版本的详细信息
 	GetVersion(ctx *gin.Context, req *VersionReq) (*VersionRes, error)
@@ -236,7 +236,7 @@ func (s *Server) CreateDashboard(ctx *gin.Context, req *DashboardReq) (*Dashboar
 // 同步更新 panels 表：先删除旧面板，再根据新 JSON 创建面板。
 // 同时创建版本记录。
 func (s *Server) UpdateDashboard(ctx *gin.Context, req *DashboardReq) (*DashboardRes, error) {
-	// 先获取当前仪表盘信息
+	// 先获取当前仪表板信息
 	var current model.Dashboard
 	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&current).Error; err != nil {
 		return nil, err
@@ -449,7 +449,7 @@ func (s *Server) GetDashboardData(ctx *gin.Context, req *DashboardDataReq) (*Das
 	}, nil
 }
 
-// GetPanelData 查询指定仪表盘中单个面板的实际数据。
+// GetPanelData 查询指定仪表板中单个面板的实际数据。
 // 与 GetDashboardData 不同，此接口只查询一个面板，减少数据传输量和处理开销。
 // 流程：
 //  1. 从数据库加载仪表板的 dashboard_json
@@ -724,7 +724,7 @@ func (s *Server) getVariableValues(dashboardID string, reqVars map[string]interf
 	// 从数据库加载变量的当前值
 	dbVars, err := variables.GetVariableValuesFromDB(s.db, dashboardID)
 	if err != nil {
-		s.log.Warnf("加载仪表盘变量失败: %v", err)
+		s.log.Warnf("加载仪表板变量失败: %v", err)
 		return result
 	}
 
@@ -1288,7 +1288,7 @@ func generateVersionID() string {
 	return fmt.Sprintf("ver-%d", time.Now().UnixMilli())
 }
 
-// ListVersions 获取仪表盘版本历史列表。
+// ListVersions 获取仪表板版本历史列表。
 func (s *Server) ListVersions(ctx *gin.Context, req *VersionListReq) ([]*VersionBriefRes, error) {
 	var versions []model.DashboardVersion
 	if err := s.db.Where("dashboard_id = ?", req.DashboardID).
@@ -1297,7 +1297,7 @@ func (s *Server) ListVersions(ctx *gin.Context, req *VersionListReq) ([]*Version
 		return nil, err
 	}
 
-	// 获取当前仪表盘的 JSON，用于判断哪个版本是当前生效版本
+	// 获取当前仪表板的 JSON，用于判断哪个版本是当前生效版本
 	var dashboard model.Dashboard
 	currentJSON, _ := json.Marshal(model.JSONMap{})
 	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.DashboardID).First(&dashboard).Error; err == nil {

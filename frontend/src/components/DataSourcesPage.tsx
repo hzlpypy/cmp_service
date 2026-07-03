@@ -180,7 +180,7 @@ export default function DataSourcesPage() {
       <div className="page-toolbar">
         <h1 className="browse-title">数据源</h1>
         <button className="btn-primary" onClick={() => { resetForm(); setShowForm(true) }}>
-          + 添加数据源
+          <span style={{ position: 'relative', top: '-1px' }}>+</span> 添加数据源
         </button>
       </div>
 
@@ -358,26 +358,26 @@ export default function DataSourcesPage() {
                 <span className="ds-meta-label">URL</span>
                 <span className="ds-meta-value">{ds.url}</span>
               </div>
-              {ds.type === 'mysql' && ds.database_name && (
-                <div className="ds-meta-item">
-                  <span className="ds-meta-label">DB</span>
-                  <span className="ds-meta-value">{ds.database_name}</span>
-                </div>
-              )}
-              {ds.username && (
-                <div className="ds-meta-item">
-                  <span className="ds-meta-label">用户</span>
-                  <span className="ds-meta-value">{ds.username}</span>
-                </div>
-              )}
             </div>
             <div className="ds-card-footer">
               <span className={`ds-card-status ${ds.enabled ? 'enabled' : 'disabled'}`}>
                 {ds.enabled ? '已启用' : '已禁用'}
               </span>
               <div className="ds-card-actions">
-                <button className="btn-sm" onClick={() => handleEdit(ds)}>编辑</button>
-                <button className="btn-sm" onClick={() => handleDelete(ds.id)} style={{ color: 'var(--red)', borderColor: 'transparent' }}>删除</button>
+                <button className="btn-sm" onClick={() => handleEdit(ds)}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                  编辑
+                </button>
+                <button className="btn-sm" onClick={() => handleDelete(ds.id)}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  </svg>
+                  删除
+                </button>
               </div>
             </div>
           </div>

@@ -6,10 +6,11 @@ import DataSourcesPage from './components/DataSourcesPage'
 import SnapshotView from './components/SnapshotView'
 import SnapshotList from './components/SnapshotList'
 import PanelEditPage from './components/PanelEditPage'
-import SettingsPage from './components/SettingsPage'
+
 import type { PanelDef, DatasourceRes, PanelDataRes } from './api'
 import { initTheme } from './themes'
 import './App.css'
+import logo from './assets/logo.png'
 
 type Page = 'browse' | 'snapshots' | 'datasources' | 'settings'
 
@@ -83,9 +84,10 @@ function SnapshotPageWrapper() {
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('browse')
   const [snapshotListKey, setSnapshotListKey] = useState(0)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const location = useLocation()
 
-  // 判断当前是否在仪表盘详情页或快照页
+  // 判断当前是否在仪表板详情页或快照页
   const isInDashboard = location.pathname.startsWith('/d/')
   const isInSnapshot = location.pathname.startsWith('/snapshot/')
 
@@ -96,17 +98,32 @@ function App() {
 
   return (
     <div className="app">
-      {!isInSnapshot && !isInDashboard && (
-      <aside className="sidebar">
+      <header className="top-header">
         <div
-          className="sidebar-logo"
+          className="top-header-logo"
           onClick={() => { setCurrentPage('browse') }}
         >
-          <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
-            <rect width="28" height="28" rx="6" fill="#fc9908" />
-            <path d="M8 13.5l5 5L20 9" stroke="#111" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <img src={logo} alt="Logo" className="top-header-logo-img" />
+          <span className="top-header-title">容量管理平台</span>
         </div>
+      </header>
+
+      <div className="app-body">
+        {!isInSnapshot && !isInDashboard && (
+        <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+          <button
+            className="sidebar-toggle-btn"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {sidebarCollapsed ? (
+                <path d="M9 18l6-6-6-6" />
+              ) : (
+                <path d="M15 18l-6-6 6-6" />
+              )}
+            </svg>
+          </button>
         <nav className="sidebar-nav">
           <div
             className={`nav-item ${currentPage === 'browse' ? 'active' : ''}`}
@@ -139,18 +156,6 @@ function App() {
             <span className="nav-label">数据源</span>
           </div>
         </nav>
-        <div className="sidebar-footer">
-          <div
-            className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}
-            onClick={() => setCurrentPage('settings')}
-            title="设置"
-          >
-            <span className="nav-icon">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v1.07a7.002 7.002 0 015.94 5.93H18a1 1 0 110 2h-1.07a7.002 7.002 0 01-5.93 5.94V18a1 1 0 11-2 0v-1.07a7.002 7.002 0 01-5.94-5.93H2a1 1 0 110-2h1.07a7.002 7.002 0 015.93-5.94V3a1 1 0 011-1zm0 4a4 4 0 100 8 4 4 0 000-8z" /></svg>
-            </span>
-            <span className="nav-label">设置</span>
-          </div>
-        </div>
       </aside>
       )}
 
@@ -160,13 +165,13 @@ function App() {
             <Route path="/" element={
               currentPage === 'browse' ? <BrowsePage /> :
               currentPage === 'snapshots' ? <SnapshotList key={snapshotListKey} /> :
-              currentPage === 'settings' ? <SettingsPage /> :
               <DataSourcesPage />
             } />
             <Route path="/d/:uid/:slug?" element={<DashboardPageWrapper />} />
             <Route path="/snapshot/:key" element={<SnapshotPageWrapper />} />
           </Routes>
         </main>
+      </div>
       </div>
     </div>
   )

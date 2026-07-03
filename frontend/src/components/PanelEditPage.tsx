@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import ChartPanel from './ChartPanel'
 import QueryInspector from './QueryInspector'
 import VariableSelector from './VariableSelector'
+import SqlEditor from './SqlEditor'
 import type { PanelDef, TargetDef, DatasourceRes, DashboardJSON, PanelDataRes, MetricRow, VariableRes, DataLinkDef } from '../api'
 import * as api from '../api'
 
@@ -26,7 +27,7 @@ const CHART_TYPES: { value: PanelDef['type']; label: string; icon: string; hint:
   { value: 'bar', label: '柱状图', icon: '▐', hint: '第一列作为X轴(分类)，数值列作为Y轴(柱高)' },
   { value: 'line', label: '折线图', icon: '⌇', hint: '第一列作为X轴，数值列作为Y轴(折线)' },
   { value: 'pie', label: '饼图', icon: '◉', hint: '第一列作为扇形名称，数值列作为扇形大小' },
-  { value: 'gauge', label: '仪表盘', icon: '◎', hint: '第一行第一列数值作为仪表值' },
+  { value: 'gauge', label: '仪表板', icon: '◎', hint: '第一行第一列数值作为仪表值' },
 ]
 
 const refLabels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -517,24 +518,26 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
       {/* ── 顶部工具栏 ── */}
       <div className="pe-toolbar">
         <div className="pe-toolbar-left">
-          <button className="pe-toolbar-btn" onClick={onBack} title="返回仪表盘">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M10 2L4 8l6 6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <button className="btn-sm" onClick={onBack} title="返回仪表板">
+            &lt; 返回
           </button>
           <div className="pe-breadcrumb">
-            <span className="pe-breadcrumb-link" onClick={onBack}>仪表盘</span>
+            <span className="pe-breadcrumb-link" onClick={onBack}>仪表板</span>
             <span className="pe-breadcrumb-sep">/</span>
             <span className="pe-breadcrumb-current">{p.title || '未命名面板'}</span>
           </div>
         </div>
         <div className="pe-toolbar-right">
           {/* 时间范围选择器 */}
-          <div style={{ position: 'relative', marginRight: 12 }}>
+          <div style={{ position: 'relative' }}>
             <button
-              className="pe-toolbar-btn time-picker-button"
+              className="btn-sm time-picker-button"
               onClick={() => setTimePickerOpen(!timePickerOpen)}
-              style={{ display: 'flex', alignItems: 'center', gap: 4 }}
             >
-              <span>🕐</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: '2px' }}>
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
               <span>{getTimeRangeDisplay()}</span>
               <span style={{ fontSize: 10 }}>▼</span>
             </button>
@@ -676,18 +679,22 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
             )}
           </div>
           {hasUnsaved && (
-            <button className="pe-toolbar-btn pe-btn-discard" onClick={handleDiscard} title="丢弃更改">
+            <button className="btn-sm" onClick={handleDiscard} title="丢弃更改">
               丢弃
             </button>
           )}
-          <button className="pe-toolbar-btn" onClick={handleRefreshPreview} disabled={queryLoading} title="刷新预览数据">
+          <button className="btn-sm" onClick={handleRefreshPreview} disabled={queryLoading} title="刷新预览数据">
             {queryLoading ? (
               <span className="pe-spinner" />
             ) : (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M12.5 7a5.5 5.5 0 11-1.63-3.9l-.87.87A4.25 4.25 0 1011.75 7H12.5zm-.5-5h1v3h-3V4h1.72A5.48 5.48 0 007 1.5 5.5 5.5 0 001.5 7h1A4.5 4.5 0 0112 2.72V2z" fillRule="evenodd"/></svg>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10" />
+                <polyline points="1 20 1 14 7 14" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
             )}
           </button>
-          <button className="pe-btn-save" onClick={handleSave}>
+          <button className="btn-sm save-btn" onClick={handleSave}>
             保存
           </button>
         </div>
@@ -772,74 +779,57 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                 <Section title="可用变量" defaultOpen={false}>
                   {/* 系统内置变量 */}
                   <div style={{ marginBottom: 12 }}>
-                    <div className="pe-label-sm" style={{ marginBottom: 4 }}>系统内置变量（时间范围）</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__from</code>
-                        <span style={{ color: 'var(--text-muted)' }}>开始时间（ISO格式，自动加引号）</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__to</code>
-                        <span style={{ color: 'var(--text-muted)' }}>结束时间（ISO格式，自动加引号）</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__fromUnix</code>
-                        <span style={{ color: 'var(--text-muted)' }}>开始时间（Unix秒，数字）</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__toUnix</code>
-                        <span style={{ color: 'var(--text-muted)' }}>结束时间（Unix秒，数字）</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__fromMs</code>
-                        <span style={{ color: 'var(--text-muted)' }}>开始时间（毫秒，数字）</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__toMs</code>
-                        <span style={{ color: 'var(--text-muted)' }}>结束时间（毫秒，数字）</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>$__timeFilter(column)</code>
-                        <span style={{ color: 'var(--text-muted)' }}>时间过滤宏</span>
-                      </div>
+                    <div className="pe-label-sm">系统内置变量（时间范围）</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+                      {[
+                        { name: '$__from', desc: '开始时间（ISO格式，自动加引号）' },
+                        { name: '$__to', desc: '结束时间（ISO格式，自动加引号）' },
+                        { name: '$__fromUnix', desc: '开始时间（Unix秒，数字）' },
+                        { name: '$__toUnix', desc: '结束时间（Unix秒，数字）' },
+                        { name: '$__fromMs', desc: '开始时间（毫秒，数字）' },
+                        { name: '$__toMs', desc: '结束时间（毫秒，数字）' },
+                        { name: '$__timeFilter(column)', desc: '时间过滤宏' },
+                      ].map((item) => (
+                        <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
+                          <code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>{item.name}</code>
+                          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{item.desc}</span>
+                        </div>
+                      ))}
                     </div>
-                    <div className="pe-hint-text" style={{ marginTop: 4 }}>
+                    <div className="pe-hint-text">
                       示例：WHERE date &gt; $__from（自动替换为 WHERE date &gt; '2026-06-21T10:00:00Z'）
                     </div>
                   </div>
                   {/* 用户自定义变量 */}
                   {variables.length > 0 && (
                     <div>
-                      <div className="pe-label-sm" style={{ marginBottom: 4 }}>仪表盘变量</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11 }}>
+                      <div className="pe-label-sm">仪表板变量</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
                         {variables.map((v) => (
-                          <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 3, color: 'var(--primary)' }}>${v.name}</code>
-                            <span style={{ color: 'var(--text-muted)' }}>{v.label || v.name}</span>
-                            {v.multi && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>(多选)</span>}
+                          <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
+                            <code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>${v.name}</code>
+                            <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{v.label || v.name}</span>
+                            {v.multi && <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-input)', padding: '1px 6px', borderRadius: 3 }}>(多选)</span>}
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
                   {variables.length === 0 && (
-                    <div className="pe-hint-text">暂无自定义变量，可在仪表盘设置中添加</div>
+                    <div className="pe-hint-text" style={{ background: 'transparent', borderLeft: 'none', padding: '4px 0' }}>暂无自定义变量，可在仪表板设置中添加</div>
                   )}
                 </Section>
 
                 <Section title="查询配置" defaultOpen={true} badge={p.targets.length > 1 ? `${p.targets.length}` : undefined}>
                   {p.targets.map((target, ti) => (
                     <div key={ti} className="pe-query-block">
-                      <div className="pe-query-header">
-                        <span className="pe-query-ref">{target.refId}</span>
-                        <span className="pe-query-label">查询</span>
-                        <div style={{ flex: 1 }} />
-                        {p.targets.length > 1 && (
+                      {p.targets.length > 1 && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '4px 8px' }}>
                           <button className="pe-query-remove" onClick={() => removeTarget(ti)} title="移除查询">
                             <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M2 2l8 8m0-8l-8 8" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>
                           </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
 
                       {isMultiQuery && (
                         <div className="pe-field" style={{ marginBottom: 8 }}>
@@ -866,13 +856,12 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                         } else if (!selectedDs || selectedDs.type === 'mysql') {
                           // MySQL数据源 - 显示SQL查询
                           return (
-                            <textarea
+                            <SqlEditor
                               value={target.rawSql || ''}
-                              onChange={(e) => updateTarget(ti, { rawSql: e.target.value })}
+                              onChange={(value) => updateTarget(ti, { rawSql: value })}
                               placeholder="SELECT market, date, weekday FROM calendar LIMIT 100"
-                              className="pe-sql-editor"
-                              spellCheck={false}
-                              rows={4}
+                              height="150px"
+                              dialect="mysql"
                             />
                           )
                         } else if (selectedDs.type === 'http') {
@@ -1466,7 +1455,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                           <select
                             value={(p.options?.alertMode as string) || 'absolute'}
                             onChange={(e) => update({ options: { ...p.options, alertMode: e.target.value } })}
-                            style={{ fontSize: 11, padding: '3px 6px', background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+                            style={{ fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
                           >
                             <option value="absolute">绝对值</option>
                             <option value="percentage">百分比（该列最大值=100%）</option>
@@ -1493,7 +1482,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                           return (
                           <div key={idx} style={{
                             display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6,
-                            padding: '6px 8px', background: 'var(--bg-input)', borderRadius: 4, flexWrap: 'wrap',
+                            padding: '6px 8px', background: '#f8f9fa', borderRadius: 4, flexWrap: 'wrap',
                           }}>
                             {/* 列选择 */}
                             <select
@@ -1503,7 +1492,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                                 alerts[idx] = { ...alerts[idx], column: e.target.value }
                                 update({ options: { ...p.options, cellAlerts: alerts } })
                               }}
-                              style={{ fontSize: 11, padding: '3px 6px', background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+                              style={{ fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
                             >
                               <option value="">选择列</option>
                               {liveColumns.map((col) => (
@@ -1518,7 +1507,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                                 alerts[idx] = { ...alerts[idx], op: e.target.value }
                                 update({ options: { ...p.options, cellAlerts: alerts } })
                               }}
-                              style={{ fontSize: 11, padding: '3px 6px', background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+                              style={{ fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
                             >
                               <option value=">">&gt;</option>
                               <option value=">=">&gt;=</option>
@@ -1537,7 +1526,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                                 update({ options: { ...p.options, cellAlerts: alerts } })
                               }}
                               placeholder="阈值"
-                              style={{ width: 60, fontSize: 11, padding: '3px 6px', background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+                              style={{ width: 60, fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
                             />
                             {/* 颜色选择 */}
                             <input
@@ -1571,10 +1560,21 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                             const alerts = [...((p.options?.cellAlerts as any[]) || []), { column: '', op: '>', value: 1, color: '#ffcc00' }]
                             update({ options: { ...p.options, cellAlerts: alerts } })
                           }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = '#e53935'
+                            e.currentTarget.style.color = '#e53935'
+                            e.currentTarget.style.background = 'rgba(229, 57, 53, 0.05)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--border-color)'
+                            e.currentTarget.style.color = 'var(--text-muted)'
+                            e.currentTarget.style.background = 'none'
+                          }}
                           style={{
                             fontSize: 11, padding: '4px 12px', marginTop: 4,
-                            background: 'var(--bg-input)', color: 'var(--text-primary)',
+                            background: 'none', color: 'var(--text-muted)',
                             border: '1px dashed var(--border-color)', borderRadius: 4, cursor: 'pointer',
+                            transition: 'all 0.15s',
                           }}
                         >
                           + 添加告警规则
@@ -1762,10 +1762,10 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                   {/* 可用变量提示 */}
                   <div className="pe-hint-block" style={{ marginBottom: 12 }}>
                     <div style={{ fontWeight: 600, marginBottom: 6 }}>可用变量：</div>
-                    <div style={{ fontSize: 11, lineHeight: 1.6 }}>
-                      <div><code style={{ background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 3 }}>${"{"}__value{"}"}</code> - 当前字段的值</div>
-                      <div><code style={{ background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 3 }}>${"{"}__field.name{"}"}</code> - 当前字段名</div>
-                      <div><code style={{ background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 3 }}>${"{"}__row.field{"}"}</code> - 当前行其他字段的值（如 ${"{"}__row.id{"}"}）</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11, lineHeight: 1.6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}><code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>${"{"}__value{"}"}</code><span style={{ color: 'var(--text-muted)', fontSize: 11 }}>当前字段的值</span></div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}><code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>${"{"}__field.name{"}"}</code><span style={{ color: 'var(--text-muted)', fontSize: 11 }}>当前字段名</span></div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}><code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>${"{"}__row.field{"}"}</code><span style={{ color: 'var(--text-muted)', fontSize: 11 }}>当前行其他字段的值（如 ${"{"}__row.id{"}"}）</span></div>
                     </div>
                   </div>
                   {/* 链接列表 */}
@@ -1887,15 +1887,24 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                       const links = [...(p.dataLinks || []), { field: '', title: '', url: '', target: '_blank' as '_blank' }]
                       update({ dataLinks: links })
                     }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = '#e53935'
+                      e.currentTarget.style.color = '#e53935'
+                      e.currentTarget.style.background = 'rgba(229, 57, 53, 0.05)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--border-color)'
+                      e.currentTarget.style.color = 'var(--text-muted)'
+                      e.currentTarget.style.background = 'none'
+                    }}
                     style={{
                       fontSize: 11,
                       padding: '6px 12px',
-                      background: 'var(--bg-input)',
-                      color: 'var(--text-primary)',
-                      border: '1px dashed var(--border-color)',
-                      borderRadius: 4,
-                      cursor: 'pointer',
+                      background: 'none',
+                      color: 'var(--text-muted)',
+                      border: '1px dashed var(--border-color)', borderRadius: 4, cursor: 'pointer',
                       width: '100%',
+                      transition: 'all 0.15s',
                     }}
                   >
                     + 添加 Data Link
@@ -1916,7 +1925,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                       placeholder="快照名称（可选）" className="pe-input" />
                   </div>
                   <button className="pe-btn-primary-sm" onClick={handleCreateSnapshot}>
-                    创建快照
+                    <span style={{ position: 'relative', top: '-1px' }}>+</span> 创建快照
                   </button>
                 </Section>
 

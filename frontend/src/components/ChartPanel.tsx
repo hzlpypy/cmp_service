@@ -300,12 +300,12 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
           }
 
           option = {
-            backgroundColor: 'transparent',
+            backgroundColor: '#ffffff',
             tooltip: { trigger: 'axis', ...(type === 'bar' ? { axisPointer: { type: 'shadow' } } : {}), backgroundColor: '#22252b', borderColor: '#33363d', textStyle: { color: '#d8d9da' } },
             legend: (isMultiTarget || valueCols.length > 1 || data.some((r, i) => (targets[i]?.metricName || '').length > 0))
               ? { data: legendData, bottom: 0, textStyle: { color: '#a0a3a8', fontSize: 11 } }
               : undefined,
-            grid: { left: '3%', right: '4%', bottom: legendData.length > 1 ? '15%' : '8%', top: '8%', containLabel: true },
+            grid: { left: '6%', right: '4%', bottom: legendData.length > 1 ? '15%' : '10%', top: '12%', containLabel: true },
             // 横向柱状图：交换 xAxis 和 yAxis
             xAxis: isHorizontal
               ? { type: 'value', name: valueCols[0] || '', nameTextStyle: { color: '#6e7178' }, axisLabel: { color: '#6e7178' }, splitLine: { lineStyle: { color: '#2c2f36' } } }
@@ -357,7 +357,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
           const gaugeValue = primaryValues.length > 0 ? primaryValues[0] : 0
           const gaugeName = names.length > 0 ? names[0] : '使用率'
           option = {
-            backgroundColor: 'transparent',
+            backgroundColor: '#ffffff',
             series: [{
               type: 'gauge', min: 0, max: 100, startAngle: 210, endAngle: -30,
               center: ['50%', '60%'], radius: '85%',
@@ -405,7 +405,15 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
         try { chart.resize() } catch {}
       }
       window.addEventListener('resize', handleResize)
+
+      // 监听容器大小变化
+      const resizeObserver = new ResizeObserver(() => {
+        try { chart.resize() } catch {}
+      })
+      if (el) resizeObserver.observe(el)
+
       return () => {
+        resizeObserver.disconnect()
         window.removeEventListener('resize', handleResize)
         // 移除点击事件
         if (dataLinks && dataLinks.length > 0) {
@@ -929,7 +937,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
           )}
         </div>
       ) : (
-        <div ref={chartRef} style={{ width: '100%', flex: 1, minHeight: 0 }}>
+        <div ref={chartRef} style={{ width: '100%', flex: 1, minHeight: '200px' }}>
           {chartError && (
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',

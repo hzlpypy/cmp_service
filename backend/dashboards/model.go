@@ -48,7 +48,7 @@ type PanelBriefRes struct {
 	ID string `json:"id"`
 	// Title 面板标题
 	Title string `json:"title"`
-	// Type 图表类型：bar（柱状图）、line（折线图）、pie（饼图）、gauge（仪表盘）、table（表格）
+	// Type 图表类型：bar（柱状图）、line（折线图）、pie（饼图）、gauge（仪表板）、table（表格）
 	Type string `json:"type"`
 	// GridPosX 网格X坐标
 	GridPosX int `json:"grid_pos_x"`
@@ -90,9 +90,9 @@ type DashboardDataReq struct {
 }
 
 // PanelDataReq 单个面板数据查询请求。
-// 指定仪表盘ID和面板ID，返回该面板的查询结果。
+// 指定仪表板ID和面板ID，返回该面板的查询结果。
 type PanelDataReq struct {
-	// DashboardID 仪表盘主键ID（必填）
+	// DashboardID 仪表板主键ID（必填）
 	DashboardID string `json:"dashboard_id" binding:"required"`
 	// PanelID 面板主键ID（必填）
 	PanelID string `json:"panel_id" binding:"required"`
@@ -244,13 +244,13 @@ func ToDashboardRes(m *model.Dashboard) *DashboardRes {
 
 // VersionListReq 版本列表请求参数。
 type VersionListReq struct {
-	// DashboardID 仪表盘ID
+	// DashboardID 仪表板ID
 	DashboardID string `json:"dashboard_id" binding:"required"`
 }
 
 // VersionReq 单个版本请求参数。
 type VersionReq struct {
-	// DashboardID 仪表盘ID
+	// DashboardID 仪表板ID
 	DashboardID string `json:"dashboard_id" binding:"required"`
 	// Version 版本号
 	Version int `json:"version"`
@@ -258,7 +258,7 @@ type VersionReq struct {
 
 // VersionRestoreReq 版本还原请求参数。
 type VersionRestoreReq struct {
-	// DashboardID 仪表盘ID
+	// DashboardID 仪表板ID
 	DashboardID string `json:"dashboard_id" binding:"required"`
 	// Version 要还原的版本号
 	Version int `json:"version" binding:"required"`
@@ -268,7 +268,7 @@ type VersionRestoreReq struct {
 
 // VersionCompareReq 版本对比请求参数。
 type VersionCompareReq struct {
-	// DashboardID 仪表盘ID
+	// DashboardID 仪表板ID
 	DashboardID string `json:"dashboard_id" binding:"required"`
 	// VersionFrom 起始版本号
 	VersionFrom int `json:"version_from" binding:"required"`
@@ -280,13 +280,13 @@ type VersionCompareReq struct {
 type VersionRes struct {
 	// ID 版本记录ID
 	ID string `json:"id"`
-	// DashboardID 仪表盘ID
+	// DashboardID 仪表板ID
 	DashboardID string `json:"dashboard_id"`
 	// Version 版本号
 	Version int `json:"version"`
-	// Title 该版本的仪表盘标题
+	// Title 该版本的仪表板标题
 	Title string `json:"title"`
-	// DashboardJSON 该版本的仪表盘完整JSON定义
+	// DashboardJSON 该版本的仪表板完整JSON定义
 	DashboardJSON interface{} `json:"dashboard_json"`
 	// Message 版本说明
 	Message string `json:"message"`
@@ -302,7 +302,7 @@ type VersionBriefRes struct {
 	ID string `json:"id"`
 	// Version 版本号
 	Version int `json:"version"`
-	// Title 该版本的仪表盘标题
+	// Title 该版本的仪表板标题
 	Title string `json:"title"`
 	// Message 版本说明
 	Message string `json:"message"`
@@ -316,7 +316,7 @@ type VersionBriefRes struct {
 
 // VersionDiffRes 版本差异对比响应。
 type VersionDiffRes struct {
-	// DashboardID 仪表盘ID
+	// DashboardID 仪表板ID
 	DashboardID string `json:"dashboard_id"`
 	// VersionFrom 起始版本号
 	VersionFrom int `json:"version_from"`

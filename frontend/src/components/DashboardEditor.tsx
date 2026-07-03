@@ -76,19 +76,19 @@ export default function DashboardEditor({ title, json, dashboardId, onSave, onCl
           ) : tab === 'visual' ? (
             <div style={{ padding: '8px 0' }}>
               <div className="form-group">
-                <label>仪表盘名称</label>
+                <label>仪表板名称</label>
                 <input
                   value={dashboardTitle}
                   onChange={(e) => setDashboardTitle(e.target.value)}
-                  placeholder="输入仪表盘名称"
+                  placeholder="输入仪表板名称"
                   style={{ fontSize: 14 }}
                 />
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 16, padding: 12, background: 'var(--bg-input)', borderRadius: 4, lineHeight: 1.6 }}>
                 <div style={{ fontWeight: 500, marginBottom: 6 }}>提示</div>
                 <ul style={{ margin: 0, paddingLeft: 16 }}>
-                  <li>编辑报表详情：返回仪表盘点击报表右上角菜单 → 编辑</li>
-                  <li>调整布局：在仪表盘页面直接拖拽报表</li>
+                  <li>编辑报表详情：返回仪表板点击报表右上角菜单 → 编辑</li>
+                  <li>调整布局：在仪表板页面直接拖拽报表</li>
                   <li>高级编辑：切换到「JSON编辑」标签页</li>
                 </ul>
               </div>
@@ -108,7 +108,7 @@ export default function DashboardEditor({ title, json, dashboardId, onSave, onCl
 
         <div className="modal-footer">
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}>
-            {tab === 'variables' ? '管理仪表盘变量' : tab === 'visual' ? '编辑仪表盘基本信息' : '直接编辑 JSON'}
+            {tab === 'variables' ? '管理仪表板变量' : tab === 'visual' ? '编辑仪表板基本信息' : '直接编辑 JSON'}
           </div>
           <button className="btn-secondary" onClick={onClose}>取消</button>
           <button className="btn-primary" onClick={handleSave} disabled={saving}>{saving ? '保存中...' : '保存'}</button>

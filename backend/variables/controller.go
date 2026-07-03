@@ -1,4 +1,4 @@
-// Package variables 提供仪表盘变量管理的 HTTP 控制器层。
+// Package variables 提供仪表板变量管理的 HTTP 控制器层。
 // 负责处理 HTTP 请求，调用业务逻辑层，返回 JSON 响应。
 package variables
 
@@ -16,7 +16,7 @@ func NewController(svc Interface) *Controller {
 	return &Controller{svc: svc}
 }
 
-// ListVariables 获取仪表盘的变量列表。
+// ListVariables 获取仪表板的变量列表。
 // POST /api/v1/variables/list
 func (c *Controller) ListVariables(ctx *gin.Context) {
 	var req VariableListReq

@@ -1,4 +1,4 @@
-// Package variables 提供仪表盘变量管理的业务逻辑层。
+// Package variables 提供仪表板变量管理的业务逻辑层。
 // 实现变量的增删改查操作，以及动态获取变量可选值的功能。
 package variables
 
@@ -23,7 +23,7 @@ type Server struct {
 
 // Interface 定义变量业务操作的接口。
 type Interface interface {
-	// ListVariables 获取仪表盘的变量列表
+	// ListVariables 获取仪表板的变量列表
 	ListVariables(ctx *gin.Context, dashboardID string) ([]*VariableRes, error)
 	// GetVariable 获取单个变量详情
 	GetVariable(ctx *gin.Context, req *VariableReq) (*VariableRes, error)
@@ -42,7 +42,7 @@ func NewServer(db *gorm.DB, log *logrus.Logger) Interface {
 	return &Server{db: db, log: log}
 }
 
-// ListVariables 获取指定仪表盘的所有变量，按 sort_order 排序。
+// ListVariables 获取指定仪表板的所有变量，按 sort_order 排序。
 func (s *Server) ListVariables(ctx *gin.Context, dashboardID string) ([]*VariableRes, error) {
 	var records []*model.Variable
 	if err := s.db.Where("dashboard_id = ? AND deleted_at IS NULL", dashboardID).
@@ -516,7 +516,7 @@ func escapeSingleQuote(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
 
-// GetVariableValuesFromDB 从数据库获取仪表盘的所有变量及其当前值。
+// GetVariableValuesFromDB 从数据库获取仪表板的所有变量及其当前值。
 func GetVariableValuesFromDB(db *gorm.DB, dashboardID string) ([]VariableValue, error) {
 	var variables []*model.Variable
 	if err := db.Where("dashboard_id = ? AND deleted_at IS NULL", dashboardID).

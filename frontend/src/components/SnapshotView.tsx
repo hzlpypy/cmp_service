@@ -124,7 +124,7 @@ export default function SnapshotView({ snapshotKey, onClose }: SnapshotViewProps
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <h2 style={{ fontSize: isSinglePanel ? 14 : 16, fontWeight: 600, margin: 0 }}>{displayTitle}</h2>
-          <span style={{ fontSize: 11, color: 'var(--bg-input)', background: 'var(--text-muted)', padding: '2px 8px', borderRadius: 10 }}>快照</span>
+          <span style={{ fontSize: 10, color: '#e53935', background: 'rgba(229,57,53,0.1)', padding: '2px 8px', borderRadius: 10, fontWeight: 500 }}>快照</span>
           {snap.name && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{snap.name}</span>}
           {!isSinglePanel && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{displayPanels.length} 个面板</span>}
         </div>
@@ -134,9 +134,12 @@ export default function SnapshotView({ snapshotKey, onClose }: SnapshotViewProps
             className="btn-sm"
             onClick={handleAIInsightsClick}
             disabled={!hasReportContent}
-            style={{ fontSize: 11 }}
+            style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
           >
-            🤖 AI 洞察
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L9.5 8.5 3 9.5l4.5 5L6.5 21 12 17.5 17.5 21l-1-6.5L21 9.5l-6.5-1z" />
+            </svg>
+            AI 洞察
           </button>
           {/* 保存按钮：只有显示 AI 洞察且有数据时才显示 */}
           {showAIInsights && aiData && (

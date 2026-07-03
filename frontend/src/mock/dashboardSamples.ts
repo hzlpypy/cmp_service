@@ -71,7 +71,7 @@ export const samplePieDashboard: DashboardJSON = {
   ],
 }
 
-/** 样例4: 仪表盘 - 单机房使用率 */
+/** 样例4: 仪表板 - 单机房使用率 */
 export const sampleGaugeDashboard: DashboardJSON = {
   title: '威新机房电信线路使用率',
   panels: [
@@ -174,7 +174,7 @@ export const sampleDashboards: { key: string; label: string; json: DashboardJSON
   { key: 'bar', label: '柱状图 - 机房带宽对比', json: sampleBarDashboard },
   { key: 'line', label: '折线图 - 带宽趋势', json: sampleLineDashboard },
   { key: 'pie', label: '饼图 - 带宽分布', json: samplePieDashboard },
-  { key: 'gauge', label: '仪表盘 - 使用率', json: sampleGaugeDashboard },
+  { key: 'gauge', label: '仪表板 - 使用率', json: sampleGaugeDashboard },
   { key: 'table', label: '表格 - 指标明细', json: sampleTableDashboard },
   { key: 'mixed', label: '综合大盘 - 多图表', json: sampleMixedDashboard },
 ]
