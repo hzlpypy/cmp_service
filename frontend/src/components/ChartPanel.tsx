@@ -441,9 +441,42 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
   // 优先使用后端返回的列顺序（columns），保证与 SQL 查询一致
   const tableHeaders = useMemo(() => {
     if (allData.length === 0) return []
-    if (columns && columns.length > 0) return columns
-    return Object.keys(allData[0])
-  }, [allData, columns])
+    let headers: string[] = []
+    if (columns && columns.length > 0) {
+      headers = columns
+    } else {
+      headers = Object.keys(allData[0])
+    }
+    // 根据options.hiddenColumns过滤隐藏的列（默认全显示）
+    const hiddenColumns = (options?.hiddenColumns as string[] | undefined) || []
+    headers = headers.filter(h => !hiddenColumns.includes(h))
+    
+    // 根据options.columnOrder重新排序（如果用户自定义了顺序）
+    const columnOrder = (options?.columnOrder as string[] | undefined) || []
+    if (columnOrder.length > 0) {
+      // 只排序存在于headers中的列，保持其他列在后面
+      const orderedHeaders: string[] = []
+      const remainingHeaders: string[] = []
+      
+      // 先按columnOrder的顺序添加
+      for (const orderedCol of columnOrder) {
+        if (headers.includes(orderedCol)) {
+          orderedHeaders.push(orderedCol)
+        }
+      }
+      
+      // 再添加不在columnOrder中的列（保持原始顺序）
+      for (const h of headers) {
+        if (!orderedHeaders.includes(h)) {
+          remainingHeaders.push(h)
+        }
+      }
+      
+      headers = [...orderedHeaders, ...remainingHeaders]
+    }
+    
+    return headers
+  }, [allData, columns, options?.hiddenColumns, options?.columnOrder])
 
   // 表格排序与列筛选
   const [sortColumn, setSortColumn] = useState<string | null>(null)

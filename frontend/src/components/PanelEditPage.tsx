@@ -465,6 +465,18 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
     }))
   }
 
+  // 使用回调更新target的headers，确保基于最新state而非闭包中的旧数据
+  const updateTargetHeaders = (ti: number, updater: (headers: Record<string, string>) => Record<string, string> | undefined) => {
+    setP((prev) => ({
+      ...prev,
+      targets: prev.targets.map((t, i) => {
+        if (i !== ti) return t
+        const curHeaders = (t.http_headers as Record<string, string> | undefined) || {}
+        return { ...t, http_headers: updater(curHeaders) }
+      }),
+    }))
+  }
+
   const setAlias = (ti: number, col: string, alias: string) => {
     setP((prev) => ({
       ...prev,
@@ -808,7 +820,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                   )}
                 </Section>
 
-                <Section title="SQL 查询" defaultOpen={true} badge={p.targets.length > 1 ? `${p.targets.length}` : undefined}>
+                <Section title="查询配置" defaultOpen={true} badge={p.targets.length > 1 ? `${p.targets.length}` : undefined}>
                   {p.targets.map((target, ti) => (
                     <div key={ti} className="pe-query-block">
                       {p.targets.length > 1 && (
@@ -831,13 +843,363 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                         </div>
                       )}
 
-                      <SqlEditor
-                        value={target.rawSql || ''}
-                        onChange={(value) => updateTarget(ti, { rawSql: value })}
-                        placeholder="SELECT market, date, weekday FROM calendar LIMIT 100"
-                        height="150px"
-                        dialect="mysql"
-                      />
+                      {/* 根据数据源类型显示不同的查询配置 */}
+                      {(() => {
+                        const selectedDs = datasources.find(ds => ds.id === p.datasource_id)
+                        if (!p.datasource_id) {
+                          // 未选择数据源 - 提示选择
+                          return (
+                            <div className="pe-hint-text" style={{ textAlign: 'center', padding: '30px 20px', background: 'var(--bg-input)', borderRadius: 4 }}>
+                              请先在上方选择数据源
+                            </div>
+                          )
+                        } else if (!selectedDs || selectedDs.type === 'mysql') {
+                          // MySQL数据源 - 显示SQL查询
+                          return (
+                            <SqlEditor
+                              value={target.rawSql || ''}
+                              onChange={(value) => updateTarget(ti, { rawSql: value })}
+                              placeholder="SELECT market, date, weekday FROM calendar LIMIT 100"
+                              height="150px"
+                              dialect="mysql"
+                            />
+                          )
+                        } else if (selectedDs.type === 'http') {
+                          // HTTP数据源 - 显示HTTP配置
+                          return (
+                            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 6, overflow: 'hidden' }}>
+                              {/* 标题区域 */}
+                              <div style={{ 
+                                background: 'linear-gradient(135deg, rgba(87, 148, 242, 0.1), rgba(87, 148, 242, 0.05))',
+                                padding: '10px 12px',
+                                borderBottom: '1px solid var(--border-color)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8
+                              }}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--primary)' }}>
+                                  <circle cx="12" cy="12" r="10"/>
+                                  <line x1="2" y1="12" x2="22" y2="12"/>
+                                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                                </svg>
+                                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>HTTP API 配置</span>
+                              </div>
+
+                              {/* 配置内容 */}
+                              <div style={{ padding: '12px' }}>
+                                {/* URL和方法 */}
+                                <div style={{ marginBottom: 12 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', marginRight: 8 }}>请求配置</label>
+                                    <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-input)', padding: '1px 6px', borderRadius: 3 }}>必填</span>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    <div style={{ flex: 1 }}>
+                                      <input
+                                        value={target.http_path || ''}
+                                        onChange={(e) => updateTarget(ti, { http_path: e.target.value })}
+                                        placeholder="/api/v1/users"
+                                        className="pe-input-sm"
+                                        style={{ fontSize: 13 }}
+                                      />
+                                    </div>
+                                    <div style={{ flex: 0.15, minWidth: 80 }}>
+                                      <select
+                                        value={target.http_method || 'GET'}
+                                        onChange={(e) => updateTarget(ti, { http_method: e.target.value as any })}
+                                        className="pe-select-sm"
+                                        style={{ fontSize: 13, fontWeight: 600 }}
+                                      >
+                                        <option value="GET">GET</option>
+                                        <option value="POST">POST</option>
+                                      </select>
+                                    </div>
+                                  </div>
+                                  {/* 完整URL预览 */}
+                                  <div style={{ 
+                                    marginTop: 6, 
+                                    padding: '6px 8px', 
+                                    background: 'var(--bg-input)', 
+                                    borderRadius: 3,
+                                    fontSize: 11,
+                                    color: 'var(--text-secondary)',
+                                    fontFamily: 'monospace',
+                                    border: '1px solid var(--border-color)'
+                                  }}>
+                                    <span style={{ color: 'var(--text-muted)' }}>完整URL: </span>
+                                    <span style={{ color: 'var(--primary)', fontWeight: 600 }}>{selectedDs.url}</span>
+                                    <span style={{ color: 'var(--text-primary)' }}>{target.http_path || '/'}</span>
+                                  </div>
+                                </div>
+
+                                {/* 请求体（POST才显示） */}
+                                {target.http_method === 'POST' && (
+                                  <div style={{ marginBottom: 12 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6, gap: 12 }}>
+                                      <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>请求体</label>
+                                      <select
+                                        value={target.http_body_type || 'raw'}
+                                        onChange={(e) => updateTarget(ti, { http_body_type: e.target.value as any })}
+                                        className="pe-select-sm"
+                                        style={{ fontSize: 11 }}
+                                      >
+                                        <option value="raw">Raw (JSON)</option>
+                                        <option value="form-data">Form Data</option>
+                                        <option value="x-www-form-urlencoded">x-www-form-urlencoded</option>
+                                        <option value="graphql">GraphQL</option>
+                                      </select>
+                                    </div>
+
+                                    {/* Raw格式 - JSON文本 */}
+                                    {(target.http_body_type === 'raw' || !target.http_body_type) && (
+                                      <textarea
+                                        value={target.http_body || ''}
+                                        onChange={(e) => updateTarget(ti, { http_body: e.target.value })}
+                                        placeholder='{"key": "value"}'
+                                        className="pe-sql-editor"
+                                        spellCheck={false}
+                                        rows={3}
+                                        style={{ fontSize: 12 }}
+                                      />
+                                    )}
+
+                                    {/* GraphQL格式 */}
+                                    {target.http_body_type === 'graphql' && (
+                                      <div>
+                                        <textarea
+                                          value={target.http_body || ''}
+                                          onChange={(e) => updateTarget(ti, { http_body: e.target.value })}
+                                          placeholder='query { users { id name } }'
+                                          className="pe-sql-editor"
+                                          spellCheck={false}
+                                          rows={3}
+                                          style={{ fontSize: 12 }}
+                                        />
+                                        <div className="pe-hint-text" style={{ marginTop: 4, fontSize: 9 }}>
+                                          GraphQL查询语句，会自动包装成 {"{ \"query\": \"...\" }"} 格式发送
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Form Data 和 x-www-form-urlencoded - key-value列表 */}
+                                    {(target.http_body_type === 'form-data' || target.http_body_type === 'x-www-form-urlencoded') && (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                        {(() => {
+                                          const formData = target.http_form_data || []
+                                          return (
+                                            <>
+                                              {formData.map((field, idx) => (
+                                                <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                                  <input
+                                                    value={field.key}
+                                                    onChange={(e) => {
+                                                      const newData = [...formData]
+                                                      newData[idx] = { ...newData[idx], key: e.target.value }
+                                                      updateTarget(ti, { http_form_data: newData })
+                                                    }}
+                                                    placeholder="字段名"
+                                                    className="pe-input-sm"
+                                                    style={{ flex: 1, fontSize: 11 }}
+                                                  />
+                                                  <input
+                                                    value={field.value}
+                                                    onChange={(e) => {
+                                                      const newData = [...formData]
+                                                      newData[idx] = { ...newData[idx], value: e.target.value }
+                                                      updateTarget(ti, { http_form_data: newData })
+                                                    }}
+                                                    placeholder="值"
+                                                    className="pe-input-sm"
+                                                    style={{ flex: 1, fontSize: 11 }}
+                                                  />
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                      const newData = formData.filter((_, i) => i !== idx)
+                                                      updateTarget(ti, { http_form_data: newData.length > 0 ? newData : undefined })
+                                                    }}
+                                                    className="pe-link-btn"
+                                                    style={{ fontSize: 10, padding: '2px 6px' }}
+                                                  >
+                                                    删除
+                                                  </button>
+                                                </div>
+                                              ))}
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  const newData = [...formData, { key: '', value: '' }]
+                                                  updateTarget(ti, { http_form_data: newData })
+                                                }}
+                                                className="pe-link-btn"
+                                                style={{ fontSize: 10 }}
+                                              >
+                                                + 添加字段
+                                              </button>
+                                            </>
+                                          )
+                                        })()}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* 数据解析配置 */}
+                                <div style={{ marginBottom: 8 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', marginRight: 8 }}>数据解析</label>
+                                    <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-input)', padding: '1px 6px', borderRadius: 3 }}>可选</span>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    <div style={{ flex: 0.3, minWidth: 100 }}>
+                                      <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>数据格式</label>
+                                      <select
+                                        value={target.http_data_format || 'json'}
+                                        onChange={(e) => updateTarget(ti, { http_data_format: e.target.value as any })}
+                                        className="pe-select-sm"
+                                        style={{ fontSize: 12 }}
+                                      >
+                                        <option value="json">JSON</option>
+                                        <option value="xml">XML</option>
+                                        <option value="csv">CSV</option>
+                                      </select>
+                                    </div>
+                                    <div style={{ flex: 0.7 }}>
+                                      <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>数据路径 (JSONPath)</label>
+                                      <input
+                                        value={target.http_data_path || ''}
+                                        onChange={(e) => updateTarget(ti, { http_data_path: e.target.value })}
+                                        placeholder="data.results 或 items[*]"
+                                        className="pe-input-sm"
+                                        style={{ fontSize: 12 }}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* 自定义Headers */}
+                                <div style={{ marginTop: 8 }}>
+                                  <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>
+                                    自定义Headers [可选]
+                                  </label>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                    {(() => {
+                                      const headersObj = target.http_headers as Record<string, unknown> | undefined
+                                      const entries = headersObj
+                                        ? Object.entries(headersObj) as Array<[string, string]>
+                                        : []
+                                      return (
+                                        <>
+                                          {entries.map(([key, value], idx) => (
+                                            <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                              <input
+                                                value={key.startsWith('__new_') ? '' : key}
+                                                onChange={(e) => {
+                                                  const val = e.target.value
+                                                  updateTargetHeaders(ti, (curHeaders) => {
+                                                    const objEntries = Object.entries(curHeaders)
+                                                    const newObj: Record<string, string> = {}
+                                                    objEntries.forEach(([k, v], i) => {
+                                                      if (i === idx) {
+                                                        if (val) newObj[val] = v
+                                                      } else {
+                                                        newObj[k] = v
+                                                      }
+                                                    })
+                                                    return newObj
+                                                  })
+                                                }}
+                                                placeholder="Key"
+                                                className="pe-input-sm"
+                                                style={{ flex: 1, fontSize: 11 }}
+                                              />
+                                              <input
+                                                value={value}
+                                                onChange={(e) => {
+                                                  const val = e.target.value
+                                                  updateTargetHeaders(ti, (curHeaders) => {
+                                                    const objEntries = Object.entries(curHeaders)
+                                                    const newObj: Record<string, string> = {}
+                                                    objEntries.forEach(([k, v], i) => {
+                                                      newObj[k] = (i === idx) ? val : v
+                                                    })
+                                                    return newObj
+                                                  })
+                                                }}
+                                                placeholder="Value"
+                                                className="pe-input-sm"
+                                                style={{ flex: 1, fontSize: 11 }}
+                                              />
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  updateTargetHeaders(ti, (curHeaders) => {
+                                                    const objEntries = Object.entries(curHeaders)
+                                                    const newObj: Record<string, string> = {}
+                                                    objEntries.forEach(([k, v], i) => {
+                                                      if (i !== idx) newObj[k] = v
+                                                    })
+                                                    return Object.keys(newObj).length > 0 ? newObj : undefined
+                                                  })
+                                                }}
+                                                className="pe-link-btn"
+                                                style={{ fontSize: 10, padding: '2px 6px' }}
+                                              >
+                                                删除
+                                              </button>
+                                            </div>
+                                          ))}
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              updateTargetHeaders(ti, (curHeaders) => {
+                                                const tempKey = `__new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+                                                return { ...curHeaders, [tempKey]: '' }
+                                              })
+                                            }}
+                                            className="pe-link-btn"
+                                            style={{ fontSize: 10 }}
+                                          >
+                                            + 添加Header
+                                          </button>
+                                        </>
+                                      )
+                                    })()}
+                                  </div>
+                                  <div className="pe-hint-text" style={{ marginTop: 2, fontSize: 9 }}>
+                                    优先级：认证Headers {'>'} 查询Headers {'>'} 数据源Headers
+                                  </div>
+                                </div>
+
+                                {/* 变量支持提示 */}
+                                <div style={{ 
+                                  marginTop: 10, 
+                                  padding: '8px 10px', 
+                                  background: 'linear-gradient(135deg, rgba(255, 152, 48, 0.1), rgba(255, 152, 48, 0.05))',
+                                  borderRadius: 4,
+                                  border: '1px solid rgba(255, 152, 48, 0.2)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6
+                                }}>
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: '#ff9830' }}>
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <line x1="12" y1="16" x2="12" y2="12"/>
+                                    <line x1="12" y1="8" x2="12.01" y2="8"/>
+                                  </svg>
+                                  <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                                    <span style={{ fontWeight: 600 }}>支持变量替换：</span>
+                                    <span style={{ fontFamily: 'monospace', color: 'var(--primary)', marginLeft: 4 }}>$__from, $__to, $__fromMs</span>
+                                    <span style={{ marginLeft: 8 }}>及自定义变量：</span>
+                                    <span style={{ fontFamily: 'monospace', color: 'var(--primary)', marginLeft: 4 }}>$city, $user</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        }
+                        return null
+                      })()}
 
                       <div className="pe-alias-section">
                         <div className="pe-alias-header">
@@ -871,7 +1233,16 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                       <QueryInspector
                         dashboardId={dashboardId}
                         datasourceId={p.datasource_id}
+                        datasources={datasources}
                         rawSql={target.rawSql || ''}
+                        httpPath={target.http_path || ''}
+                        httpMethod={target.http_method || ''}
+                        httpBodyType={target.http_body_type}
+                        httpBody={target.http_body || ''}
+                        httpFormData={target.http_form_data}
+                        httpHeaders={target.http_headers}
+                        httpDataFormat={target.http_data_format || ''}
+                        httpDataPath={target.http_data_path || ''}
                         variables={variables}
                         from={getTimeRange()?.from}
                         to={getTimeRange()?.to}
@@ -1210,6 +1581,168 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                         </button>
                       </div>
                     )}
+
+                    {/* 字段显示配置 */}
+                    <div style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, display: 'block' }}>
+                        字段显示配置
+                      </label>
+                      <div className="pe-hint-text" style={{ marginBottom: 8, marginLeft: 0 }}>
+                        勾选要显示的字段，未勾选的字段将被隐藏（默认全显示）。可拖动调整显示顺序。
+                      </div>
+                      {liveColumns.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 250, overflowY: 'auto', padding: '4px 0' }}>
+                          {/* 显示所有字段（包括隐藏的），方便用户重新勾选 */}
+                          {(() => {
+                            const hiddenColumns = (p.options?.hiddenColumns as string[] | undefined) || []
+                            const columnOrder = (p.options?.columnOrder as string[] | undefined) || []
+                            
+                            // 计算显示顺序（包含所有字段）
+                            let orderedColumns: string[] = []
+                            if (columnOrder.length > 0) {
+                              // 先按columnOrder的顺序
+                              for (const orderedCol of columnOrder) {
+                                if (liveColumns.includes(orderedCol)) {
+                                  orderedColumns.push(orderedCol)
+                                }
+                              }
+                              // 再添加不在columnOrder中的字段（保持原始顺序）
+                              for (const col of liveColumns) {
+                                if (!orderedColumns.includes(col)) {
+                                  orderedColumns.push(col)
+                                }
+                              }
+                            } else {
+                              // 使用原始顺序（显示所有字段）
+                              orderedColumns = liveColumns
+                            }
+                            
+                            return orderedColumns.map((col, idx) => {
+                              const checked = !hiddenColumns.includes(col)
+                              return (
+                                <div key={col} style={{ 
+                                  display: 'flex', alignItems: 'center', gap: 6, 
+                                  padding: '6px 8px', borderRadius: 4, 
+                                  background: checked ? 'var(--bg-input)' : 'transparent',
+                                  border: '1px solid var(--border-color)',
+                                  transition: 'all 0.2s',
+                                  opacity: checked ? 1 : 0.7
+                                }}>
+                                  {/* 排序按钮（仅对显示的字段有效） */}
+                                  {checked && (
+                                    <div style={{ display: 'flex', gap: 2 }}>
+                                      <button
+                                        onClick={() => {
+                                          if (idx === 0) return
+                                          const newOrder = [...orderedColumns]
+                                          const temp = newOrder[idx - 1]
+                                          newOrder[idx - 1] = newOrder[idx]
+                                          newOrder[idx] = temp
+                                          update({ options: { ...p.options, columnOrder: newOrder } })
+                                        }}
+                                        disabled={idx === 0}
+                                        style={{
+                                          width: 20, height: 20, fontSize: 10,
+                                          background: idx === 0 ? 'transparent' : 'var(--bg-hover)',
+                                          color: idx === 0 ? 'var(--text-muted)' : 'var(--text-primary)',
+                                          border: 'none', borderRadius: 3, cursor: idx === 0 ? 'not-allowed' : 'pointer',
+                                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                        }}
+                                        title="上移"
+                                      >
+                                        ↑
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          if (idx === orderedColumns.length - 1) return
+                                          const newOrder = [...orderedColumns]
+                                          const temp = newOrder[idx]
+                                          newOrder[idx] = newOrder[idx + 1]
+                                          newOrder[idx + 1] = temp
+                                          update({ options: { ...p.options, columnOrder: newOrder } })
+                                        }}
+                                        disabled={idx === orderedColumns.length - 1}
+                                        style={{
+                                          width: 20, height: 20, fontSize: 10,
+                                          background: idx === orderedColumns.length - 1 ? 'transparent' : 'var(--bg-hover)',
+                                          color: idx === orderedColumns.length - 1 ? 'var(--text-muted)' : 'var(--text-primary)',
+                                          border: 'none', borderRadius: 3, cursor: idx === orderedColumns.length - 1 ? 'not-allowed' : 'pointer',
+                                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                        }}
+                                        title="下移"
+                                      >
+                                        ↓
+                                      </button>
+                                    </div>
+                                  )}
+                                  
+                                  {/* 占位符（隐藏字段不显示排序按钮） */}
+                                  {!checked && <div style={{ width: 44 }} />}
+                                  
+                                  {/* checkbox */}
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      const hiddenColumns = (p.options?.hiddenColumns as string[] | undefined) || []
+                                      const columnOrder = (p.options?.columnOrder as string[] | undefined) || []
+                                      const nextHidden = checked
+                                        ? [...hiddenColumns, col]
+                                        : hiddenColumns.filter((c) => c !== col)
+                                      
+                                      const nextOrder = checked
+                                        ? columnOrder.filter(c => c !== col)
+                                        : columnOrder
+                                      
+                                      update({ options: { ...p.options, hiddenColumns: nextHidden, columnOrder: nextOrder } })
+                                    }}
+                                    style={{ cursor: 'pointer' }}
+                                  />
+                                  
+                                  {/* 列名 */}
+                                  <span style={{ flex: 1, fontSize: 12, color: checked ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                                    {col}
+                                  </span>
+                                  
+                                  {/* 状态指示 */}
+                                  {checked && (
+                                    <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-hover)', padding: '1px 4px', borderRadius: 2 }}>
+                                      #{idx + 1}
+                                    </span>
+                                  )}
+                                  {!checked && (
+                                    <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 2 }}>
+                                      已隐藏
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })
+                          })()}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>
+                          暂无列数据，请先点击「刷新」获取预览数据。
+                        </div>
+                      )}
+                      {liveColumns.length > 0 && (
+                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                          <span>显示: {liveColumns.length - ((p.options?.hiddenColumns as string[] | undefined) || []).length} / {liveColumns.length}</span>
+                          <button
+                            onClick={() => update({ options: { ...p.options, hiddenColumns: [], columnOrder: [] } })}
+                            style={{ fontSize: 10, padding: '2px 8px', background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 3, cursor: 'pointer' }}
+                          >
+                            全部显示（恢复默认顺序）
+                          </button>
+                          <button
+                            onClick={() => update({ options: { ...p.options, hiddenColumns: liveColumns, columnOrder: [] } })}
+                            style={{ fontSize: 10, padding: '2px 8px', background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 3, cursor: 'pointer' }}
+                          >
+                            全部隐藏
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </Section>
                 )}
 

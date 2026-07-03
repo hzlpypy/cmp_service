@@ -176,6 +176,10 @@ type Datasource struct {
 	Password string `gorm:"type:varchar(256);default:''" json:"password"`
 	// Headers HTTP请求头（仅HTTP类型使用，JSON格式）
 	Headers JSONMap `gorm:"type:json" json:"headers"`
+	// Config HTTP数据源专用配置（JSON格式）
+	// 仅包含认证配置：auth_type(认证类型)、auth_token(Token值)、auth_username(用户名)、auth_password(密码)
+	// 其他查询参数（method、path、data_format、data_path等）在面板target配置中定义
+	Config JSONMap `gorm:"type:json" json:"config"`
 	// Enabled 是否启用该数据源
 	Enabled bool `gorm:"type:tinyint(1);default:1" json:"enabled"`
 }

@@ -3,6 +3,7 @@
 package dashboards
 
 import (
+	"cmp_service_backend/datasources"
 	"cmp_service_backend/model"
 	"cmp_service_backend/variables"
 	"database/sql"
@@ -37,10 +38,64 @@ func convertValue(val interface{}) interface{} {
 	return val
 }
 
+// buildCurlCommand 根据HTTP请求详情生成等效的curl命令
+func buildCurlCommand(info *HTTPRequestInfo) string {
+	var parts []string
+	parts = append(parts, "curl")
+
+	// 方法
+	method := strings.ToUpper(info.Method)
+	if method != "" && method != "GET" {
+		parts = append(parts, fmt.Sprintf("-X %s", method))
+	}
+
+	// Headers
+	for k, v := range info.Headers {
+		parts = append(parts, fmt.Sprintf("-H '%s: %s'", k, v))
+	}
+
+	// Content-Type for form data
+	if info.BodyType == "form-data" && len(info.FormData) > 0 {
+		// 不需要额外设置，curl -F 会自动处理
+	} else if info.BodyType == "x-www-form-urlencoded" && len(info.FormData) > 0 {
+		parts = append(parts, "-H 'Content-Type: application/x-www-form-urlencoded'")
+	}
+
+	// Body
+	switch info.BodyType {
+	case "raw":
+		if info.Body != "" {
+			parts = append(parts, fmt.Sprintf("-d '%s'", info.Body))
+		}
+	case "graphql":
+		if info.Body != "" {
+			parts = append(parts, fmt.Sprintf("-d '{\"query\": \"%s\"}'", strings.ReplaceAll(info.Body, "\"", "\\\"")))
+		}
+	case "form-data":
+		for _, fd := range info.FormData {
+			parts = append(parts, fmt.Sprintf("-F '%s=%s'", fd["key"], fd["value"]))
+		}
+	case "x-www-form-urlencoded":
+		var pairs []string
+		for _, fd := range info.FormData {
+			pairs = append(pairs, fmt.Sprintf("%s=%s", fd["key"], fd["value"]))
+		}
+		if len(pairs) > 0 {
+			parts = append(parts, fmt.Sprintf("-d '%s'", strings.Join(pairs, "&")))
+		}
+	}
+
+	// URL
+	parts = append(parts, fmt.Sprintf("'%s'", info.URL))
+
+	return strings.Join(parts, " \\\n  ")
+}
+
 // Server 仪表板业务服务，持有数据库连接和日志记录器。
 type Server struct {
-	db  *gorm.DB
-	log *logrus.Logger
+	db              *gorm.DB
+	log             *logrus.Logger
+	httpQueryExec   *datasources.HTTPQueryExecutor
 }
 
 // Interface 定义仪表板业务操作的接口。
@@ -76,21 +131,26 @@ type Interface interface {
 
 // NewServer 创建仪表板业务服务实例。
 func NewServer(db *gorm.DB, log *logrus.Logger) Interface {
-	return &Server{db: db, log: log}
+	return &Server{
+		db:            db,
+		log:           log,
+		httpQueryExec: datasources.NewHTTPQueryExecutor(log),
+	}
 }
 
 // getDatasourceDB 根据数据源 ID 获取对应的数据库连接。
 // 如果 datasourceID 为空，返回主应用数据库连接（s.db）。
 // 对于 MySQL 类型数据源，动态创建临时连接并返回 *gorm.DB。
-func (s *Server) getDatasourceDB(datasourceID string) (*gorm.DB, error) {
+// 对于 HTTP 类型数据源，返回 nil，后续使用HTTP查询器处理。
+func (s *Server) getDatasourceDB(datasourceID string) (*gorm.DB, *model.Datasource, error) {
 	if datasourceID == "" {
-		return s.db, nil
+		return s.db, nil, nil
 	}
 
 	// 从数据库查询数据源配置
 	var ds model.Datasource
 	if err := s.db.Where("id = ? AND enabled = 1 AND deleted_at IS NULL", datasourceID).First(&ds).Error; err != nil {
-		return nil, fmt.Errorf("数据源 %s 不存在或已禁用: %v", datasourceID, err)
+		return nil, nil, fmt.Errorf("数据源 %s 不存在或已禁用: %v", datasourceID, err)
 	}
 
 	switch ds.Type {
@@ -99,7 +159,7 @@ func (s *Server) getDatasourceDB(datasourceID string) (*gorm.DB, error) {
 			ds.Username, ds.Password, ds.URL, ds.DatabaseName)
 		sqlDB, err := sql.Open("mysql", dsn)
 		if err != nil {
-			return nil, fmt.Errorf("连接数据源 %s 失败: %v", ds.Name, err)
+			return nil, nil, fmt.Errorf("连接数据源 %s 失败: %v", ds.Name, err)
 		}
 		sqlDB.SetConnMaxLifetime(5 * time.Minute)
 		sqlDB.SetMaxOpenConns(5)
@@ -108,11 +168,14 @@ func (s *Server) getDatasourceDB(datasourceID string) (*gorm.DB, error) {
 		gormDB, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB}), &gorm.Config{})
 		if err != nil {
 			sqlDB.Close()
-			return nil, fmt.Errorf("初始化 GORM 连接失败: %v", err)
+			return nil, nil, fmt.Errorf("初始化 GORM 连接失败: %v", err)
 		}
-		return gormDB, nil
+		return gormDB, &ds, nil
+	case "http":
+		// HTTP数据源返回nil，使用HTTP查询器处理
+		return nil, &ds, nil
 	default:
-		return nil, fmt.Errorf("不支持的数据源类型: %s", ds.Type)
+		return nil, nil, fmt.Errorf("不支持的数据源类型: %s", ds.Type)
 	}
 }
 
@@ -432,63 +495,194 @@ func (s *Server) GetPanelData(ctx *gin.Context, req *PanelDataReq) (*PanelData, 
 
 // QueryInspect 查询检查器：执行变量替换后的 SQL 并返回实际 SQL 和查询结果。
 // 用于前端 Query Inspector 功能，帮助用户调试 SQL 查询和变量替换。
+// 支持MySQL和HTTP数据源。
 func (s *Server) QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryInspectRes, error) {
 	// 获取变量值
 	varValues := s.getVariableValues(req.DashboardID, req.Variables)
 
-	// 使用共享的 SQL 处理逻辑（变量替换、系统变量、时间过滤）
-	// Query Inspector 不自动添加时间过滤（chartType 为空）
-	processedSQL := ProcessRawSQL(req.RawSQL, varValues, req.From, req.To, "")
-
 	res := &QueryInspectRes{
-		ProcessedSQL: processedSQL,
+		ProcessedSQL: "",
 		Columns:      []string{},
 		Rows:         []map[string]interface{}{},
 	}
 
-	// 安全检查：只允许 SELECT 开头
-	trimmed := strings.TrimSpace(processedSQL)
-	upper := strings.ToUpper(trimmed)
-	if !strings.HasPrefix(upper, "SELECT") {
-		res.Error = "只允许 SELECT 查询"
-		return res, nil
-	}
-
-	// 获取数据源对应的数据库连接
-	db, err := s.getDatasourceDB(req.DatasourceID)
+	// 获取数据源对应的数据库连接和数据源配置
+	db, ds, err := s.getDatasourceDB(req.DatasourceID)
 	if err != nil {
 		res.Error = fmt.Sprintf("获取数据源连接失败: %v", err)
 		return res, nil
 	}
 
-	// 执行 SQL
-	rows, err := db.Raw(trimmed).Rows()
-	if err != nil {
-		res.Error = err.Error()
-		return res, nil
+	// 根据数据源类型执行查询
+	if ds != nil && ds.Type == "http" {
+		// HTTP数据源查询
+		// 从请求中提取HTTP查询参数
+		queryConfig := &datasources.HTTPQueryConfig{
+			Method:      req.HTTPMethod,
+			Path:        req.HTTPPath,
+			BodyType:    req.HTTPBodyType,
+			Body:        req.HTTPBody,
+			FormData:    req.HTTPFormData,
+			Headers:     req.HTTPHeaders,
+			DataFormat:  req.HTTPDataFormat,
+			DataPath:    req.HTTPDataPath,
+		}
+		if queryConfig.Method == "" {
+			queryConfig.Method = "GET"
+		}
+		if queryConfig.DataFormat == "" {
+			queryConfig.DataFormat = "json"
+		}
+
+		s.log.Infof("QueryInspect HTTP: BodyType=%s, Body=%s, FormData=%v, Headers=%v", queryConfig.BodyType, queryConfig.Body, queryConfig.FormData, queryConfig.Headers)
+
+		// 解析认证配置（用于构建请求详情）
+		authConfig := s.httpQueryExec.ParseAuthConfig(ds.Config)
+
+		// 应用变量替换到URL（与实际查询保持一致）
+		fullURL := ds.URL + queryConfig.Path
+		url := variables.ReplaceVariables(fullURL, varValues)
+
+		s.log.Infof("QueryInspect HTTP: 原始URL=%s, 变量替换后=%s, From=%s, To=%s", fullURL, url, req.From, req.To)
+
+		// 对于HTTP查询，需要手动替换系统变量（不添加引号）
+		// 因为URL参数不需要引号，而ReplaceSystemVariables会添加引号（用于SQL）
+		if req.From != "" && req.To != "" {
+			// 解析时间
+			fromTime, _ := time.Parse(time.RFC3339, req.From)
+			toTime, _ := time.Parse(time.RFC3339, req.To)
+
+			s.log.Infof("QueryInspect HTTP: 替换系统变量前URL=%s", url)
+
+			// 替换 $__from（不添加引号）
+			url = strings.ReplaceAll(url, "${__from}", req.From)
+			url = strings.ReplaceAll(url, "$__from", req.From)
+
+			// 替换 $__to（不添加引号）
+			url = strings.ReplaceAll(url, "${__to}", req.To)
+			url = strings.ReplaceAll(url, "$__to", req.To)
+
+			// 替换 $__fromUnix（毫秒）
+			fromMs := fromTime.UnixMilli()
+			url = strings.ReplaceAll(url, "${__fromUnix}", fmt.Sprintf("%d", fromMs))
+			url = strings.ReplaceAll(url, "$__fromUnix", fmt.Sprintf("%d", fromMs))
+
+			// 替换 $__toUnix（毫秒）
+			toMs := toTime.UnixMilli()
+			url = strings.ReplaceAll(url, "${__toUnix}", fmt.Sprintf("%d", toMs))
+			url = strings.ReplaceAll(url, "$__toUnix", fmt.Sprintf("%d", toMs))
+
+			// 替换 $__fromMs 和 $__toMs（毫秒）
+			url = strings.ReplaceAll(url, "${__fromMs}", fmt.Sprintf("%d", fromMs))
+			url = strings.ReplaceAll(url, "$__fromMs", fmt.Sprintf("%d", fromMs))
+			url = strings.ReplaceAll(url, "${__toMs}", fmt.Sprintf("%d", toMs))
+			url = strings.ReplaceAll(url, "$__toMs", fmt.Sprintf("%d", toMs))
+
+			s.log.Infof("QueryInspect HTTP: 替换系统变量后URL=%s", url)
+		} else {
+			s.log.Warnf("QueryInspect HTTP: 未提供时间范围(From=%s, To=%s)，跳过系统变量替换", req.From, req.To)
+		}
+
+		// 执行HTTP查询
+		result := s.httpQueryExec.QueryHTTPDatasource(ds, queryConfig, varValues, req.From, req.To)
+		if result.Error != "" {
+			res.Error = result.Error
+			return res, nil
+		}
+
+		// 返回变量替换后的完整URL（包含真实变量值）
+		res.ProcessedSQL = url
+		res.Columns = result.Columns
+		res.Rows = result.Rows
+		res.RowCount = len(result.Rows)
+
+		// 构建HTTP请求详情
+		reqInfo := &HTTPRequestInfo{
+			Method:   queryConfig.Method,
+			URL:      url,
+			BodyType: queryConfig.BodyType,
+			Headers:  make(map[string]string),
+		}
+		// 合并数据源Headers + 查询Headers
+		if ds.Headers != nil {
+			for k, v := range ds.Headers {
+				if sv, ok := v.(string); ok {
+					reqInfo.Headers[k] = sv
+				}
+			}
+		}
+		if queryConfig.Headers != nil {
+			for k, v := range queryConfig.Headers {
+				if sv, ok := v.(string); ok {
+					reqInfo.Headers[k] = sv
+				}
+			}
+		}
+		// 认证Headers
+		if authConfig.AuthType == "bearer" && authConfig.AuthToken != "" {
+			reqInfo.Headers["Authorization"] = "Bearer " + authConfig.AuthToken
+		} else if authConfig.AuthType == "api_key" && authConfig.AuthToken != "" {
+			reqInfo.Headers["X-API-Key"] = authConfig.AuthToken
+		}
+		// 请求体
+		switch queryConfig.BodyType {
+		case "raw", "graphql":
+			reqInfo.Body = queryConfig.Body
+		case "form-data", "x-www-form-urlencoded":
+			for _, fd := range queryConfig.FormData {
+				if fd.Key != "" {
+					reqInfo.FormData = append(reqInfo.FormData, map[string]string{"key": fd.Key, "value": fd.Value})
+				}
+			}
+		}
+		// 生成curl命令
+		reqInfo.CurlCommand = buildCurlCommand(reqInfo)
+		res.RequestInfo = reqInfo
+	} else {
+		// MySQL数据源查询
+		// 使用共享的 SQL 处理逻辑（变量替换、系统变量、时间过滤）
+		// Query Inspector 不自动添加时间过滤（chartType 为空）
+		processedSQL := ProcessRawSQL(req.RawSQL, varValues, req.From, req.To, "")
+		res.ProcessedSQL = processedSQL
+
+		// 安全检查：只允许 SELECT 开头
+		trimmed := strings.TrimSpace(processedSQL)
+		upper := strings.ToUpper(trimmed)
+		if !strings.HasPrefix(upper, "SELECT") {
+			res.Error = "只允许 SELECT 查询"
+			return res, nil
+		}
+
+		// 执行 SQL
+		rows, err := db.Raw(trimmed).Rows()
+		if err != nil {
+			res.Error = err.Error()
+			return res, nil
+		}
+		defer rows.Close()
+
+		columns, _ := rows.Columns()
+		res.Columns = columns
+
+		for rows.Next() {
+			values := make([]interface{}, len(columns))
+			valuePtrs := make([]interface{}, len(columns))
+			for i := range values {
+				valuePtrs[i] = &values[i]
+			}
+			if err := rows.Scan(valuePtrs...); err != nil {
+				continue
+			}
+			row := make(map[string]interface{}, len(columns))
+			for i, col := range columns {
+				row[col] = convertValue(values[i])
+			}
+			res.Rows = append(res.Rows, row)
+		}
+
+		res.RowCount = len(res.Rows)
 	}
-	defer rows.Close()
 
-	columns, _ := rows.Columns()
-	res.Columns = columns
-
-	for rows.Next() {
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-		if err := rows.Scan(valuePtrs...); err != nil {
-			continue
-		}
-		row := make(map[string]interface{}, len(columns))
-		for i, col := range columns {
-			row[col] = convertValue(values[i])
-		}
-		res.Rows = append(res.Rows, row)
-	}
-
-	res.RowCount = len(res.Rows)
 	return res, nil
 }
 
@@ -546,12 +740,13 @@ func (s *Server) queryPanelDataWithVars(panelMap map[string]interface{}, from, t
 	// 读取面板指定的数据源ID
 	datasourceID := getStringField(panelMap, "datasource_id")
 
-	// 获取数据源对应的数据库连接
-	db, err := s.getDatasourceDB(datasourceID)
+	// 获取数据源对应的数据库连接和数据源配置
+	db, ds, err := s.getDatasourceDB(datasourceID)
 	if err != nil {
 		s.log.Warnf("面板 %s 获取数据源 %s 失败，使用主数据库: %v", panelID, datasourceID, err)
 		db = s.db
 		datasourceID = ""
+		ds = nil
 	}
 
 	if datasourceID != "" {
@@ -577,9 +772,22 @@ func (s *Server) queryPanelDataWithVars(panelMap map[string]interface{}, from, t
 			continue
 		}
 
-		cols, rows, err := s.queryTargetWithVars(db, tMap, from, to, panelType, varValues)
-		if err != nil {
-			s.log.Warnf("查询 panel %s target 数据失败: %v", panelID, err)
+		// 根据数据源类型决定查询方式
+		var cols []string
+		var rows []map[string]interface{}
+		var queryErr error
+
+		if ds != nil && ds.Type == "http" {
+			// HTTP数据源使用HTTP查询器
+			// 从数据源获取Base URL和认证，从target获取path、method等参数
+			cols, rows, queryErr = s.queryHTTPTarget(ds, tMap, varValues, from, to)
+		} else {
+			// MySQL数据源或默认数据库使用SQL查询
+			cols, rows, queryErr = s.queryTargetWithVars(db, tMap, from, to, panelType, varValues)
+		}
+
+		if queryErr != nil {
+			s.log.Warnf("查询 panel %s target 数据失败: %v", panelID, queryErr)
 			continue
 		}
 		if columns == nil {
@@ -618,6 +826,110 @@ func (s *Server) queryTargetWithVars(db *gorm.DB, tMap map[string]interface{}, f
 	category := getStringField(tMap, "category")
 	metricName := getStringField(tMap, "metricName")
 	return s.queryNetworkMetrics(db, category, metricName, from, to)
+}
+
+// queryHTTPTarget 根据 target map 执行HTTP数据源查询。
+// HTTP数据源的查询参数从target配置中获取，URL由数据源Base URL + target path拼接。
+func (s *Server) queryHTTPTarget(ds *model.Datasource, tMap map[string]interface{}, varValues []variables.VariableValue, from, to string) ([]string, []map[string]interface{}, error) {
+	// 从target配置中提取HTTP查询参数
+	queryConfig := &datasources.HTTPQueryConfig{
+		Method:      getStringField(tMap, "http_method"),
+		Path:        getStringField(tMap, "http_path"),
+		BodyType:    getStringField(tMap, "http_body_type"),
+		Body:        getStringField(tMap, "http_body"),
+		DataFormat:  getStringField(tMap, "http_data_format"),
+		DataPath:    getStringField(tMap, "http_data_path"),
+	}
+
+	// 解析http_headers（可选）
+	if headersVal, ok := tMap["http_headers"]; ok {
+		if headersMap, ok := headersVal.(map[string]interface{}); ok {
+			queryConfig.Headers = headersMap
+		}
+	}
+
+	// 解析http_form_data（可选，用于form-data和x-www-form-urlencoded）
+	if formDataVal, ok := tMap["http_form_data"]; ok {
+		if formDataArr, ok := formDataVal.([]interface{}); ok {
+			var formData []datasources.FormDataField
+			for _, item := range formDataArr {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					field := datasources.FormDataField{
+						Key:   getStringField(itemMap, "key"),
+						Value: getStringField(itemMap, "value"),
+					}
+					formData = append(formData, field)
+				}
+			}
+			queryConfig.FormData = formData
+		}
+	}
+
+	// 解析timeout（可选）
+	if timeoutVal, ok := tMap["timeout"]; ok {
+		switch v := timeoutVal.(type) {
+		case float64:
+			queryConfig.Timeout = int(v)
+		case int:
+			queryConfig.Timeout = v
+		}
+	}
+
+	// 如果method为空，默认为GET
+	if queryConfig.Method == "" {
+		queryConfig.Method = "GET"
+	}
+
+	// 如果data_format为空，默认为json
+	if queryConfig.DataFormat == "" {
+		queryConfig.DataFormat = "json"
+	}
+
+	// 执行HTTP查询
+	result := s.httpQueryExec.QueryHTTPDatasource(ds, queryConfig, varValues, from, to)
+
+	// 检查错误
+	if result.Error != "" {
+		return nil, nil, fmt.Errorf(result.Error)
+	}
+
+	// 应用别名映射（如果有）
+	aliasMap := make(map[string]string)
+	if amRaw, ok := tMap["aliasMap"]; ok {
+		if am, ok := amRaw.(map[string]interface{}); ok {
+			for k, v := range am {
+				if vs, ok := v.(string); ok && vs != "" {
+					aliasMap[k] = vs
+				}
+			}
+		}
+	}
+
+	// 应用别名映射生成最终列名和行数据
+	finalColumns := make([]string, 0, len(result.Columns))
+	for _, col := range result.Columns {
+		if alias, ok := aliasMap[col]; ok {
+			finalColumns = append(finalColumns, alias)
+		} else {
+			finalColumns = append(finalColumns, col)
+		}
+	}
+
+	// 应用别名映射到行数据
+	finalRows := make([]map[string]interface{}, 0, len(result.Rows))
+	for _, row := range result.Rows {
+		finalRow := make(map[string]interface{}, len(row))
+		for col, val := range row {
+			if alias, ok := aliasMap[col]; ok {
+				finalRow[alias] = val
+			} else {
+				finalRow[col] = val
+			}
+		}
+		finalRows = append(finalRows, finalRow)
+	}
+
+	return finalColumns, finalRows, nil
 }
 
 // ProcessRawSQL 对原始 SQL 进行统一处理：变量替换、系统内置变量、时间过滤宏。
@@ -761,97 +1073,6 @@ func (s *Server) queryWithRawSQLAndVars(db *gorm.DB, rawSQL string, tMap map[str
 	}
 
 	return finalColumns, result, nil
-}
-
-// queryPanelData 根据单个面板配置查询数据。
-// 每个 target 查询一组数据，返回按 target 分组的结果。
-// 面板可指定 datasource_id，不同面板可使用不同数据源获取数据。
-func (s *Server) queryPanelData(panelMap map[string]interface{}, from, to string) PanelData {
-	panelID := getStringField(panelMap, "id")
-	panelTitle := getStringField(panelMap, "title")
-	panelType := getStringField(panelMap, "type")
-
-	// 读取面板指定的数据源ID，用于根据不同的数据源查询数据
-	datasourceID := getStringField(panelMap, "datasource_id")
-
-	// 获取数据源对应的数据库连接
-	db, err := s.getDatasourceDB(datasourceID)
-	if err != nil {
-		s.log.Warnf("面板 %s 获取数据源 %s 失败，使用主数据库: %v", panelID, datasourceID, err)
-		db = s.db
-		datasourceID = ""
-	}
-
-	if datasourceID != "" {
-		s.log.Infof("面板 %s 使用数据源: %s", panelID, datasourceID)
-	}
-
-	// 解析 targets 配置
-	targetsRaw, ok := panelMap["targets"]
-	if !ok {
-		return PanelData{PanelID: panelID, PanelTitle: panelTitle, PanelType: panelType, Target: [][]map[string]interface{}{}}
-	}
-	targetsList, ok := targetsRaw.([]interface{})
-	if !ok {
-		return PanelData{PanelID: panelID, PanelTitle: panelTitle, PanelType: panelType, Target: [][]map[string]interface{}{}}
-	}
-
-	// 为每个 target 查询数据
-	targetResults := make([][]map[string]interface{}, 0, len(targetsList))
-	var columns []string
-	for _, tRaw := range targetsList {
-		tMap, ok := tRaw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		// 读取 target 配置，传入数据源连接
-		cols, rows, err := s.queryTargetFromMap(db, tMap, from, to)
-		if err != nil {
-			s.log.Warnf("查询 panel %s target 数据失败: %v", panelID, err)
-			continue
-		}
-		// 取第一个 target 的列顺序作为面板整体的列顺序
-		if columns == nil {
-			columns = cols
-		}
-		targetResults = append(targetResults, rows)
-	}
-
-	return PanelData{
-		PanelID:      panelID,
-		PanelTitle:   panelTitle,
-		PanelType:    panelType,
-		DatasourceID: datasourceID,
-		Columns:      columns,
-		Target:       targetResults,
-	}
-}
-
-// queryTargetFromMap 根据 target map 执行数据库查询。
-// 支持三种模式（按优先级）：
-//   - rawSql 模式：执行用户自定义 SQL 语句
-//   - table 模式：指定 table + fields 查询（向后兼容）
-//   - 默认模式：查询 net_work_metrics 表
-func (s *Server) queryTargetFromMap(db *gorm.DB, tMap map[string]interface{}, from, to string) ([]string, []map[string]interface{}, error) {
-	rawSQL := getStringField(tMap, "rawSql")
-
-	// 模式1: 用户自定义 SQL
-	if rawSQL != "" {
-		return s.queryWithRawSQL(db, rawSQL, tMap)
-	}
-
-	// 模式2: 自定义表模式
-	table := getStringField(tMap, "table")
-	fields := getStringField(tMap, "fields")
-	if table != "" {
-		return s.queryCustomTable(db, table, fields, tMap)
-	}
-
-	// 模式3: 默认 net_work_metrics
-	category := getStringField(tMap, "category")
-	metricName := getStringField(tMap, "metricName")
-	return s.queryNetworkMetrics(db, category, metricName, from, to)
 }
 
 // queryWithRawSQL 执行用户自定义 SQL 并应用别名映射。

@@ -78,6 +78,123 @@ function ScoreCircle({ score, loading }: { score: number; loading: boolean }) {
   )
 }
 
+function ScoreHelpIcon() {
+  const [showHelp, setShowHelp] = useState(false)
+
+  const scoreRules = [
+    { range: '90-100', level: '优秀', color: '#22c55e', desc: '系统运行非常健康，各项指标表现优异，无明显风险' },
+    { range: '80-89', level: '良好', color: '#22c55e', desc: '系统运行稳定，大部分指标正常，存在少量可改进项' },
+    { range: '70-79', level: '中等', color: '#f59e0b', desc: '系统整体可用，部分指标存在波动或接近阈值，需关注' },
+    { range: '60-69', level: '一般', color: '#f59e0b', desc: '系统存在明显问题，多个指标异常，需要及时处理' },
+    { range: '0-59', level: '危险', color: '#ef4444', desc: '系统运行存在严重风险，关键指标异常，需立即处理' }
+  ]
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={() => setShowHelp(!showHelp)}
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: '50%',
+          border: '1px solid var(--border-color)',
+          background: 'var(--bg-button)',
+          color: 'var(--text-muted)',
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'all 0.2s ease'
+        }}
+        title="查看打分规则"
+      >
+        ?
+      </button>
+      {showHelp && (
+        <div style={{
+          position: 'absolute',
+          top: 28,
+          left: 0,
+          width: 320,
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-color)',
+          borderRadius: 8,
+          padding: 12,
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+          zIndex: 1000,
+          fontSize: 11
+        }}>
+          <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10, fontSize: 13 }}>
+            📊 健康度评分规则
+          </div>
+          {scoreRules.map((rule, i) => (
+            <div key={i} style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              padding: '6px 0',
+              borderBottom: i < scoreRules.length - 1 ? '1px dashed var(--border-color)' : 'none'
+            }}>
+              <div style={{
+                width: 50,
+                fontWeight: 600,
+                color: rule.color,
+                flexShrink: 0
+              }}>
+                {rule.range}
+              </div>
+              <div style={{
+                flex: 1,
+                minWidth: 0
+              }}>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>
+                  {rule.level}
+                </div>
+                <div style={{ color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                  {rule.desc}
+                </div>
+              </div>
+            </div>
+          ))}
+          <div style={{
+            marginTop: 10,
+            padding: '8px 10px',
+            background: 'var(--bg-input)',
+            borderRadius: 4,
+            color: 'var(--text-muted)',
+            fontSize: 10
+          }}>
+            💡 AI基于报表数据分析多个维度：<br/>
+            数据完整性、指标趋势、异常值、阈值接近度等
+          </div>
+          <button
+            onClick={() => setShowHelp(false)}
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              width: 20,
+              height: 20,
+              borderRadius: '50%',
+              border: 'none',
+              background: 'var(--bg-input)',
+              color: 'var(--text-muted)',
+              fontSize: 12,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function EditableText({ content, loading, waiting, isEditing, onChange }: { content: string; loading: boolean; waiting?: boolean; isEditing?: boolean; onChange?: (v: string) => void }) {
   if (loading || waiting || !content) return <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>AI 生成中...</span>
   if (isEditing) {
@@ -305,8 +422,9 @@ export function AIInsightsPanel({ dashboardId, dashboardTitle, panelsData, panel
       {/* 核心结论与风险 */}
       <div style={{ marginBottom: 12 }}>
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, gap: 8 }}>
             <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>📊 核心结论与风险</span>
+            <ScoreHelpIcon />
             <button 
               onClick={() => setIsEditing(prev => ({ ...prev, risk: !prev.risk }))}
               disabled={anyLoading || !contents.conclusion}

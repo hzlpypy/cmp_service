@@ -99,9 +99,19 @@ export interface DatasourceRes {
   database_name: string
   username: string
   headers: Record<string, unknown>
+  config: HTTPDatasourceConfig
   enabled: boolean
   created_at: string
   updated_at: string
+}
+
+export interface HTTPDatasourceConfig {
+  // 数据源层仅配置认证信息
+  auth_type?: 'none' | 'basic' | 'bearer' | 'api_key'
+  auth_token?: string
+  auth_username?: string
+  auth_password?: string
+  timeout?: number
 }
 
 // DashboardJSON is the complete dashboard definition (Grafana-style)
@@ -136,7 +146,7 @@ export interface DataLinkDef {
 
 export interface TargetDef {
   refId: string
-  /** 用户自定义 SQL 语句（如 SELECT date FROM calendar） */
+  /** 用户自定义 SQL 语句（如 SELECT date FROM calendar） - MySQL数据源 */
   rawSql?: string
   /** 列名别名映射，如 {"date": "日期", "market": "市场"} */
   aliasMap?: Record<string, string>
@@ -146,6 +156,22 @@ export interface TargetDef {
   fields?: string
   category: string
   metricName: string
+  /** HTTP API路径 - HTTP数据源使用，会与数据源Base URL拼接 */
+  http_path?: string
+  /** HTTP请求方法 - HTTP数据源使用 */
+  http_method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+  /** HTTP请求体类型 - HTTP数据源使用：raw, form-data, x-www-form-urlencoded, graphql */
+  http_body_type?: 'raw' | 'form-data' | 'x-www-form-urlencoded' | 'graphql'
+  /** HTTP请求体 - HTTP数据源使用，raw/graphql类型使用 */
+  http_body?: string
+  /** HTTP表单数据 - HTTP数据源使用，form-data/x-www-form-urlencoded类型使用 */
+  http_form_data?: Array<{ key: string; value: string }>
+  /** HTTP自定义Headers - HTTP数据源使用，JSON对象 */
+  http_headers?: Record<string, unknown>
+  /** HTTP数据格式 - HTTP数据源使用 */
+  http_data_format?: 'json' | 'xml' | 'csv'
+  /** HTTP数据提取路径 - HTTP数据源使用，JSONPath表达式 */
+  http_data_path?: string
 }
 
 export interface DashboardDataRes {
@@ -257,6 +283,7 @@ export async function createDatasource(data: {
   username?: string
   password?: string
   headers?: Record<string, unknown>
+  config?: HTTPDatasourceConfig
 }): Promise<DatasourceRes> {
   return request('/api/v1/datasources/create', { method: 'POST', body: JSON.stringify(data) })
 }
@@ -396,6 +423,32 @@ export interface QueryInspectReq {
   variables?: Record<string, string | string[]>
   from?: string
   to?: string
+  /** HTTP API路径 - HTTP数据源使用 */
+  http_path?: string
+  /** HTTP请求方法 - HTTP数据源使用 */
+  http_method?: string
+  /** HTTP请求体类型 - HTTP数据源使用 */
+  http_body_type?: 'raw' | 'form-data' | 'x-www-form-urlencoded' | 'graphql'
+  /** HTTP请求体 - HTTP数据源使用 */
+  http_body?: string
+  /** HTTP表单数据 - HTTP数据源使用 */
+  http_form_data?: Array<{ key: string; value: string }>
+  /** HTTP自定义Headers - HTTP数据源使用 */
+  http_headers?: Record<string, unknown>
+  /** HTTP数据格式 - HTTP数据源使用 */
+  http_data_format?: string
+  /** HTTP数据提取路径 - HTTP数据源使用 */
+  http_data_path?: string
+}
+
+export interface HTTPRequestInfo {
+  method: string
+  url: string
+  headers: Record<string, string>
+  body_type: string
+  body?: string
+  form_data?: Array<{ key: string; value: string }>
+  curl_command: string
 }
 
 export interface QueryInspectRes {
@@ -404,6 +457,7 @@ export interface QueryInspectRes {
   rows: Record<string, unknown>[]
   row_count: number
   error?: string
+  request_info?: HTTPRequestInfo
 }
 
 export async function queryInspect(data: QueryInspectReq): Promise<QueryInspectRes> {

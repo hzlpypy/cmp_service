@@ -1442,7 +1442,7 @@ body {
 }
 
 .pe-breadcrumb-link:hover {
-  color: var(--accent);
+  color: #e53935;
 }
 
 .pe-breadcrumb-sep {

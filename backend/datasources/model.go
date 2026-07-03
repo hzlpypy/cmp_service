@@ -23,6 +23,10 @@ type DatasourceReq struct {
 	Password string `json:"password"`
 	// Headers HTTP请求头（仅HTTP类型使用，JSON格式）
 	Headers model.JSONMap `json:"headers"`
+	// Config HTTP数据源认证配置（JSON格式）
+	// 仅包含认证配置：auth_type(认证类型)、auth_token(Token值)、auth_username(用户名)、auth_password(密码)
+	// 查询参数在面板target配置中定义
+	Config model.JSONMap `json:"config"`
 	// Enabled 是否启用（指针类型，用于区分未传值和传 false）
 	Enabled *bool `json:"enabled"`
 }
@@ -44,6 +48,8 @@ type DatasourceRes struct {
 	Username string `json:"username"`
 	// Headers HTTP请求头配置
 	Headers model.JSONMap `json:"headers"`
+	// Config HTTP数据源专用配置
+	Config model.JSONMap `json:"config"`
 	// Enabled 启用状态
 	Enabled bool `json:"enabled"`
 	// CreatedAt 创建时间（ISO 8601 格式）
@@ -58,6 +64,9 @@ func ToDatasourceRes(m *model.Datasource) *DatasourceRes {
 	if m.Headers == nil {
 		m.Headers = model.JSONMap{}
 	}
+	if m.Config == nil {
+		m.Config = model.JSONMap{}
+	}
 	return &DatasourceRes{
 		ID:           m.ID,
 		Name:         m.Name,
@@ -66,6 +75,7 @@ func ToDatasourceRes(m *model.Datasource) *DatasourceRes {
 		DatabaseName: m.DatabaseName,
 		Username:     m.Username,
 		Headers:      m.Headers,
+		Config:       m.Config,
 		Enabled:      m.Enabled,
 		CreatedAt:    m.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
 		UpdatedAt:    m.UpdatedAt.Format("2006-01-02T15:04:05+08:00"),

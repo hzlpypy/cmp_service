@@ -1,17 +1,28 @@
 import { useState } from 'react'
 import * as api from '../api'
-import type { VariableRes } from '../api'
+import type { VariableRes, DatasourceRes } from '../api'
 
 interface QueryInspectorProps {
   dashboardId: string
   datasourceId?: string
-  rawSql: string
+  datasources: DatasourceRes[]
+  rawSql: string // MySQL数据源使用
+  httpPath?: string // HTTP数据源使用
+  httpMethod?: string
+  httpBodyType?: 'raw' | 'form-data' | 'x-www-form-urlencoded' | 'graphql' // HTTP请求体类型
+  httpBody?: string // HTTP请求体（raw/graphql类型使用）
+  httpFormData?: Array<{ key: string; value: string }> // HTTP表单数据
+  httpHeaders?: Record<string, unknown> // HTTP自定义Headers
+  httpDataFormat?: string
+  httpDataPath?: string
   variables: VariableRes[]
   from?: string
   to?: string
 }
 
-export default function QueryInspector({ dashboardId, datasourceId, rawSql, variables, from, to }: QueryInspectorProps) {
+export default function QueryInspector({
+  dashboardId, datasourceId, datasources, rawSql, httpPath, httpMethod, httpBodyType, httpBody, httpFormData, httpHeaders, httpDataFormat, httpDataPath, variables, from, to
+}: QueryInspectorProps) {
   const [result, setResult] = useState<api.QueryInspectRes | null>(null)
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -31,18 +42,38 @@ export default function QueryInspector({ dashboardId, datasourceId, rawSql, vari
       // 合并系统内置变量（$__from, $__to 等）
       if (from && to) Object.assign(varMap, api.getSystemVars(from, to))
 
-      const res = await api.queryInspect({
-        raw_sql: rawSql,
+      // 根据数据源类型发送不同的参数
+      const selectedDs = datasources.find(ds => ds.id === datasourceId)
+      let requestBody: any = {
         dashboard_id: dashboardId,
         datasource_id: datasourceId,
         variables: varMap,
         from,
         to,
-      })
+      }
+
+      if (selectedDs && selectedDs.type === 'http') {
+        // HTTP数据源 - 发送HTTP查询参数
+        requestBody.http_path = httpPath || ''
+        requestBody.http_method = httpMethod || 'GET'
+        requestBody.http_body_type = httpBodyType || 'raw'
+        requestBody.http_body = httpBody || ''
+        requestBody.http_form_data = httpFormData || []
+        requestBody.http_headers = httpHeaders || {}
+        requestBody.http_data_format = httpDataFormat || 'json'
+        requestBody.http_data_path = httpDataPath || ''
+      } else {
+        // MySQL数据源 - 发送SQL参数
+        requestBody.raw_sql = rawSql
+      }
+
+      const res = await api.queryInspect(requestBody)
       setResult(res)
     } catch (e: any) {
       setResult({
-        processed_sql: rawSql,
+        processed_sql: selectedDs && selectedDs.type === 'http' 
+          ? (selectedDs.url + (httpPath || '')) 
+          : rawSql,
         columns: [],
         rows: [],
         row_count: 0,
@@ -53,6 +84,9 @@ export default function QueryInspector({ dashboardId, datasourceId, rawSql, vari
       setExpanded(true)
     }
   }
+
+  // 判断当前数据源类型
+  const selectedDs = datasources.find(ds => ds.id === datasourceId)
 
   return (
     <div className="query-inspector" style={{ marginTop: 12, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
@@ -90,25 +124,85 @@ export default function QueryInspector({ dashboardId, datasourceId, rawSql, vari
 
       {result && expanded && (
         <div className="inspect-result">
-          {/* 执行的 SQL */}
+          {/* HTTP请求详情 */}
+          {selectedDs && selectedDs.type === 'http' && result.request_info && (
+            <div style={{ marginBottom: 12 }}>
+              {/* curl 命令 */}
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                  cURL 命令:
+                </div>
+                <pre style={preStyle}>
+                  {result.request_info.curl_command}
+                </pre>
+              </div>
+
+              {/* 请求概览 */}
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                  请求详情:
+                </div>
+                <div style={{ background: 'var(--bg-input)', borderRadius: 4, padding: '8px 12px', border: '1px solid var(--border-color)', fontSize: 11, fontFamily: 'monospace' }}>
+                  <div><span style={{ color: 'var(--text-muted)' }}>Method:</span> <strong>{result.request_info.method}</strong></div>
+                  <div style={{ marginTop: 4 }}><span style={{ color: 'var(--text-muted)' }}>URL:</span> {result.request_info.url}</div>
+                  <div style={{ marginTop: 4 }}><span style={{ color: 'var(--text-muted)' }}>Body Type:</span> {result.request_info.body_type}</div>
+                </div>
+              </div>
+
+              {/* Headers */}
+              {Object.keys(result.request_info.headers).length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                    Headers:
+                  </div>
+                  <div style={{ background: 'var(--bg-input)', borderRadius: 4, border: '1px solid var(--border-color)', fontSize: 11, fontFamily: 'monospace', overflow: 'hidden' }}>
+                    {Object.entries(result.request_info.headers).map(([k, v]) => (
+                      <div key={k} style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', padding: '4px 8px' }}>
+                        <span style={{ color: 'var(--accent)', minWidth: 160, flexShrink: 0 }}>{k}:</span>
+                        <span style={{ wordBreak: 'break-all' }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 请求体 */}
+              {result.request_info.body && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                    请求体 ({result.request_info.body_type}):
+                  </div>
+                  <pre style={preStyle}>
+                    {result.request_info.body}
+                  </pre>
+                </div>
+              )}
+
+              {/* Form Data */}
+              {result.request_info.form_data && result.request_info.form_data.length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                    Form Data ({result.request_info.body_type}):
+                  </div>
+                  <div style={{ background: 'var(--bg-input)', borderRadius: 4, border: '1px solid var(--border-color)', fontSize: 11, fontFamily: 'monospace', overflow: 'hidden' }}>
+                    {result.request_info.form_data.map((fd, i) => (
+                      <div key={i} style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', padding: '4px 8px' }}>
+                        <span style={{ color: 'var(--accent)', minWidth: 160, flexShrink: 0 }}>{fd.key}:</span>
+                        <span style={{ wordBreak: 'break-all' }}>{fd.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* MySQL查询 或 HTTP URL */}
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
-              实际执行的 SQL:
+              {selectedDs && selectedDs.type === 'http' ? '实际请求的 URL:' : '实际执行的 SQL:'}
             </div>
-            <pre style={{
-              background: 'var(--bg-input)',
-              color: 'var(--text-primary)',
-              padding: '8px 12px',
-              borderRadius: 4,
-              fontSize: 12,
-              fontFamily: 'monospace',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-all',
-              maxHeight: 120,
-              overflow: 'auto',
-              margin: 0,
-              border: '1px solid var(--border-color)',
-            }}>
+            <pre style={preStyle}>
               {result.processed_sql}
             </pre>
           </div>
@@ -184,4 +278,19 @@ const cellStyle: React.CSSProperties = {
   maxWidth: 300,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
+}
+
+const preStyle: React.CSSProperties = {
+  background: 'var(--bg-input)',
+  color: 'var(--text-primary)',
+  padding: '8px 12px',
+  borderRadius: 4,
+  fontSize: 12,
+  fontFamily: 'monospace',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-all',
+  maxHeight: 200,
+  overflow: 'auto',
+  margin: 0,
+  border: '1px solid var(--border-color)',
 }
