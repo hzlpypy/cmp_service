@@ -152,6 +152,17 @@ export default function AIChatDialog({
   // 附件上传状态
   const [attachments, setAttachments] = useState<Array<{ name: string; path: string; uploading: boolean }>>([])
 
+  // 中文输入法组合状态（防止输入中文时回车误触发发送）
+  const isComposingRef = useRef(false)
+
+  // @ 数据源选择相关状态
+  const [datasourceList, setDatasourceList] = useState<Array<{ id: string; name: string; type: string; url: string }>>([])
+  const [showDatasourceDropdown, setShowDatasourceDropdown] = useState(false)
+  const [datasourceDropdownPos, setDatasourceDropdownPos] = useState(0) // @ 符号在输入中的位置
+  const [selectedDsIndex, setSelectedDsIndex] = useState(0) // 当前高亮的数据源索引
+  const datasourcesRef = useRef<Array<{ id: string; name: string; type: string; url: string }>>([])
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
   // 流式消息累积
   const streamRef = useRef<{
     currentTokenId: string | null
@@ -180,6 +191,56 @@ export default function AIChatDialog({
     })
   }, [])
   useEffect(() => { scrollToBottom() }, [messages, scrollToBottom])
+
+  // 获取数据源列表（用于 @ 下拉选择）
+  useEffect(() => {
+    const fetchDatasources = async () => {
+      try {
+        const data = await api.listDatasources()
+        const list = data.map((ds: any) => ({
+          id: ds.id,
+          name: ds.name,
+          type: ds.type,
+          url: ds.url,
+        }))
+        setDatasourceList(list)
+        datasourcesRef.current = list
+      } catch (e) {
+        console.error('Failed to fetch datasources:', e)
+      }
+    }
+    fetchDatasources()
+  }, [])
+
+  // 处理输入变化，检测 @ 符号触发下拉
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value
+    setInput(value)
+
+    // 检测是否有 @ 符号
+    const lastAtIndex = value.lastIndexOf('@')
+    if (lastAtIndex !== -1) {
+      // 检查 @ 后面是否有空格或换行（如果有说明已经完成选择）
+      const afterAt = value.slice(lastAtIndex + 1)
+      if (!afterAt.includes(' ') && !afterAt.includes('\n') && afterAt.length < 20) {
+        setDatasourceDropdownPos(lastAtIndex)
+        setShowDatasourceDropdown(true)
+        setSelectedDsIndex(0)
+        return
+      }
+    }
+    setShowDatasourceDropdown(false)
+  }
+
+  // 选择数据源，插入到输入框
+  const selectDatasource = (ds: { id: string; name: string; type: string; url: string }) => {
+    const beforeAt = input.slice(0, datasourceDropdownPos)
+    const afterAt = input.slice(datasourceDropdownPos + 1)
+    const newValue = beforeAt + `@${ds.name} ` + afterAt
+    setInput(newValue)
+    setShowDatasourceDropdown(false)
+    textareaRef.current?.focus()
+  }
 
   // 连接 WebSocket
   const connect = useCallback(() => {
@@ -371,11 +432,29 @@ export default function AIChatDialog({
     const count = panelList.length
     const summary = `${count} 个面板: ${JSON.stringify(panelList)}`
 
+    // 解析用户输入中的 @数据源名，注入已解析的数据源信息
+    const dsList = datasourcesRef.current
+    const resolvedDsList: Array<{ mention: string; id: string; name: string; type: string; url: string }> = []
+    const atRegex = /@([^\s]+)/g
+    let m: RegExpExecArray | null
+    while ((m = atRegex.exec(userText)) !== null) {
+      const mention = m[0].slice(1)
+      const ds = dsList.find((d) => d.name === mention || d.id === mention)
+      if (ds) {
+        resolvedDsList.push({ mention, id: ds.id, name: ds.name, type: ds.type, url: ds.url })
+      }
+    }
+
+    const dsContext = resolvedDsList.length > 0
+      ? `【已解析数据源】${JSON.stringify(resolvedDsList)}\n`
+      : ''
+
     return [
       `【仪表板上下文】`,
       `仪表板ID: ${dashboardId}`,
       `标题: ${dashboardTitle}`,
       summary,
+      dsContext,
       `---`,
       `【用户指令】${userText}`,
     ].join('\n')
@@ -454,10 +533,45 @@ export default function AIChatDialog({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // 数据源下拉列表键盘导航
+    if (showDatasourceDropdown && datasourceList.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSelectedDsIndex((prev) => (prev + 1) % datasourceList.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSelectedDsIndex((prev) => (prev - 1 + datasourceList.length) % datasourceList.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        selectDatasource(datasourceList[selectedDsIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setShowDatasourceDropdown(false)
+        return
+      }
+    }
+
+    // 输入法组合输入状态时不触发发送（防止中文输入回车误发送）
+    if (isComposingRef.current) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
+  }
+
+  // 输入法组合事件处理
+  const handleCompositionStart = () => {
+    isComposingRef.current = true
+  }
+
+  const handleCompositionEnd = () => {
+    isComposingRef.current = false
   }
 
   const statusColor = connected ? '#52c41a' : '#ff4d4f'
@@ -704,11 +818,74 @@ export default function AIChatDialog({
             📎
           </button>
 
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={connected ? '描述你想做的修改...' : '正在连接...'}
+          <div style={{ position: 'relative', flex: 1 }}>
+            {/* 数据源下拉列表 */}
+            {showDatasourceDropdown && datasourceList.length > 0 && (
+              <div style={{
+                position: 'absolute',
+                bottom: '100%',
+                left: 0,
+                right: 0,
+                marginBottom: 4,
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 6,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                maxHeight: 200,
+                overflowY: 'auto',
+                zIndex: 10,
+              }}>
+                <div style={{
+                  padding: '6px 10px',
+                  fontSize: 11,
+                  color: 'var(--text-muted)',
+                  borderBottom: '1px solid var(--border-color)',
+                }}>
+                  选择数据源（↑↓ 选择，Enter 确认，Esc 关闭）
+                </div>
+                {datasourceList.map((ds, idx) => (
+                  <div
+                    key={ds.id}
+                    onClick={() => selectDatasource(ds)}
+                    style={{
+                      padding: '8px 12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      background: idx === selectedDsIndex ? 'var(--primary-light)' : 'transparent',
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={() => setSelectedDsIndex(idx)}
+                  >
+                    <span style={{
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      fontSize: 10,
+                      fontWeight: 500,
+                      background: ds.type === 'http' ? '#52c41a' : '#1890ff',
+                      color: '#fff',
+                    }}>
+                      {ds.type === 'http' ? 'HTTP' : 'MySQL'}
+                    </span>
+                    <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
+                      {ds.name}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {ds.id}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              onCompositionStart={handleCompositionStart}
+              onCompositionEnd={handleCompositionEnd}
+              placeholder={connected ? '描述你想做的修改...（输入 @ 选择数据源）' : '正在连接...'}
             disabled={!connected || loading}
             rows={2}
             style={{
@@ -718,8 +895,10 @@ export default function AIChatDialog({
               color: 'var(--text-primary)',
               border: '1px solid var(--border-color)',
               borderRadius: 4, outline: 'none',
+              width: '100%',
             }}
           />
+          </div>
           <button
             onClick={handleSend}
             disabled={!connected || loading || !input.trim()}
