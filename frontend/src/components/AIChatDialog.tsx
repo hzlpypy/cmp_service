@@ -97,12 +97,26 @@ function mergePanels(draftJson: any, newPanels: any[]) {
 
     if (idx >= 0) {
       // 已存在 → 合并更新
+      // targets 按 refId 深度合并：AI 只需传要改的字段，保留原有其他字段
+      let mergedTargets = existingPanels[idx].targets || []
+      if (np.targets && Array.isArray(np.targets)) {
+        mergedTargets = np.targets.map((newT: any) => {
+          const existingT = (existingPanels[idx].targets || []).find(
+            (t: any) => t.refId === newT.refId
+          )
+          if (existingT) {
+            // 按 refId 合并：保留原有字段，只覆盖 AI 传的字段
+            return { ...existingT, ...newT }
+          }
+          return newT
+        })
+      }
+
       existingPanels[idx] = {
         ...existingPanels[idx],
         ...np,
         id: panelId,
-        // targets 完全替换（agent 返回完整 targets）
-        targets: np.targets || existingPanels[idx].targets,
+        targets: mergedTargets,
         // options 深合并：AI 只传要改的 option 字段，保留其余
         options: np.options != null
           ? { ...(existingPanels[idx].options || {}), ...np.options }

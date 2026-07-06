@@ -458,8 +458,12 @@ curl -s http://127.0.0.1:3011/api/v1/panels/data \
 4. **`action` 必须为 `"update_draft"`**：前端据此识别并更新草稿
 5. **`message` 要有清晰的用户反馈**：告知具体改了什么，末尾提示「保存仪表板」
 6. **`refId` 使用 `A`, `B`, `C`**：多查询场景按字母递增
-7. **修改已有面板时只传需要改的字段**：前端合并逻辑是 `{ ...原面板, ...新面板 }`，只改 `options` 就不要传 `targets`，否则会覆盖掉原有的 SQL 查询和别名映射。只改 `type` 就不要改其他字段
-8. **修改 SQL 时必须保留原有 `aliasMap` 和 `metricName`**：从上下文中读取面板当前的 `targets`，修改 `rawSql` 时把原 `aliasMap` 和 `metricName` 原封不动带回去。不要自作主张把 `SELECT a, b` 改成 `SELECT *`，也不要删除别名映射
+7. **修改已有面板时只传需要改的字段**：只改 `type` 就不要传 `targets` 和 `datasource_id`
+8. **⚠️ targets 按 refId 深度合并**：前端合并逻辑是 `{ ...原target, ...新target }`，AI 只需要传要修改的 target 字段，未传的字段会保留原值
+   - **只改 `aliasMap` 时**：targets 数组中只传 `refId` + `aliasMap`，不要传其他字段（http_path、rawSql 等会保留原值）
+   - **只改 `http_path` 时**：只传 `refId` + `http_path`，不要重复传 http_method、http_data_path 等
+   - **只改 `metricName` 时**：只传 `refId` + `metricName`
+9. **⚠️ 严禁清空 target 关键字段**：修改任何 target 时，绝对不能将 http_path、rawSql、http_method、http_data_path、http_data_format 等设为空字符串或删除。只在需要修改时才传对应字段，不需要修改的字段不要传
 
 ---
 
@@ -529,6 +533,59 @@ curl -s http://127.0.0.1:3011/api/v1/panels/data \
     }
   ],
   "message": "已将【交易日历】SQL 改为仅显示上海市场数据。请点击右上角「保存仪表板」持久化。"
+}
+```
+
+### 场景 C2：只改字段别名（aliasMap）
+
+用户说："给天气查询表格的字段赋予别名，city 改为城市，temp 改为温度"
+
+**⚠️ 关键规则**：只传需要改的字段！从上下文获取面板 `panel-http-1` 的当前配置（含 http_path、http_method 等），**只传 refId + aliasMap**，其他字段不传。
+
+```json
+{
+  "action": "update_draft",
+  "panels": [
+    {
+      "id": "panel-http-1",
+      "targets": [
+        {
+          "refId": "A",
+          "aliasMap": { "city": "城市", "temp": "温度" }
+        }
+      ]
+    }
+  ],
+  "message": "已将天气查询的字段别名设置为：city→城市、temp→温度。请点击右上角「保存仪表板」持久化。"
+}
+```
+
+**说明**：
+- `id` 必须带，前端通过 id 定位面板
+- `targets` 中只传 `refId` + `aliasMap`，**绝不传 http_path、http_method 等字段**（前端会保留原值）
+- 同理，MySQL 面板只改 aliasMap 时也只需传 `refId` + `aliasMap`，不传 rawSql
+
+### 场景 C3：只改 HTTP API 路径
+
+用户说："把天气查询的 API 路径改为 /v2/weather"
+
+只传 `refId` + `http_path`，其他不传：
+
+```json
+{
+  "action": "update_draft",
+  "panels": [
+    {
+      "id": "panel-http-1",
+      "targets": [
+        {
+          "refId": "A",
+          "http_path": "/v2/weather"
+        }
+      ]
+    }
+  ],
+  "message": "已将天气查询的 API 路径更新为 /v2/weather。请点击右上角「保存仪表板」持久化。"
 }
 ```
 
