@@ -289,15 +289,37 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
 
           // 计算xAxis标签间隔（避免重叠）
           const calculateLabelInterval = (): number => {
-            if (!isTimeSeries || names.length <= 10) return 0
-            // 根据数据点数量和图表宽度估算可显示的标签数量
-            // 假设每个标签需要约60px宽度
-            const maxLabels = Math.floor(800 / 60) // 假设图表宽度800px
-            if (names.length > maxLabels) {
+            // 根据数据点数量估算可显示的标签数量
+            // 假设每个标签需要约50px宽度（含间距）
+            const avgLabelWidth = 50
+            // 使用实际图表宽度（容器宽度 - 左右边距）
+            const chartWidth = el?.offsetWidth || 400
+            const usableWidth = chartWidth * 0.85 // 减去左右边距
+            const maxLabels = Math.floor(usableWidth / avgLabelWidth)
+            if (names.length > maxLabels && maxLabels > 0) {
               return Math.ceil(names.length / maxLabels) - 1
             }
             return 0
           }
+
+          // 计算标签旋转角度
+          const calculateRotate = (): number => {
+            if (isHorizontal) return 0
+            // 时间序列数据：根据数据点数量决定旋转
+            if (isTimeSeries) {
+              if (names.length > 20) return 45
+              if (names.length > 10) return 30
+              return 0
+            }
+            // 非时间序列数据：根据标签文本长度决定旋转
+            const avgLabelLen = names.reduce((sum, n) => sum + (n?.length || 0), 0) / names.length
+            if (names.length > 15 || avgLabelLen > 8) return 30
+            if (names.length > 10 || avgLabelLen > 5) return 15
+            return 0
+          }
+
+          const labelRotate = calculateRotate()
+          const labelInterval = calculateLabelInterval()
 
           option = {
             backgroundColor: '#ffffff',
@@ -305,7 +327,13 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
             legend: (isMultiTarget || valueCols.length > 1 || data.some((r, i) => (targets[i]?.metricName || '').length > 0))
               ? { data: legendData, bottom: 0, textStyle: { color: '#a0a3a8', fontSize: 11 } }
               : undefined,
-            grid: { left: '6%', right: '4%', bottom: legendData.length > 1 ? '15%' : '10%', top: '12%', containLabel: true },
+            // 根据标签旋转角度调整底部边距，避免标签被截断
+            grid: { 
+              left: '6%', right: '4%', 
+              bottom: legendData.length > 1 ? '15%' : (labelRotate > 30 ? '18%' : labelRotate > 0 ? '12%' : '10%'), 
+              top: '12%', 
+              containLabel: true 
+            },
             // 横向柱状图：交换 xAxis 和 yAxis
             xAxis: isHorizontal
               ? { type: 'value', name: valueCols[0] || '', nameTextStyle: { color: '#6e7178' }, axisLabel: { color: '#6e7178' }, splitLine: { lineStyle: { color: '#2c2f36' } } }
@@ -314,12 +342,19 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
                   data: names,
                   ...(type === 'line' ? { boundaryGap: false } : {}),
                   axisLabel: {
-                    rotate: isTimeSeries && names.length > 15 ? 30 : 0,
+                    rotate: labelRotate,
                     fontSize: 11,
                     color: '#a0a3a8',
-                    interval: calculateLabelInterval(),
-                    // 时间序列数据：隐藏部分标签避免重叠
-                    hideOverlap: isTimeSeries && names.length > 20,
+                    interval: labelInterval,
+                    // 大量数据时隐藏重叠标签
+                    hideOverlap: names.length > 25,
+                    // 超长标签截断
+                    formatter: (val: string) => {
+                      if (val && val.length > 12) {
+                        return val.slice(0, 12) + '...'
+                      }
+                      return val
+                    },
                   },
                   axisLine: { lineStyle: { color: '#33363d' } },
                   axisTick: { show: false },

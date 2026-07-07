@@ -97,12 +97,26 @@ function mergePanels(draftJson: any, newPanels: any[]) {
 
     if (idx >= 0) {
       // 已存在 → 合并更新
+      // targets 按 refId 深度合并：AI 只需传要改的字段，保留原有其他字段
+      let mergedTargets = existingPanels[idx].targets || []
+      if (np.targets && Array.isArray(np.targets)) {
+        mergedTargets = np.targets.map((newT: any) => {
+          const existingT = (existingPanels[idx].targets || []).find(
+            (t: any) => t.refId === newT.refId
+          )
+          if (existingT) {
+            // 按 refId 合并：保留原有字段，只覆盖 AI 传的字段
+            return { ...existingT, ...newT }
+          }
+          return newT
+        })
+      }
+
       existingPanels[idx] = {
         ...existingPanels[idx],
         ...np,
         id: panelId,
-        // targets 完全替换（agent 返回完整 targets）
-        targets: np.targets || existingPanels[idx].targets,
+        targets: mergedTargets,
         // options 深合并：AI 只传要改的 option 字段，保留其余
         options: np.options != null
           ? { ...(existingPanels[idx].options || {}), ...np.options }
@@ -147,10 +161,36 @@ export default function AIChatDialog({
   const isUserScrolledUp = useRef(false)
   const scrollRAF = useRef<number | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectDelayRef = useRef(1000) // 重连延迟：1s → 2s → 4s → 8s → max 30s
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // 附件上传状态
   const [attachments, setAttachments] = useState<Array<{ name: string; path: string; uploading: boolean }>>([])
+
+  // 中文输入法组合状态（防止输入中文时回车误触发发送）
+  const isComposingRef = useRef(false)
+
+  // @ 数据源选择相关状态
+  const [datasourceList, setDatasourceList] = useState<Array<{ id: string; name: string; type: string; url: string }>>([])
+  const [showDatasourceDropdown, setShowDatasourceDropdown] = useState(false)
+  const [datasourceDropdownPos, setDatasourceDropdownPos] = useState(0) // @ 符号在输入中的位置
+  const [selectedDsIndex, setSelectedDsIndex] = useState(0) // 当前高亮的数据源索引
+  const datasourcesRef = useRef<Array<{ id: string; name: string; type: string; url: string }>>([])
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // # 面板选择相关状态
+  const [panelDropdownPos, setPanelDropdownPos] = useState(0)
+  const [showPanelDropdown, setShowPanelDropdown] = useState(false)
+  const [selectedPanelIdx, setSelectedPanelIdx] = useState(0)
+  // 获取完整面板列表（用于 # 下拉和 @ 注入上下文）
+  const getPanelList = useCallback(() => {
+    const panels = draftRef.current?.panels || panelsSummary
+    return panels.map((p: any) => ({
+      id: p.id || '',
+      title: p.title || '',
+      type: p.type || '',
+    }))
+  }, [panelsSummary])
 
   // 流式消息累积
   const streamRef = useRef<{
@@ -181,6 +221,100 @@ export default function AIChatDialog({
   }, [])
   useEffect(() => { scrollToBottom() }, [messages, scrollToBottom])
 
+  // 获取数据源列表（用于 @ 下拉选择）
+  useEffect(() => {
+    const fetchDatasources = async () => {
+      try {
+        const data = await api.listDatasources()
+        const list = data.map((ds: any) => ({
+          id: ds.id,
+          name: ds.name,
+          type: ds.type,
+          url: ds.url,
+        }))
+        setDatasourceList(list)
+        datasourcesRef.current = list
+      } catch (e) {
+        console.error('Failed to fetch datasources:', e)
+      }
+    }
+    fetchDatasources()
+  }, [])
+
+  // 处理输入变化，检测 @ 和 # 符号触发下拉
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value
+    setInput(value)
+
+    // 关闭所有下拉
+    setShowDatasourceDropdown(false)
+    setShowPanelDropdown(false)
+
+    // 检测最后一个 @ 或 #（取最后出现的那个符号）
+    const lastAtIndex = value.lastIndexOf('@')
+    const lastHashIndex = value.lastIndexOf('#')
+
+    if (lastHashIndex > lastAtIndex) {
+      // # 面板选择
+      const afterHash = value.slice(lastHashIndex + 1)
+      if (!afterHash.includes(' ') && !afterHash.includes('\n') && afterHash.length < 30) {
+        setPanelDropdownPos(lastHashIndex)
+        setShowPanelDropdown(true)
+        setSelectedPanelIdx(0)
+        return
+      }
+    } else if (lastAtIndex !== -1) {
+      const afterAt = value.slice(lastAtIndex + 1)
+      if (!afterAt.includes(' ') && !afterAt.includes('\n') && afterAt.length < 20) {
+        setDatasourceDropdownPos(lastAtIndex)
+        setShowDatasourceDropdown(true)
+        setSelectedDsIndex(0)
+        return
+      }
+    }
+  }
+
+  /** 根据输入中 # 后的文字模糊匹配面板 */
+  const filterPanels = (text: string) => {
+    const panels = getPanelList()
+    if (!text) return panels
+    const lower = text.toLowerCase()
+    return panels.filter((p) =>
+      p.title.toLowerCase().includes(lower) || p.id.toLowerCase().includes(lower)
+    )
+  }
+
+  // 选择面板，插入到输入框
+  const selectPanel = (panel: { id: string; title: string }) => {
+    const beforeHash = input.slice(0, panelDropdownPos)
+    const afterHash = input.slice(panelDropdownPos + 1)
+    const existingText = afterHash.split(/[\s\n]/)[0] || ''
+    const newAfter = afterHash.slice(existingText.length)
+    const newValue = beforeHash + `#${panel.title} ` + newAfter
+    setInput(newValue)
+    setShowPanelDropdown(false)
+    textareaRef.current?.focus()
+  }
+
+  /** 根据输入中 @ 后的文字模糊匹配数据源 */
+  const filterDatasources = (text: string) => {
+    if (!text) return datasourceList
+    const lower = text.toLowerCase()
+    return datasourceList.filter((ds) =>
+      ds.name.toLowerCase().includes(lower) || ds.id.toLowerCase().includes(lower)
+    )
+  }
+
+  // 选择数据源，插入到输入框
+  const selectDatasource = (ds: { id: string; name: string; type: string; url: string }) => {
+    const beforeAt = input.slice(0, datasourceDropdownPos)
+    const afterAt = input.slice(datasourceDropdownPos + 1)
+    const newValue = beforeAt + `@${ds.name} ` + afterAt
+    setInput(newValue)
+    setShowDatasourceDropdown(false)
+    textareaRef.current?.focus()
+  }
+
   // 连接 WebSocket
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
@@ -191,6 +325,7 @@ export default function AIChatDialog({
 
       ws.onopen = () => {
         setConnected(true)
+        reconnectDelayRef.current = 1000 // 重连成功后重置延迟
         setMessages((prev) => {
           if (prev.length > 0 && prev[prev.length - 1].role === 'system') return prev
           return prev
@@ -207,21 +342,22 @@ export default function AIChatDialog({
         }
       }
 
-      ws.onerror = (e) => {
-        console.error('WebSocket error:', e)
+      ws.onerror = () => {
         setConnected(false)
         setLoading(false)
-        setMessages((prev) => [...prev, {
-          role: 'system',
-          content: 'WebSocket 连接异常，请确认后端已启动 (ws://127.0.0.1:8764)',
-        }])
+        ws.close() // 主动关闭，触发 onclose 统一重连
       }
 
       ws.onclose = () => {
         finalizeSegment()
         setConnected(false)
         setLoading(false)
-        reconnectTimerRef.current = setTimeout(() => connect(), 5000)
+        // 指数退避重连：1s → 2s → 4s → 8s → ... → max 30s
+        const delay = reconnectDelayRef.current
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectDelayRef.current = Math.min(delay * 2, 30000)
+          connect()
+        }, delay)
       }
     } catch {
       setConnected(false)
@@ -366,16 +502,60 @@ export default function AIChatDialog({
         rawSql: t.rawSql || '',
         metricName: t.metricName || '',
         aliasMap: t.aliasMap || {},
+        // HTTP API 字段
+        http_path: t.http_path || '',
+        http_method: t.http_method || '',
+        http_data_format: t.http_data_format || '',
+        http_data_path: t.http_data_path || '',
+        http_body_type: t.http_body_type || '',
+        http_body: t.http_body || '',
+        http_form_data: t.http_form_data || [],
+        http_headers: t.http_headers || {},
       })),
     }))
     const count = panelList.length
     const summary = `${count} 个面板: ${JSON.stringify(panelList)}`
+
+    // 解析用户输入中的 @数据源名，注入已解析的数据源信息
+    const dsList = datasourcesRef.current
+    const resolvedDsList: Array<{ mention: string; id: string; name: string; type: string; url: string }> = []
+    const atRegex = /@([^\s]+)/g
+    let m: RegExpExecArray | null
+    while ((m = atRegex.exec(userText)) !== null) {
+      const mention = m[0].slice(1)
+      const ds = dsList.find((d) => d.name === mention || d.id === mention)
+      if (ds) {
+        resolvedDsList.push({ mention, id: ds.id, name: ds.name, type: ds.type, url: ds.url })
+      }
+    }
+
+    // 解析用户输入中的 #面板名，注入已解析的面板信息
+    const panelListFull = getPanelList()
+    const resolvedPanels: Array<{ mention: string; id: string; title: string; type: string }> = []
+    const hashRegex = /#([^\s]+)/g
+    while ((m = hashRegex.exec(userText)) !== null) {
+      const mention = m[0].slice(1)
+      const panel = panelListFull.find((p) => p.title === mention || p.id === mention)
+      if (panel) {
+        resolvedPanels.push({ mention, id: panel.id, title: panel.title, type: panel.type })
+      }
+    }
+
+    const dsContext = resolvedDsList.length > 0
+      ? `【已解析数据源】${JSON.stringify(resolvedDsList)}\n`
+      : ''
+
+    const panelContext = resolvedPanels.length > 0
+      ? `【已解析面板】${JSON.stringify(resolvedPanels)}\n`
+      : ''
 
     return [
       `【仪表板上下文】`,
       `仪表板ID: ${dashboardId}`,
       `标题: ${dashboardTitle}`,
       summary,
+      dsContext,
+      panelContext,
       `---`,
       `【用户指令】${userText}`,
     ].join('\n')
@@ -454,14 +634,79 @@ export default function AIChatDialog({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // 面板下拉列表键盘导航（# 符号触发）
+    if (showPanelDropdown) {
+      const filteredPanels = filterPanels(input.slice(panelDropdownPos + 1).split(/[\s\n]/)[0] || '')
+      if (filteredPanels.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          setSelectedPanelIdx((prev) => (prev + 1) % filteredPanels.length)
+          return
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          setSelectedPanelIdx((prev) => (prev - 1 + filteredPanels.length) % filteredPanels.length)
+          return
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault()
+          selectPanel(filteredPanels[selectedPanelIdx])
+          return
+        }
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setShowPanelDropdown(false)
+        return
+      }
+    }
+
+    // 数据源下拉列表键盘导航（@ 符号触发）
+    if (showDatasourceDropdown) {
+      const filteredDs = filterDatasources(input.slice(datasourceDropdownPos + 1).split(/[\s\n]/)[0] || '')
+      if (filteredDs.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          setSelectedDsIndex((prev) => (prev + 1) % filteredDs.length)
+          return
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          setSelectedDsIndex((prev) => (prev - 1 + filteredDs.length) % filteredDs.length)
+          return
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault()
+          selectDatasource(filteredDs[selectedDsIndex])
+          return
+        }
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setShowDatasourceDropdown(false)
+        return
+      }
+    }
+
+    // 输入法组合输入状态时不触发发送（防止中文输入回车误发送）
+    if (isComposingRef.current) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
   }
 
-  const statusColor = connected ? '#52c41a' : '#ff4d4f'
-  const statusText = connected ? '已连接' : '未连接'
+  // 输入法组合事件处理
+  const handleCompositionStart = () => {
+    isComposingRef.current = true
+  }
+
+  const handleCompositionEnd = () => {
+    isComposingRef.current = false
+  }
+
+  const statusColor = connected ? '#52c41a' : '#faad14'
+  const statusText = connected ? '已连接' : '重连中...'
 
   return (
     <div style={{
@@ -704,11 +949,141 @@ export default function AIChatDialog({
             📎
           </button>
 
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={connected ? '描述你想做的修改...' : '正在连接...'}
+          <div style={{ position: 'relative', flex: 1 }}>
+            {/* # 面板下拉列表 */}
+            {showPanelDropdown && (() => {
+              const filteredPanels = filterPanels(input.slice(panelDropdownPos + 1).split(/[\s\n]/)[0] || '')
+              if (filteredPanels.length === 0) return null
+              return (
+                <div style={{
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: 0,
+                  right: 0,
+                  marginBottom: 4,
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 6,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                  maxHeight: 200,
+                  overflowY: 'auto',
+                  zIndex: 10,
+                }}>
+                  <div style={{
+                    padding: '6px 10px',
+                    fontSize: 11,
+                    color: 'var(--text-muted)',
+                    borderBottom: '1px solid var(--border-color)',
+                  }}>
+                    选择面板（↑↓ 选择，Enter 确认，Esc 关闭，输入文字实时筛选）
+                  </div>
+                  {filteredPanels.map((p, idx) => (
+                    <div
+                      key={p.id}
+                      onClick={() => selectPanel(p)}
+                      style={{
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        background: idx === selectedPanelIdx ? 'var(--primary-light)' : 'transparent',
+                        transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={() => setSelectedPanelIdx(idx)}
+                    >
+                      <span style={{
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        fontSize: 10,
+                        fontWeight: 500,
+                        background: p.type === 'table' ? '#722ed1' : p.type === 'line' ? '#1890ff' : p.type === 'bar' ? '#52c41a' : p.type === 'pie' ? '#fa8c16' : '#faad14',
+                        color: '#fff',
+                      }}>
+                        {p.type}
+                      </span>
+                      <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
+                        {p.title}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {p.id}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
+
+            {/* @ 数据源下拉列表 */}
+            {showDatasourceDropdown && (() => {
+              const filteredDs = filterDatasources(input.slice(datasourceDropdownPos + 1).split(/[\s\n]/)[0] || '')
+              if (filteredDs.length === 0) return null
+              return (
+              <div style={{
+                position: 'absolute',
+                bottom: '100%',
+                left: 0,
+                right: 0,
+                marginBottom: 4,
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 6,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                maxHeight: 200,
+                overflowY: 'auto',
+                zIndex: 10,
+              }}>
+                <div style={{
+                  padding: '6px 10px',
+                  fontSize: 11,
+                  color: 'var(--text-muted)',
+                  borderBottom: '1px solid var(--border-color)',
+                }}>
+                  选择数据源（↑↓ 选择，Enter 确认，Esc 关闭，输入文字实时筛选）
+                </div>
+                {filteredDs.map((ds, idx) => (
+                  <div
+                    key={ds.id}
+                    onClick={() => selectDatasource(ds)}
+                    style={{
+                      padding: '8px 12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      background: idx === selectedDsIndex ? 'var(--primary-light)' : 'transparent',
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={() => setSelectedDsIndex(idx)}
+                  >
+                    <span style={{
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      fontSize: 10,
+                      fontWeight: 500,
+                      background: ds.type === 'http' ? '#52c41a' : '#1890ff',
+                      color: '#fff',
+                    }}>
+                      {ds.type === 'http' ? 'HTTP' : 'MySQL'}
+                    </span>
+                    <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
+                      {ds.name}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {ds.id}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )})()}
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              onCompositionStart={handleCompositionStart}
+              onCompositionEnd={handleCompositionEnd}
+              placeholder={connected ? '描述你想做的修改...（输入 @ 选数据源，# 选面板）' : '正在连接...'}
             disabled={!connected || loading}
             rows={2}
             style={{
@@ -718,8 +1093,10 @@ export default function AIChatDialog({
               color: 'var(--text-primary)',
               border: '1px solid var(--border-color)',
               borderRadius: 4, outline: 'none',
+              width: '100%',
             }}
           />
+          </div>
           <button
             onClick={handleSend}
             disabled={!connected || loading || !input.trim()}
