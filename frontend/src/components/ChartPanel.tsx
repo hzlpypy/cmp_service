@@ -147,17 +147,8 @@ function detectColumns(rows: MetricRow[], chartType?: string): { nameCol: string
   let nameCol: string | null = null
   const valueCols: string[] = []
 
+  // 第一步：先识别数值列（优先级最高）
   for (const k of keys) {
-    const kl = k.toLowerCase()
-    // 折线图/柱状图：日期列优先作为 X 轴
-    if (!nameCol && isDateColumn(k)) {
-      nameCol = k
-      continue
-    }
-    if (!nameCol && (kl.includes('name') || kl.includes('指标') || kl.includes('机房') || kl === '市场' || kl === 'market')) {
-      nameCol = k
-      continue
-    }
     const sample = rows.slice(0, 5)
     const allNumeric = sample.every((r) => {
       const v = r[k]
@@ -168,8 +159,30 @@ function detectColumns(rows: MetricRow[], chartType?: string): { nameCol: string
       valueCols.push(k)
     }
   }
+
+  // 第二步：从非数值列中识别名称列
+  const nonValueKeys = keys.filter((k) => !valueCols.includes(k))
+  for (const k of nonValueKeys) {
+    const kl = k.toLowerCase()
+    // 折线图/柱状图：日期列优先作为 X 轴
+    if (!nameCol && isDateColumn(k)) {
+      nameCol = k
+      continue
+    }
+    // 名称列关键词匹配（精确匹配优先）
+    if (!nameCol && (kl.includes('name') || kl.includes('node') || kl.includes('机房') || kl === '市场' || kl === 'market' || kl === '类型' || kl === 'type' || kl === 'category' || kl.includes('设备'))) {
+      nameCol = k
+      continue
+    }
+  }
+
+  // 第三步：如果还没找到名称列，取第一个非数值列
+  if (!nameCol && nonValueKeys.length > 0) {
+    nameCol = nonValueKeys[0]
+  }
+  // 兜底：如果所有列都是数值列，取第一个列作为名称列
   if (!nameCol) {
-    nameCol = keys.find((k) => !valueCols.includes(k)) || keys[0]
+    nameCol = keys[0]
   }
   return { nameCol, valueCols }
 }
@@ -183,7 +196,8 @@ function shortName(name: string): string {
     .replace('）', '')
 }
 
-const SERIES_COLORS = ['#5794f2', '#e24d4d', '#55bd6a', '#ff9830', '#b877d9', '#eca846']
+// 冷色调配色方案，避免红色/黄色引发告警误解
+const SERIES_COLORS = ['#5470c6', '#73c0de', '#91cc75', '#55bd6a', '#b877d9', '#9a60b4', '#3ba272', '#5b8ff9']
 
 export default memo(function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, panelKey, columns, dataLinks }: ChartPanelProps) {
   const chartRef = useRef<HTMLDivElement>(null)
@@ -371,15 +385,80 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
           const primaryValues = valueCols.length > 0
             ? firstRows.map((m) => parseFloat(m[valueCols[0]]) || 0)
             : []
+          // 根据数据量动态调整布局
+          const dataCount = names.length
+          const isManyData = dataCount > 8
+          // 数据多时：使用右侧图例，饼图左移，标签隐藏（通过图例查看）
+          // 数据少时：使用左侧图例，饼图右移，标签外部显示
+          const pieCenter = isManyData ? ['40%', '50%'] : ['55%', '50%']
+          const pieRadius = isManyData ? ['35%', '55%'] : ['45%', '70%']
+
           option = {
             backgroundColor: 'transparent',
-            tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)', backgroundColor: '#22252b', borderColor: '#33363d', textStyle: { color: '#d8d9da' } },
-            legend: { orient: 'vertical', left: 'left', top: 'middle', textStyle: { color: '#a0a3a8', fontSize: 11 } },
+            tooltip: {
+              trigger: 'item',
+              formatter: '{b}: {c} ({d}%)',
+              backgroundColor: '#22252b',
+              borderColor: '#33363d',
+              textStyle: { color: '#d8d9da' },
+              confine: true, // 限制在图表区域内
+            },
+            legend: isManyData ? {
+              type: 'scroll',
+              orient: 'vertical',
+              right: 10,
+              top: 'middle',
+              textStyle: { color: '#a0a3a8', fontSize: 11 },
+              itemWidth: 12,
+              itemHeight: 12,
+              itemGap: 6,
+              pageIconColor: '#a0a3a8',
+              pageIconInactiveColor: '#4e5969',
+              pageTextStyle: { color: '#a0a3a8' },
+            } : {
+              orient: 'vertical',
+              left: 10,
+              top: 'middle',
+              textStyle: { color: '#a0a3a8', fontSize: 11 },
+              itemWidth: 12,
+              itemHeight: 12,
+              itemGap: 6,
+            },
             series: [{
-              type: 'pie', radius: ['45%', '70%'], center: ['55%', '50%'],
+              type: 'pie',
+              radius: pieRadius,
+              center: pieCenter,
               data: names.map((n, i) => ({ name: n, value: primaryValues[i] || 0 })),
-              emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.5)' } },
-              label: { color: '#a0a3a8', fontSize: 10 },
+              emphasis: {
+                itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.5)' },
+                label: { show: true, fontWeight: 'bold' }, // 悬浮时显示标签
+              },
+              label: {
+                show: !isManyData, // 数据多时隐藏标签，通过图例查看
+                position: 'outer',
+                color: '#a0a3a8',
+                fontSize: 10,
+                formatter: isManyData ? '{b}' : '{b}\n{c} ({d}%)', // 数据多时只显示名称
+                alignTo: 'labelLine', // 标签对齐到引导线
+                bleedMargin: 5, // 标签出血边距
+              },
+              labelLine: {
+                show: !isManyData,
+                length: 10, // 第一段引导线长度
+                length2: 15, // 第二段引导线长度
+                smooth: false,
+                lineStyle: { color: '#4e5969', width: 1 },
+              },
+              labelLayout: {
+                hideOverlap: true, // 自动隐藏重叠的标签
+                moveOverlap: 'shiftY', // 垂直方向移动避免重叠
+              },
+              // 小数据时，鼠标悬浮显示完整信息
+              ...(isManyData ? {} : {
+                blur: {
+                  label: { opacity: 0.3 },
+                },
+              }),
             }],
           }
           break

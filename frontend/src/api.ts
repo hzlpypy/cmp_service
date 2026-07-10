@@ -176,7 +176,7 @@ export interface TargetDef {
 
 export interface DashboardDataRes {
   dashboard_id: string
-  dashboard_title: string
+  dashboard_title?: string  dashboard_title: string
   dashboard_json: DashboardJSON
   panels_data: PanelDataRes[]
 }
@@ -305,7 +305,7 @@ export async function testDatasource(data: { id?: string; name?: string; type?: 
 export interface SnapshotRes {
   id: string
   dashboard_id: string
-  panel_id: string
+  dashboard_title?: string  panel_id: string
   snapshot_key: string
   name: string
   dashboard_json: DashboardJSON
@@ -317,7 +317,7 @@ export interface SnapshotRes {
 
 export interface SnapshotCreateReq {
   dashboard_id: string
-  panel_id?: string
+  dashboard_title?: string  panel_id?: string
   name?: string
   dashboard_json: DashboardJSON
   panels_data?: PanelDataRes[]
@@ -364,7 +364,7 @@ export interface VariableOption {
 export interface VariableRes {
   id: string
   dashboard_id: string
-  name: string
+  dashboard_title?: string  name: string
   type: 'custom' | 'query' | 'textbox' | 'constant' | 'datasource' | 'interval'
   label: string
   description: string
@@ -419,7 +419,7 @@ export async function getPanelData(dashboard_id: string, panel_id: string, from?
 export interface QueryInspectReq {
   raw_sql: string
   dashboard_id: string
-  datasource_id?: string
+  dashboard_title?: string  datasource_id?: string
   variables?: Record<string, string | string[]>
   from?: string
   to?: string
@@ -505,7 +505,7 @@ export interface VersionBriefRes {
 export interface VersionRes {
   id: string
   dashboard_id: string
-  version: number
+  dashboard_title?: string  version: number
   title: string
   dashboard_json: DashboardJSON
   message: string
@@ -515,7 +515,7 @@ export interface VersionRes {
 
 export interface VersionDiffRes {
   dashboard_id: string
-  version_from: number
+  dashboard_title?: string  version_from: number
   version_to: number
   title_from: string
   title_to: string
