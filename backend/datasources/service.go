@@ -238,7 +238,7 @@ func testHTTPConnection(name, url string) (string, error) {
 		return "", fmt.Errorf("服务器错误: HTTP %d", resp.StatusCode)
 	}
 
-	return fmt.Sprintf("%s(HTTP) 连接成功, 状态码: %d", name, resp.StatusCode), nil
+	return fmt.Sprintf("%s(HTTP) 连接成功", name), nil
 }
 
 // generateDSID 生成数据源的唯一ID（最多19字符）。
