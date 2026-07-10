@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom'
+import { Modal, message } from 'antd'
 import html2canvas from 'html2canvas'
 import ChartPanel from './ChartPanel'
 import GridLayout from './GridLayout'
@@ -141,18 +142,27 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       setSnapshots((prev) => [snap, ...prev])
       setSnapName('')
     } catch (e: any) {
-      alert('创建快照失败: ' + (e.message || '未知错误'))
+      message.error('创建快照失败: ' + (e.message || '未知错误'))
     } finally {
       setSnapping(false)
     }
   }
 
   const handleDeleteSnapshot = async (key: string) => {
-    if (!confirm('确认删除该快照？')) return
-    try {
-      await api.deleteSnapshot(key)
-      setSnapshots((prev) => prev.filter((s) => s.snapshot_key !== key))
-    } catch (e: any) { alert('删除失败: ' + (e.message || '未知错误')) }
+    Modal.confirm({
+      title: '确认删除',
+      content: '确认删除该快照？',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.deleteSnapshot(key)
+          setSnapshots((prev) => prev.filter((s) => s.snapshot_key !== key))
+          message.success('删除成功')
+        } catch (e: any) { message.error('删除失败: ' + (e.message || '未知错误')) }
+      },
+    })
   }
 
   // 导出为图像
@@ -213,7 +223,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       link.href = canvas.toDataURL('image/png')
       link.click()
     } catch (e: any) {
-      alert('导出失败: ' + (e.message || e))
+      message.error('导出失败: ' + (e.message || e))
     } finally {
       // 恢复原始样式
       canvasEl.style.cssText = origCanvasStyle
@@ -722,7 +732,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
       setDataRes(dbData)
     } catch (e: any) {
-      alert('保存失败: ' + (e.message || e))
+      message.error('保存失败: ' + (e.message || e))
     } finally {
       setSaving(false)
     }

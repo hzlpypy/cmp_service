@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { Modal, message } from 'antd'
 import * as api from '../api'
 
 interface VersionHistoryProps {
@@ -128,7 +129,7 @@ export default function VersionHistory({ dashboardId, onClose, onRestore }: Vers
       setSelectedVersion(v)
       setDiff(null)
     } catch (e) {
-      alert('获取版本详情失败')
+      message.error('获取版本详情失败')
     }
   }
 
@@ -148,7 +149,7 @@ export default function VersionHistory({ dashboardId, onClose, onRestore }: Vers
 
   const handleCompare = async () => {
     if (selectedForCompare.length !== 2) {
-      alert('请选择两个版本进行对比')
+      message.warning('请选择两个版本进行对比')
       return
     }
     const [v1, v2] = selectedForCompare
@@ -158,42 +159,57 @@ export default function VersionHistory({ dashboardId, onClose, onRestore }: Vers
       setSelectedVersion(null)
       setShowJsonDiff(false)
     } catch (e) {
-      alert('对比失败')
+      message.error('对比失败')
     }
   }
 
   const handleRestore = async (version: number) => {
-    if (!confirm(`确定要切换到版本 ${version} 吗？`)) return
-    setRestoring(true)
-    try {
-      await api.restoreVersion(dashboardId, version)
-      alert('切换成功')
-      onRestore()
-      loadVersions()
-    } catch (e: any) {
-      alert('切换失败: ' + e.message)
-    } finally {
-      setRestoring(false)
-    }
+    Modal.confirm({
+      title: '确认切换',
+      content: `确定要切换到版本 ${version} 吗？`,
+      okText: '切换',
+      cancelText: '取消',
+      onOk: async () => {
+        setRestoring(true)
+        try {
+          await api.restoreVersion(dashboardId, version)
+          message.success('切换成功')
+          onRestore()
+          loadVersions()
+        } catch (e: any) {
+          message.error('切换失败: ' + e.message)
+        } finally {
+          setRestoring(false)
+        }
+      },
+    })
   }
 
   const handleDelete = async (version: number) => {
-    if (!confirm(`确定要删除版本 ${version} 吗？此操作不可恢复。`)) return
-    setDeleting(true)
-    try {
-      await api.deleteVersion(dashboardId, version)
-      alert('删除成功')
-      loadVersions()
-      if (selectedVersion?.version === version) {
-        setSelectedVersion(null)
-      }
-      setSelectedForCompare(prev => prev.filter(v => v !== version))
-      setDiff(null)
-    } catch (e: any) {
-      alert('删除失败: ' + e.message)
-    } finally {
-      setDeleting(false)
-    }
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定要删除版本 ${version} 吗？此操作不可恢复。`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setDeleting(true)
+        try {
+          await api.deleteVersion(dashboardId, version)
+          message.success('删除成功')
+          loadVersions()
+          if (selectedVersion?.version === version) {
+            setSelectedVersion(null)
+          }
+          setSelectedForCompare(prev => prev.filter(v => v !== version))
+          setDiff(null)
+        } catch (e: any) {
+          message.error('删除失败: ' + e.message)
+        } finally {
+          setDeleting(false)
+        }
+      },
+    })
   }
 
   return (

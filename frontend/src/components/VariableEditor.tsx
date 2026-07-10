@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Modal, message } from 'antd'
 import * as api from '../api'
 import type { VariableRes, DatasourceRes } from '../api'
 
@@ -107,18 +108,27 @@ export default function VariableEditor({ dashboardId }: VariableEditorProps) {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('确定删除该变量？')) return
-    try {
-      await api.deleteVariable(id)
-      setVariables((prev) => prev.filter((v) => v.id !== id))
-    } catch (e: any) {
-      alert('删除失败: ' + (e.message || '未知错误'))
-    }
+    Modal.confirm({
+      title: '确认删除',
+      content: '确定删除该变量？',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.deleteVariable(id)
+          setVariables((prev) => prev.filter((v) => v.id !== id))
+          message.success('删除成功')
+        } catch (e: any) {
+          message.error('删除失败: ' + (e.message || '未知错误'))
+        }
+      },
+    })
   }
 
   const handleSave = async () => {
     if (!form.name?.trim()) {
-      alert('请输入变量名称')
+      message.warning('请输入变量名称')
       return
     }
 
@@ -143,13 +153,15 @@ export default function VariableEditor({ dashboardId }: VariableEditorProps) {
       if (editingId) {
         const updated = await api.updateVariable(editingId, data)
         setVariables((prev) => prev.map((v) => (v.id === editingId ? updated : v)))
+        message.success('更新成功')
       } else {
         const created = await api.createVariable(data)
         setVariables((prev) => [...prev, created])
+        message.success('创建成功')
       }
       resetForm()
     } catch (e: any) {
-      alert('保存失败: ' + (e.message || '未知错误'))
+      message.error('保存失败: ' + (e.message || '未知错误'))
     } finally {
       setSaving(false)
     }

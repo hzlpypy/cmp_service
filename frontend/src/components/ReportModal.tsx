@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { message } from 'antd'
 
 /** 报告缓存：按 dashboardId 存储已生成的报告 */
 const reportCache: Map<string, string> = new Map()
@@ -169,7 +170,7 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
   const handleCopy = () => {
     if (!report) return
     navigator.clipboard.writeText(cleanReport(report)).then(() => {
-      alert('已复制到剪贴板')
+      message.success('已复制到剪贴板')
     })
   }
 

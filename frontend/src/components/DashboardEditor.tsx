@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { message } from 'antd'
 import type { DashboardJSON } from '../api'
 import VariableEditor from './VariableEditor'
 
@@ -38,7 +39,7 @@ export default function DashboardEditor({ title, json, dashboardId, onSave, onCl
       const p = JSON.parse(jsonText) as DashboardJSON
       if (p.title) setDashboardTitle(p.title)
       setTab('visual')
-    } catch { alert('JSON 格式错误，请修正后再切换') }
+    } catch { message.error('JSON 格式错误，请修正后再切换') }
   }, [jsonText])
 
   const handleSave = async () => {
@@ -51,7 +52,8 @@ export default function DashboardEditor({ title, json, dashboardId, onSave, onCl
         final = JSON.parse(jsonText)
       }
       await onSave(final)
-    } catch (e: any) { alert('保存失败: ' + e.message) }
+      message.success('保存成功')
+    } catch (e: any) { message.error('保存失败: ' + e.message) }
     finally { setSaving(false) }
   }
 

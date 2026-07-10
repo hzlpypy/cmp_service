@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import type { ReactNode } from 'react'
+import { Modal, message } from 'antd'
 import * as api from '../api'
 import type { FolderRes, DashboardBriefRes } from '../api'
 import { sampleDashboards } from '../mock/dashboardSamples'
@@ -179,15 +180,24 @@ export default function BrowsePage() {
       setNewFolderName('')
       setShowNewFolder(false)
       loadFolders()
-    } catch (e: any) { alert('创建文件夹失败: ' + e.message) }
+    } catch (e: any) { message.error('创建文件夹失败: ' + e.message) }
   }
 
   const handleDeleteFolder = async (id: string) => {
-    if (!confirm('确定删除该文件夹及其下所有仪表板?')) return
-    try {
-      await api.deleteFolder(id)
-      loadFolders()
-    } catch (e: any) { alert('删除失败: ' + e.message) }
+    Modal.confirm({
+      title: '确认删除',
+      content: '确定删除该文件夹及其下所有仪表板？',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.deleteFolder(id)
+          message.success('删除成功')
+          loadFolders()
+        } catch (e: any) { message.error('删除失败: ' + e.message) }
+      },
+    })
   }
 
   const handleCreateDashboard = async () => {
@@ -204,27 +214,45 @@ export default function BrowsePage() {
       setNewMenuOpen(false)
       loadFolders()
       navigate(`/d/${db.id}/${titleToSlug(db.title)}`)
-    } catch (e: any) { alert('创建仪表板失败: ' + e.message) }
+    } catch (e: any) { message.error('创建仪表板失败: ' + e.message) }
   }
 
   const handleDeleteDashboard = async (id: string) => {
-    if (!confirm('确定删除此仪表板?')) return
-    try {
-      await api.deleteDashboard(id)
-      loadFolders()
-    } catch (e: any) { alert('删除失败: ' + e.message) }
+    Modal.confirm({
+      title: '确认删除',
+      content: '确定删除此仪表板？',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.deleteDashboard(id)
+          message.success('删除成功')
+          loadFolders()
+        } catch (e: any) { message.error('删除失败: ' + e.message) }
+      },
+    })
   }
 
   const handleBatchDelete = async () => {
     if (selectedDashboards.size === 0) return
-    if (!confirm(`确定删除选中的 ${selectedDashboards.size} 个仪表板?`)) return
-    try {
-      const ids = Array.from(selectedDashboards)
-      await Promise.all(ids.map((id) => api.deleteDashboard(id)))
-      setSelectedDashboards(new Set())
-      setSelectedFolders(new Set())
-      loadFolders()
-    } catch (e: any) { alert('删除失败: ' + e.message) }
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定删除选中的 ${selectedDashboards.size} 个仪表板？`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const ids = Array.from(selectedDashboards)
+          await Promise.all(ids.map((id) => api.deleteDashboard(id)))
+          setSelectedDashboards(new Set())
+          setSelectedFolders(new Set())
+          message.success('删除成功')
+          loadFolders()
+        } catch (e: any) { message.error('删除失败: ' + e.message) }
+      },
+    })
   }
 
   const handleOpenMoveModal = () => {
@@ -248,7 +276,7 @@ export default function BrowsePage() {
       setSelectedFolders(new Set())
       setShowMoveModal(false)
       loadFolders()
-    } catch (e: any) { alert('移动失败: ' + e.message) }
+    } catch (e: any) { message.error('移动失败: ' + e.message) }
     finally { setMoving(false) }
   }
 
@@ -258,7 +286,7 @@ export default function BrowsePage() {
       setEditingDashboard(db)
       setJsonEditText(JSON.stringify(db.dashboard_json, null, 2))
       setShowJsonEdit(true)
-    } catch (e: any) { alert('加载仪表板失败: ' + e.message) }
+    } catch (e: any) { message.error('加载仪表板失败: ' + e.message) }
   }
 
   const handleSaveDashboardJson = async () => {
@@ -267,8 +295,9 @@ export default function BrowsePage() {
       const newJson = JSON.parse(jsonEditText)
       await api.updateDashboard(editingDashboard.id, editingDashboard.title, editingDashboard.folder_id, newJson)
       setShowJsonEdit(false)
+      message.success('保存成功')
       loadFolders()
-    } catch (e: any) { alert('保存失败: ' + e.message) }
+    } catch (e: any) { message.error('保存失败: ' + e.message) }
   }
 
   const allDashboards = folders.flatMap((f) =>

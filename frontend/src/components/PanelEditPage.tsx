@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Modal, message } from 'antd'
 import ChartPanel from './ChartPanel'
 import QueryInspector from './QueryInspector'
 import VariableSelector from './VariableSelector'
@@ -345,7 +346,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
       // 3. 确保有数据才创建快照
       const hasData = latestData.length > 0 && latestData.some(series => series.length > 0)
       if (!hasData) {
-        alert('暂无预览数据，请先点击工具栏的「刷新」按钮获取数据后再创建快照')
+        message.warning('暂无预览数据，请先点击工具栏的「刷新」按钮获取数据后再创建快照')
         return
       }
 
@@ -367,15 +368,25 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
       })
       setSnapshots((prev) => [snap, ...prev])
       setSnapName('')
-    } catch (e: any) { alert('创建快照失败: ' + (e.message || '未知错误')) }
+      message.success('创建快照成功')
+    } catch (e: any) { message.error('创建快照失败: ' + (e.message || '未知错误')) }
   }
 
   const handleDeleteSnapshot = async (key: string) => {
-    if (!confirm('确认删除该快照？')) return
-    try {
-      await api.deleteSnapshot(key)
-      setSnapshots((prev) => prev.filter((s) => s.snapshot_key !== key))
-    } catch (e: any) { alert('删除失败: ' + (e.message || '未知错误')) }
+    Modal.confirm({
+      title: '确认删除',
+      content: '确认删除该快照？',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.deleteSnapshot(key)
+          setSnapshots((prev) => prev.filter((s) => s.snapshot_key !== key))
+          message.success('删除成功')
+        } catch (e: any) { message.error('删除失败: ' + (e.message || '未知错误')) }
+      },
+    })
   }
 
   const shareLink = `${window.location.origin}/snapshot/`
@@ -401,7 +412,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
         setLiveColumns(pd.columns || [])
       }
     } catch (e: any) {
-      alert('查询失败: ' + (e.message || '未知错误'))
+      message.error('查询失败: ' + (e.message || '未知错误'))
     } finally {
       setQueryLoading(false)
     }
@@ -448,9 +459,22 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
   }
 
   const handleDiscard = () => {
-    if (hasUnsaved && !confirm('确定要丢弃所有更改吗？')) return
-    setP(clonePanel(panel))
-    setHasUnsaved(false)
+    if (hasUnsaved) {
+      Modal.confirm({
+        title: '确认放弃',
+        content: '确定要丢弃所有更改吗？',
+        okText: '放弃',
+        okType: 'danger',
+        cancelText: '继续编辑',
+        onOk: () => {
+          setP(clonePanel(panel))
+          setHasUnsaved(false)
+        },
+      })
+    } else {
+      setP(clonePanel(panel))
+      setHasUnsaved(false)
+    }
   }
 
   const update = (patch: Partial<PanelDef>) => setP((prev) => ({ ...prev, ...patch }))
