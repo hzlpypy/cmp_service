@@ -176,7 +176,7 @@ export interface TargetDef {
 
 export interface DashboardDataRes {
   dashboard_id: string
-  dashboard_title?: string  dashboard_title: string
+  dashboard_title?: string
   dashboard_json: DashboardJSON
   panels_data: PanelDataRes[]
 }
@@ -205,8 +205,9 @@ export interface MetricRow {
 
 // ---- Folders API ----
 
-export async function listFolders(): Promise<{ list: FolderRes[]; total: number }> {
-  return request('/api/v1/folders/list')
+export async function listFolders(title?: string): Promise<{ list: FolderRes[]; total: number }> {
+  const url = title ? `/api/v1/folders/list?title=${encodeURIComponent(title)}` : '/api/v1/folders/list'
+  return request(url)
 }
 
 export async function getFolder(id: string): Promise<FolderRes> {
@@ -305,7 +306,7 @@ export async function testDatasource(data: { id?: string; name?: string; type?: 
 export interface SnapshotRes {
   id: string
   dashboard_id: string
-  dashboard_title?: string  panel_id: string
+  panel_id: string
   snapshot_key: string
   name: string
   dashboard_json: DashboardJSON
@@ -317,7 +318,7 @@ export interface SnapshotRes {
 
 export interface SnapshotCreateReq {
   dashboard_id: string
-  dashboard_title?: string  panel_id?: string
+  panel_id?: string
   name?: string
   dashboard_json: DashboardJSON
   panels_data?: PanelDataRes[]
@@ -353,6 +354,39 @@ export async function deleteSnapshot(key: string): Promise<void> {
   return request('/api/v1/snapshots/delete', { method: 'POST', body: JSON.stringify({ snapshot_key: key }) })
 }
 
+// ---- Snapshot Schedules API ----
+
+export interface SnapshotScheduleRes {
+  id: string
+  dashboard_id: string
+  name: string
+  cron_expr: string
+  enabled: boolean
+  last_run_at?: string
+  next_run_at?: string
+  created_at: string
+}
+
+export async function createSnapshotSchedule(req: { dashboard_id: string; name: string; cron_expr: string }): Promise<SnapshotScheduleRes> {
+  return request('/api/v1/snapshot-schedules/create', { method: 'POST', body: JSON.stringify(req) })
+}
+
+export async function listSnapshotSchedules(dashboardId: string): Promise<SnapshotScheduleRes[]> {
+  return request('/api/v1/snapshot-schedules/list', { method: 'POST', body: JSON.stringify({ dashboard_id: dashboardId }) })
+}
+
+export async function updateSnapshotSchedule(req: { id: string; name?: string; cron_expr?: string }): Promise<SnapshotScheduleRes> {
+  return request('/api/v1/snapshot-schedules/update', { method: 'POST', body: JSON.stringify(req) })
+}
+
+export async function deleteSnapshotSchedule(id: string): Promise<void> {
+  return request('/api/v1/snapshot-schedules/delete', { method: 'POST', body: JSON.stringify({ id }) })
+}
+
+export async function toggleSnapshotSchedule(id: string, enabled: boolean): Promise<SnapshotScheduleRes> {
+  return request('/api/v1/snapshot-schedules/toggle', { method: 'POST', body: JSON.stringify({ id, enabled }) })
+}
+
 // ---- Variables API ----
 
 export interface VariableOption {
@@ -364,7 +398,7 @@ export interface VariableOption {
 export interface VariableRes {
   id: string
   dashboard_id: string
-  dashboard_title?: string  name: string
+  name: string
   type: 'custom' | 'query' | 'textbox' | 'constant' | 'datasource' | 'interval'
   label: string
   description: string
@@ -419,7 +453,7 @@ export async function getPanelData(dashboard_id: string, panel_id: string, from?
 export interface QueryInspectReq {
   raw_sql: string
   dashboard_id: string
-  dashboard_title?: string  datasource_id?: string
+  datasource_id?: string
   variables?: Record<string, string | string[]>
   from?: string
   to?: string
@@ -505,7 +539,7 @@ export interface VersionBriefRes {
 export interface VersionRes {
   id: string
   dashboard_id: string
-  dashboard_title?: string  version: number
+  version: number
   title: string
   dashboard_json: DashboardJSON
   message: string
@@ -515,7 +549,7 @@ export interface VersionRes {
 
 export interface VersionDiffRes {
   dashboard_id: string
-  dashboard_title?: string  version_from: number
+  version_from: number
   version_to: number
   title_from: string
   title_to: string

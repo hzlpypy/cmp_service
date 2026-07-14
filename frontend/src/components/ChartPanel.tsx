@@ -98,11 +98,34 @@ function formatTimestamp(ms: number, format?: string): string {
 }
 
 /**
+ * 格式化数值，最多保留两位小数。
+ */
+function formatNumber(val: number | string): string {
+  const num = typeof val === 'string' ? parseFloat(val) : val
+  if (isNaN(num)) return String(val)
+  // 如果是整数，不显示小数
+  if (Number.isInteger(num)) return String(num)
+  // 最多保留两位小数
+  return num.toFixed(2).replace(/\.?0+$/, '')
+}
+
+/**
  * 格式化值：如果是毫秒时间戳则转换为日期字符串，否则返回原值。
  */
 function formatValue(val: unknown): string {
   if (isMillisecondTimestamp(val)) {
     return formatTimestamp(val as number)
+  }
+  // 如果是数值，格式化并保留两位小数
+  if (typeof val === 'number') {
+    return formatNumber(val)
+  }
+  // 尝试解析为数值
+  if (typeof val === 'string' && val !== '') {
+    const num = parseFloat(val)
+    if (!isNaN(num) && String(num) === val) {
+      return formatNumber(num)
+    }
   }
   return String(val ?? '')
 }
@@ -401,7 +424,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
                   return `<div style="display:flex;align-items:center;gap:8px;margin:2px 0">
                     <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${alertColor || p.color};flex-shrink:0"></span>
                     <span style="color:#86909c;min-width:80px">${p.seriesName}</span>
-                    <span style="color:${alertColor ? alertColor : '#1d2129'};font-weight:600">${p.value}${alertColor ? ' ⚠' : ''}</span>
+                    <span style="color:${alertColor ? alertColor : '#1d2129'};font-weight:600">${formatNumber(p.value)}${alertColor ? ' ⚠' : ''}</span>
                   </div>`
                 })
                 return `<div style="font-weight:600;color:#4e5969;margin-bottom:6px">${params[0].axisValueLabel}</div>${parts.join('')}`
@@ -496,7 +519,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
               confine: true,
               formatter: (params: any) => {
                  const alertClr = pieAlertCol ? getCellAlertColor(pieAlertCol, String(params.value)) : undefined
-                 const base = `<b>${params.name}</b>: ${params.value} (${params.percent}%)`
+                 const base = `<b>${params.name}</b>: ${formatNumber(params.value)} (${formatNumber(params.percent)}%)`
                  return alertClr ? `${base} <span style="color:${alertClr}">⚠</span>` : base
                },
             },
@@ -582,7 +605,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
                 },
               },
               axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
-              detail: { valueAnimation: true, fontSize: 28, offsetCenter: [0, '60%'], formatter: '{value}%', color: '#1d2129', fontWeight: 'bold' },
+              detail: { valueAnimation: true, fontSize: 28, offsetCenter: [0, '60%'], formatter: (val: number) => `${formatNumber(val)}%`, color: '#1d2129', fontWeight: 'bold' },
               data: [{ value: gaugeValue, name: shortName(gaugeName) }],
               title: { color: '#86909c', fontSize: 12, offsetCenter: [0, '85%'] },
             }],

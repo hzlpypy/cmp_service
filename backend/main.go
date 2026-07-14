@@ -27,6 +27,7 @@ import (
 	"cmp_service_backend/network_metrics"
 	"cmp_service_backend/panels"
 	"cmp_service_backend/snapshots"
+	"cmp_service_backend/snapshotschedules"
 	"cmp_service_backend/variables"
 	"fmt"
 	"time"
@@ -157,6 +158,12 @@ func main() {
 	snapCtrl := snapshots.NewController(snapSvc)
 	snapshots.RegisterSnapshotsRouter(e, snapCtrl)
 
+	// 定时快照管理：/api/v1/snapshot-schedules/*
+	schedSvc := snapshotschedules.NewServer(db, l, dbSvc, snapSvc)
+	schedCtrl := snapshotschedules.NewController(schedSvc)
+	snapshotschedules.RegisterSnapshotSchedulesRouter(e, schedCtrl)
+	schedSvc.StartScheduler()
+
 	// 变量管理：/api/v1/variables/*
 	varSvc := variables.NewServer(db, l)
 	varCtrl := variables.NewController(varSvc)
@@ -168,7 +175,7 @@ func main() {
 	file.RegisterFileRouter(e, fnc)
 
 	// Auto-migrate new tables
-	db.AutoMigrate(&model.Snapshot{}, &model.Variable{}, &model.DashboardVersion{}, &model.Datasource{})
+	db.AutoMigrate(&model.Snapshot{}, &model.Variable{}, &model.DashboardVersion{}, &model.Datasource{}, &model.SnapshotSchedule{})
 
 	// 启动 HTTP 服务器
 	l.Infof("Server starting on port %d", cfg.Server.Port)

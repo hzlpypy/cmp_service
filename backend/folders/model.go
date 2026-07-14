@@ -41,10 +41,37 @@ type DashboardBriefRes struct {
 	Title string `json:"title"`
 	// FolderID 所属文件夹ID
 	FolderID string `json:"folder_id"`
+	// FolderName 所属文件夹名称（搜索结果中使用）
+	FolderName string `json:"folder_name,omitempty"`
 	// CreatedAt 创建时间
 	CreatedAt string `json:"created_at"`
 	// UpdatedAt 最后更新时间
 	UpdatedAt string `json:"updated_at"`
+}
+
+// SearchItemRes 搜索结果项。
+// 用于搜索响应，可以是文件夹或仪表板。
+type SearchItemRes struct {
+	// ID 唯一标识符
+	ID string `json:"id"`
+	// Title 标题
+	Title string `json:"title"`
+	// Type 类型：folder（文件夹）或 dashboard（仪表板）
+	Type string `json:"type"`
+	// FolderName 所属文件夹名称（仅仪表板类型）
+	FolderName string `json:"folder_name,omitempty"`
+	// FolderID 所属文件夹ID（仅仪表板类型）
+	FolderID string `json:"folder_id,omitempty"`
+	// CreatedAt 创建时间
+	CreatedAt string `json:"created_at"`
+	// UpdatedAt 最后更新时间
+	UpdatedAt string `json:"updated_at"`
+}
+
+// FolderListReq 文件夹列表查询请求参数。
+type FolderListReq struct {
+	// Title 可选，按仪表板标题模糊搜索
+	Title string `json:"title"`
 }
 
 // FolderListRes 文件夹列表响应结构。

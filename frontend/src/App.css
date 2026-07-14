@@ -722,6 +722,39 @@ body {
   border-bottom: none;
 }
 
+/* ===== Folder Content Container ===== */
+.folder-content-container {
+  background: #fff;
+  border: 1px solid #e5e6eb;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.folder-content-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: #fafbfc;
+  border-bottom: 1px solid #e5e6eb;
+  font-weight: 600;
+  font-size: 13px;
+  color: #1d2129;
+}
+
+.folder-content-list {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.folder-content-list .dashboard-item {
+  border-bottom: 1px solid #f2f3f5;
+}
+
+.folder-content-list .dashboard-item:last-child {
+  border-bottom: none;
+}
+
 /* ===== Checkbox ===== */
 .list-item input[type="checkbox"] {
   width: 14px;
