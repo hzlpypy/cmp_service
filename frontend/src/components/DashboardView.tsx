@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { useSearchParams, useNavigate, useParams } from 'react-router-dom'
+import { useSearchParams, useNavigate, useParams, Link } from 'react-router-dom'
+import { Modal, message, Breadcrumb } from 'antd'
+import { HomeOutlined, FolderOutlined, DashboardOutlined } from '@ant-design/icons'
 import html2canvas from 'html2canvas'
 import ChartPanel from './ChartPanel'
 import GridLayout from './GridLayout'
@@ -8,6 +10,7 @@ import VariableSelector from './VariableSelector'
 import DashboardEditor from './DashboardEditor'
 import VersionHistory from './VersionHistory'
 import ReportModal from './ReportModal'
+import SnapshotScheduleModal from './SnapshotScheduleModal'
 import * as api from '../api'
 import type { DashboardRes, DashboardDataRes, DashboardJSON, MetricRow, PanelDef, PanelDataRes, DatasourceRes, VariableRes } from '../api'
 
@@ -141,18 +144,27 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       setSnapshots((prev) => [snap, ...prev])
       setSnapName('')
     } catch (e: any) {
-      alert('创建快照失败: ' + (e.message || '未知错误'))
+      message.error('创建快照失败: ' + (e.message || '未知错误'))
     } finally {
       setSnapping(false)
     }
   }
 
   const handleDeleteSnapshot = async (key: string) => {
-    if (!confirm('确认删除该快照？')) return
-    try {
-      await api.deleteSnapshot(key)
-      setSnapshots((prev) => prev.filter((s) => s.snapshot_key !== key))
-    } catch (e: any) { alert('删除失败: ' + (e.message || '未知错误')) }
+    Modal.confirm({
+      title: '确认删除',
+      content: '确认删除该快照？',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.deleteSnapshot(key)
+          setSnapshots((prev) => prev.filter((s) => s.snapshot_key !== key))
+          message.success('删除成功')
+        } catch (e: any) { message.error('删除失败: ' + (e.message || '未知错误')) }
+      },
+    })
   }
 
   // 导出为图像
@@ -213,7 +225,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       link.href = canvas.toDataURL('image/png')
       link.click()
     } catch (e: any) {
-      alert('导出失败: ' + (e.message || e))
+      message.error('导出失败: ' + (e.message || e))
     } finally {
       // 恢复原始样式
       canvasEl.style.cssText = origCanvasStyle
@@ -240,6 +252,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   const [showVersionHistory, setShowVersionHistory] = useState(false)
   // 报告生成
   const [showReport, setShowReport] = useState(false)
+  const [showSchedule, setShowSchedule] = useState(false)
 
   // 时间范围选择（优先从 URL 参数读取，其次 localStorage）
   type TimePreset = '5m' | '30m' | '1h' | '6h' | '12h' | '24h' | '2d' | '7d' | '30d' | 'today' | 'yesterday' | 'day_before_yesterday' | 'last_week_today' | 'custom'
@@ -722,7 +735,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
       setDataRes(dbData)
     } catch (e: any) {
-      alert('保存失败: ' + (e.message || e))
+      message.error('保存失败: ' + (e.message || e))
     } finally {
       setSaving(false)
     }
@@ -897,6 +910,30 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
   return (
     <div className="dashboard-view">
+      {/* 面包屑导航 */}
+      <div style={{ padding: '12px 24px', background: '#fff', borderBottom: '1px solid #f0f0f0' }}>
+        <Breadcrumb>
+          <Breadcrumb.Item>
+            <Link to="/">
+              <HomeOutlined /> 仪表板
+            </Link>
+          </Breadcrumb.Item>
+          {dashboard?.folder_name && (
+            <Breadcrumb.Item>
+              <Link to="/" onClick={(e) => {
+                e.preventDefault()
+                // TODO: 跳转到该文件夹
+                navigate('/')
+              }}>
+                <FolderOutlined /> {dashboard.folder_name}
+              </Link>
+            </Breadcrumb.Item>
+          )}
+          <Breadcrumb.Item>
+            <DashboardOutlined /> {displayTitle || dashboard?.title || '未命名'}
+          </Breadcrumb.Item>
+        </Breadcrumb>
+      </div>
       {/* ---- Toolbar ---- */}
       <div className="dashboard-toolbar">
         <div className="toolbar-left">
@@ -1170,6 +1207,19 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                 </button>
                 <button
                   className="btn-sm"
+                  onClick={() => { setShowSchedule(true); setMoreMenuOpen(false) }}
+                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                    <path d="M12 2v2" />
+                    <path d="M12 20v2" />
+                  </svg>
+                  定时快照
+                </button>
+                <button
+                  className="btn-sm"
                   onClick={() => { setShowVersionHistory(true); setMoreMenuOpen(false) }}
                   style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
                 >
@@ -1345,6 +1395,14 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
           onClose={() => setShowReport(false)}
         />
       )}
+
+      {/* ---- 定时快照 ---- */}
+      <SnapshotScheduleModal
+        open={showSchedule}
+        dashboardId={dashboardId}
+        dashboardTitle={dashboard?.title || '仪表板'}
+        onClose={() => setShowSchedule(false)}
+      />
 
       {/* ---- 添加面板确认 ---- */}
       {showNewPanel && (

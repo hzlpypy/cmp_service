@@ -1,394 +1,678 @@
 import { useState, useEffect } from 'react'
+import {
+  Modal,
+  Form,
+  Input,
+  Select,
+  Button,
+  Tag,
+  Space,
+  Typography,
+  Spin,
+  message,
+  InputNumber,
+  Tooltip,
+} from 'antd'
+import {
+  DatabaseOutlined,
+  ApiOutlined,
+  PlusOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  SearchOutlined,
+} from '@ant-design/icons'
 import * as api from '../api'
-import type { DatasourceRes, HTTPDatasourceConfig } from '../api'
+import type { DatasourceRes } from '../api'
+
+const { Text } = Typography
 
 export default function DataSourcesPage() {
   const [dataSources, setDataSources] = useState<DatasourceRes[]>([])
   const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
+  const [showModal, setShowModal] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
   const [testingForm, setTestingForm] = useState(false)
-  const [headersPairs, setHeadersPairs] = useState<Array<{key: string, value: string}>>([]) // HTTP Headers key-value列表
-  const [form, setForm] = useState({
-    name: '',
-    type: 'mysql' as 'mysql' | 'http',
-    url: '',
-    database_name: '',
-    username: '',
-    password: '',
-    enabled: true,
-    headers: {} as Record<string, unknown>,
-    config: {
-      auth_type: 'none' as 'none' | 'basic' | 'bearer' | 'api_key',
-      auth_token: '',
-      auth_username: '',
-      auth_password: '',
-      timeout: 10,
-    } as HTTPDatasourceConfig,
-  })
+  const [searchText, setSearchText] = useState('')
+  const [form] = Form.useForm()
 
   const loadList = async () => {
     try {
+      setLoading(true)
       const list = await api.listDatasources()
       setDataSources(list)
     } catch (e: any) {
-      console.error('加载数据源失败:', e)
+      message.error('加载数据源失败: ' + e.message)
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { loadList() }, [])
+  useEffect(() => {
+    loadList()
+  }, [])
 
   const resetForm = () => {
-    setForm({
-      name: '',
-      type: 'mysql',
-      url: '',
-      database_name: '',
-      username: '',
-      password: '',
-      enabled: true,
-      headers: {},
-      config: {
-        auth_type: 'none',
-        auth_token: '',
-        auth_username: '',
-        auth_password: '',
-        timeout: 10,
-      },
-    })
-    setHeadersPairs([])
+    form.resetFields()
     setEditId(null)
-    setShowForm(false)
+    setShowModal(false)
   }
 
   const handleSave = async () => {
-    if (!form.name || !form.url) return
     try {
-      // 将headersPairs转换为headers对象
-      const headers: Record<string, string> = {}
-      if (form.type === 'http') {
-        headersPairs.forEach(pair => {
-          if (pair.key.trim() && pair.value.trim()) {
-            headers[pair.key.trim()] = pair.value.trim()
-          }
-        })
-      }
-
-      // 构建提交数据，根据类型过滤无用字段
+      const values = await form.validateFields()
       const submitData: any = {
-        name: form.name,
-        type: form.type,
-        url: form.url,
-        enabled: form.enabled,
+        name: values.name,
+        type: values.type,
+        url: values.url,
+        enabled: values.enabled ?? true,
       }
 
-      if (form.type === 'mysql') {
-        submitData.database_name = form.database_name
-        submitData.username = form.username
-        submitData.password = form.password
-      } else if (form.type === 'http') {
+      if (values.type === 'mysql') {
+        submitData.database_name = values.database_name
+        submitData.username = values.username
+        submitData.password = values.password
+      } else if (values.type === 'http') {
+        const headers: Record<string, string> = {}
+        if (values.headers && Array.isArray(values.headers)) {
+          values.headers.forEach((pair: { key: string; value: string }) => {
+            if (pair.key.trim() && pair.value.trim()) {
+              headers[pair.key.trim()] = pair.value.trim()
+            }
+          })
+        }
         if (Object.keys(headers).length > 0) submitData.headers = headers
-        // 只保存认证配置
+
         const config: any = {}
-        if (form.config?.auth_type && form.config.auth_type !== 'none') {
-          config.auth_type = form.config.auth_type
-          if (form.config.auth_type === 'bearer' || form.config.auth_type === 'api_key') {
-            if (form.config.auth_token) config.auth_token = form.config.auth_token
-          } else if (form.config.auth_type === 'basic') {
-            if (form.config.auth_username) config.auth_username = form.config.auth_username
-            if (form.config.auth_password) config.auth_password = form.config.auth_password
+        if (values.auth_type && values.auth_type !== 'none') {
+          config.auth_type = values.auth_type
+          if (values.auth_type === 'bearer' || values.auth_type === 'api_key') {
+            if (values.auth_token) config.auth_token = values.auth_token
+          } else if (values.auth_type === 'basic') {
+            if (values.auth_username) config.auth_username = values.auth_username
+            if (values.auth_password) config.auth_password = values.auth_password
           }
         }
-        if (form.config?.timeout) config.timeout = form.config.timeout
+        if (values.timeout) config.timeout = values.timeout
         if (Object.keys(config).length > 0) submitData.config = config
       }
 
       if (editId) {
         await api.updateDatasource(editId, submitData)
+        message.success('数据源更新成功')
       } else {
         await api.createDatasource(submitData)
+        message.success('数据源创建成功')
       }
       resetForm()
       loadList()
-    } catch (e: any) { alert('保存失败: ' + e.message) }
+    } catch (e: any) {
+      if (e.errorFields) {
+        message.error('请填写必填字段')
+      } else {
+        message.error('保存失败: ' + e.message)
+      }
+    }
   }
 
   const handleEdit = (ds: DatasourceRes) => {
-    setForm({
+    const headers: Array<{ key: string; value: string }> = []
+    if (ds.headers && typeof ds.headers === 'object') {
+      Object.entries(ds.headers).forEach(([key, value]) => {
+        headers.push({ key, value: String(value) })
+      })
+    }
+
+    form.setFieldsValue({
       name: ds.name,
-      type: ds.type as 'mysql' | 'http',
+      type: ds.type,
       url: ds.url,
       database_name: ds.database_name || '',
       username: ds.username || '',
       password: '',
       enabled: ds.enabled,
-      headers: ds.headers || {},
-      config: ds.config || {
-        auth_type: 'none',
-        auth_token: '',
-        auth_username: '',
-        auth_password: '',
-        timeout: 10,
-      },
+      auth_type: ds.config?.auth_type || 'none',
+      auth_token: ds.config?.auth_token || '',
+      auth_username: ds.config?.auth_username || '',
+      auth_password: '',
+      timeout: ds.config?.timeout || 10,
+      headers,
     })
-    // 将headers对象转换为key-value数组
-    const pairs: Array<{key: string, value: string}> = []
-    if (ds.headers && typeof ds.headers === 'object') {
-      Object.entries(ds.headers).forEach(([key, value]) => {
-        pairs.push({ key, value: String(value) })
-      })
-    }
-    setHeadersPairs(pairs)
     setEditId(ds.id)
-    setShowForm(true)
+    setShowModal(true)
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('确定删除此数据源?')) return
-    try {
-      await api.deleteDatasource(id)
-      loadList()
-    } catch (e: any) { alert('删除失败: ' + e.message) }
+    Modal.confirm({
+      title: '确认删除',
+      content: '确定要删除此数据源吗？此操作不可撤销。',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.deleteDatasource(id)
+          message.success('删除成功')
+          loadList()
+        } catch (e: any) {
+          message.error('删除失败: ' + e.message)
+        }
+      },
+    })
   }
 
   const handleTestForm = async () => {
     setTestingForm(true)
     try {
+      const values = await form.validateFields()
       const testData: any = {
         id: editId || undefined,
-        name: form.name,
-        type: form.type,
-        url: form.url,
+        name: values.name,
+        type: values.type,
+        url: values.url,
       }
-      if (form.type === 'mysql') {
-        testData.database_name = form.database_name
-        testData.username = form.username
-        testData.password = form.password
+      if (values.type === 'mysql') {
+        testData.database_name = values.database_name
+        testData.username = values.username
+        testData.password = values.password
       }
       const msg = await api.testDatasource(testData)
-      alert(msg)
-    } catch (e: any) { alert('测试失败: ' + e.message) }
-    finally { setTestingForm(false) }
+      message.success(msg)
+    } catch (e: any) {
+      message.error('测试失败: ' + e.message)
+    } finally {
+      setTestingForm(false)
+    }
   }
 
-  if (loading) return <div className="browse-page"><div className="empty-state">加载中...</div></div>
+  const filteredDataSources = dataSources.filter(
+    (ds) =>
+      ds.name.toLowerCase().includes(searchText.toLowerCase()) ||
+      ds.url.toLowerCase().includes(searchText.toLowerCase())
+  )
+
+  const getDataSourceIcon = (type: string) => {
+    if (type === 'mysql') {
+      return <DatabaseOutlined style={{ fontSize: 18, color: '#e53935' }} />
+    }
+    return <ApiOutlined style={{ fontSize: 18, color: '#3871dc' }} />
+  }
 
   return (
-    <div className="browse-page">
-      <div className="page-toolbar">
-        <h1 className="browse-title">数据源</h1>
-        <button className="btn-primary" onClick={() => { resetForm(); setShowForm(true) }}>
-          <span style={{ position: 'relative', top: '-1px' }}>+</span> 添加数据源
-        </button>
+    <div className="ds-page">
+      {/* 页面头部 */}
+      <div className="ds-header">
+        <h1 className="ds-title">数据源</h1>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => {
+            resetForm()
+            setShowModal(true)
+          }}
+        >
+          添加数据源
+        </Button>
       </div>
 
-      {/* Add/Edit Modal */}
-      {showForm && (
-        <div className="modal-overlay" onClick={resetForm}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>{editId ? '编辑数据源' : '添加数据源'}</h2>
-              <button className="modal-close" onClick={resetForm}>&times;</button>
+      {/* 搜索栏 */}
+      <div className="ds-toolbar">
+        <Input
+          placeholder="搜索数据源..."
+          prefix={<SearchOutlined style={{ color: '#86909c' }} />}
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          className="ds-search"
+          allowClear
+        />
+      </div>
+
+      {/* 数据源列表 */}
+      <Spin spinning={loading}>
+        <div className="ds-list">
+          {filteredDataSources.length === 0 ? (
+            <div className="ds-empty">
+              <Text style={{ color: '#86909c' }}>
+                {searchText ? '未找到匹配的数据源' : '暂无数据源，点击"添加数据源"开始配置'}
+              </Text>
             </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label>名称</label>
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="数据源名称" autoFocus />
-              </div>
-              <div className="form-group">
-                <label>类型</label>
-                <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as 'mysql' | 'http' })}>
-                  <option value="mysql">MySQL</option>
-                  <option value="http">HTTP API</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label>URL</label>
-                <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })}
-                  placeholder={form.type === 'mysql' ? 'host:port' : 'http://host:port/api'} />
-              </div>
-              {form.type === 'mysql' && (
-                <>
-                  <div className="form-group">
-                    <label>数据库</label>
-                    <input value={form.database_name} onChange={(e) => setForm({ ...form, database_name: e.target.value })} placeholder="数据库名" />
+          ) : (
+            filteredDataSources.map((ds) => (
+              <div
+                key={ds.id}
+                className="ds-row"
+                onClick={() => handleEdit(ds)}
+              >
+                {/* 左侧：图标 + 名称 */}
+                <div className="ds-row-left">
+                  <div className="ds-row-icon">
+                    {getDataSourceIcon(ds.type)}
                   </div>
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label>用户名</label>
-                      <input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="用户名" />
-                    </div>
-                    <div className="form-group">
-                      <label>密码</label>
-                      <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="密码" />
-                    </div>
+                  <div className="ds-row-info">
+                    <span className="ds-row-name">{ds.name}</span>
+                    <Tag
+                      color={ds.type === 'mysql' ? '#e53935' : '#3871dc'}
+                      style={{ marginLeft: 8, borderRadius: 2 }}
+                    >
+                      {ds.type === 'mysql' ? 'MySQL' : 'HTTP API'}
+                    </Tag>
                   </div>
-                </>
-              )}
-              {form.type === 'http' && (
-                <>
-                  <div className="form-group">
-                    <label>认证方式</label>
-                    <select value={form.config?.auth_type || 'none'} onChange={(e) => setForm({ ...form, config: { ...form.config!, auth_type: e.target.value as any } })}>
-                      <option value="none">无认证</option>
-                      <option value="bearer">Bearer Token</option>
-                      <option value="api_key">API Key</option>
-                      <option value="basic">Basic Auth</option>
-                    </select>
-                  </div>
-                  {form.config?.auth_type === 'bearer' && (
-                    <div className="form-group">
-                      <label>Bearer Token</label>
-                      <input type="password" value={form.config?.auth_token || ''} onChange={(e) => setForm({ ...form, config: { ...form.config!, auth_token: e.target.value } })}
-                        placeholder="输入Token" />
-                    </div>
+                </div>
+
+                {/* 中间：URL */}
+                <div className="ds-row-center">
+                  <Text
+                    style={{
+                      fontFamily: 'SF Mono, Fira Code, monospace',
+                      fontSize: 12,
+                      color: '#4e5969',
+                    }}
+                  >
+                    {ds.url}
+                  </Text>
+                  {ds.type === 'mysql' && ds.database_name && (
+                    <Text
+                      style={{
+                        fontFamily: 'SF Mono, Fira Code, monospace',
+                        fontSize: 12,
+                        color: '#86909c',
+                        marginLeft: 12,
+                      }}
+                    >
+                      / {ds.database_name}
+                    </Text>
                   )}
-                  {form.config?.auth_type === 'api_key' && (
-                    <div className="form-group">
-                      <label>API Key</label>
-                      <input type="password" value={form.config?.auth_token || ''} onChange={(e) => setForm({ ...form, config: { ...form.config!, auth_token: e.target.value } })}
-                        placeholder="输入API Key" />
-                    </div>
-                  )}
-                  {form.config?.auth_type === 'basic' && (
-                    <div className="form-row">
-                      <div className="form-group">
-                        <label>用户名</label>
-                        <input value={form.config?.auth_username || ''} onChange={(e) => setForm({ ...form, config: { ...form.config!, auth_username: e.target.value } })}
-                          placeholder="用户名" />
-                      </div>
-                      <div className="form-group">
-                        <label>密码</label>
-                        <input type="password" value={form.config?.auth_password || ''} onChange={(e) => setForm({ ...form, config: { ...form.config!, auth_password: e.target.value } })}
-                          placeholder="密码" />
-                      </div>
-                    </div>
-                  )}
-                  <div className="form-group">
-                    <label>超时时间(秒)</label>
-                    <input type="number" value={form.config?.timeout || 10} onChange={(e) => setForm({ ...form, config: { ...form.config!, timeout: parseInt(e.target.value) || 10 } })}
-                      min={1} max={60} />
-                  </div>
-                  <div className="form-group">
-                    <label>自定义Headers</label>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {headersPairs.map((pair, index) => (
-                        <div key={index} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <input
-                            value={pair.key}
-                            onChange={(e) => {
-                              const newPairs = [...headersPairs]
-                              newPairs[index].key = e.target.value
-                              setHeadersPairs(newPairs)
-                            }}
-                            placeholder="Header名称"
-                            style={{ flex: 1, fontSize: 12 }}
-                          />
-                          <input
-                            value={pair.value}
-                            onChange={(e) => {
-                              const newPairs = [...headersPairs]
-                              newPairs[index].value = e.target.value
-                              setHeadersPairs(newPairs)
-                            }}
-                            placeholder="Header值"
-                            style={{ flex: 1, fontSize: 12 }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newPairs = headersPairs.filter((_, i) => i !== index)
-                              setHeadersPairs(newPairs)
-                            }}
-                            style={{ padding: '4px 8px', fontSize: 12, color: '#666', border: '1px solid #ddd', borderRadius: 3, cursor: 'pointer' }}
-                          >
-                            删除
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => setHeadersPairs([...headersPairs, { key: '', value: '' }])}
-                        style={{ padding: '6px 12px', fontSize: 12, color: '#1976d2', border: '1px solid #1976d2', borderRadius: 3, cursor: 'pointer', background: 'white' }}
-                      >
-                        + 添加Header
-                      </button>
-                    </div>
-                    <div className="pe-hint-text" style={{ marginTop: 4 }}>
-                      HTTP请求头，每个请求都会带上这些Headers。可被面板查询配置覆盖。
-                    </div>
-                  </div>
-                  <div className="pe-hint-text" style={{ marginTop: 8, marginLeft: 0 }}>
-                    Base URL为API基础地址，具体查询路径在面板编辑时配置。
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={resetForm}>取消</button>
-              <button className="btn-secondary" onClick={handleTestForm} disabled={testingForm}>
-                {testingForm ? '测试中...' : '测试连接'}
-              </button>
-              <button className="btn-primary" onClick={handleSave}>{editId ? '保存修改' : '保存'}</button>
-            </div>
-          </div>
+                </div>
+
+                {/* 右侧：状态 + 操作 */}
+                <div className="ds-row-right">
+                  <Tooltip title={ds.enabled ? '已启用' : '已禁用'}>
+                    {ds.enabled ? (
+                      <CheckCircleOutlined style={{ color: '#55bd6a', fontSize: 14 }} />
+                    ) : (
+                      <CloseCircleOutlined style={{ color: '#86909c', fontSize: 14 }} />
+                    )}
+                  </Tooltip>
+                  <Space size={4} className="ds-row-actions">
+                    <Tooltip title="编辑">
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<EditOutlined style={{ color: '#4e5969' }} />}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleEdit(ds)
+                        }}
+                      />
+                    </Tooltip>
+                    <Tooltip title="删除">
+                      <Button
+                        type="text"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDelete(ds.id)
+                        }}
+                      />
+                    </Tooltip>
+                  </Space>
+                </div>
+              </div>
+            ))
+          )}
         </div>
-      )}
+      </Spin>
 
-      <div className="ds-cards">
-        {dataSources.map((ds) => (
-          <div key={ds.id} className="ds-card">
-            <div className="ds-card-header">
-              <div className={`ds-card-icon ${ds.type}`}>
-                {ds.type === 'mysql' ? (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3C7.58 3 4 4.79 4 7v10c0 2.21 3.58 4 8 4s8-1.79 8-4V7c0-2.21-3.58-4-8-4zm0 2.5c3.04 0 5.5 1.12 5.5 2.5s-2.46 2.5-5.5 2.5S6.5 9.38 6.5 8 8.96 5.5 12 5.5zm0 10c-3.04 0-5.5-1.12-5.5-2.5v-2.1c1.36 1.1 3.38 1.6 5.5 1.6s4.14-.5 5.5-1.6v2.1c0 1.38-2.46 2.5-5.5 2.5zm0-4.5c-3.04 0-5.5-1.12-5.5-2.5V8.4c1.36 1.1 3.38 1.6 5.5 1.6s4.14-.5 5.5-1.6v2.1c0 1.38-2.46 2.5-5.5 2.5z" /></svg>
-                ) : (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10M12 2a15.3 15.3 0 00-4 10 15.3 15.3 0 004 10" /></svg>
-                )}
-              </div>
-              <div>
-                <div className="ds-card-name">{ds.name}</div>
-                <div className="ds-card-type">{ds.type === 'mysql' ? 'MySQL' : 'HTTP API'}</div>
-              </div>
-            </div>
-            <div className="ds-card-meta">
-              <div className="ds-meta-item">
-                <span className="ds-meta-label">URL</span>
-                <span className="ds-meta-value">{ds.url}</span>
-              </div>
-            </div>
-            <div className="ds-card-footer">
-              <span className={`ds-card-status ${ds.enabled ? 'enabled' : 'disabled'}`}>
-                {ds.enabled ? '已启用' : '已禁用'}
-              </span>
-              <div className="ds-card-actions">
-                <button className="btn-sm" onClick={() => handleEdit(ds)}>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </svg>
-                  编辑
-                </button>
-                <button className="btn-sm" onClick={() => handleDelete(ds.id)}>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  </svg>
-                  删除
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
+      {/* 添加/编辑模态框 */}
+      <Modal
+        title={editId ? '编辑数据源' : '添加数据源'}
+        open={showModal}
+        onCancel={resetForm}
+        footer={null}
+        width={560}
+        style={{ top: 20 }}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{
+            type: 'mysql',
+            enabled: true,
+            auth_type: 'none',
+            timeout: 10,
+            headers: [],
+          }}
+        >
+          <Form.Item
+            name="name"
+            label="名称"
+            rules={[{ required: true, message: '请输入数据源名称' }]}
+          >
+            <Input placeholder="数据源名称" autoFocus />
+          </Form.Item>
 
-        {dataSources.length === 0 && (
-          <div className="empty-state" style={{ gridColumn: '1/-1' }}>
-            暂无数据源，点击"添加数据源"开始配置
-          </div>
-        )}
-      </div>
+          <Form.Item
+            name="type"
+            label="类型"
+            rules={[{ required: true, message: '请选择数据源类型' }]}
+          >
+            <Select>
+              <Select.Option value="mysql">MySQL</Select.Option>
+              <Select.Option value="http">HTTP API</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="url"
+            label="URL"
+            rules={[{ required: true, message: '请输入URL' }]}
+          >
+            <Input
+              placeholder={form.getFieldValue('type') === 'mysql' ? 'host:port' : 'http://host:port/api'}
+            />
+          </Form.Item>
+
+          <Form.Item name="enabled" label="启用状态">
+            <Select>
+              <Select.Option value={true}>启用</Select.Option>
+              <Select.Option value={false}>禁用</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item noStyle shouldUpdate={(prevValues, currentValues) => prevValues.type !== currentValues.type}>
+            {({ getFieldValue }) => {
+              if (getFieldValue('type') === 'mysql') {
+                return (
+                  <>
+                    <Form.Item
+                      name="database_name"
+                      label="数据库"
+                      rules={[{ required: true, message: '请输入数据库名' }]}
+                    >
+                      <Input placeholder="数据库名" />
+                    </Form.Item>
+                    <div style={{ display: 'flex', gap: 16 }}>
+                      <Form.Item
+                        name="username"
+                        label="用户名"
+                        rules={[{ required: true, message: '请输入用户名' }]}
+                        style={{ flex: 1 }}
+                      >
+                        <Input placeholder="用户名" />
+                      </Form.Item>
+                      <Form.Item
+                        name="password"
+                        label="密码"
+                        rules={[{ required: true, message: '请输入密码' }]}
+                        style={{ flex: 1 }}
+                      >
+                        <Input.Password placeholder="密码" />
+                      </Form.Item>
+                    </div>
+                  </>
+                )
+              }
+
+              return (
+                <>
+                  <Form.Item name="auth_type" label="认证方式">
+                    <Select>
+                      <Select.Option value="none">无认证</Select.Option>
+                      <Select.Option value="bearer">Bearer Token</Select.Option>
+                      <Select.Option value="api_key">API Key</Select.Option>
+                      <Select.Option value="basic">Basic Auth</Select.Option>
+                    </Select>
+                  </Form.Item>
+
+                  <Form.Item
+                    noStyle
+                    shouldUpdate={(prevValues, currentValues) => prevValues.auth_type !== currentValues.auth_type}
+                  >
+                    {({ getFieldValue }) => {
+                      const authType = getFieldValue('auth_type')
+                      if (authType === 'bearer') {
+                        return (
+                          <Form.Item
+                            name="auth_token"
+                            label="Bearer Token"
+                            rules={[{ required: true, message: '请输入Token' }]}
+                          >
+                            <Input.Password placeholder="输入Token" />
+                          </Form.Item>
+                        )
+                      }
+                      if (authType === 'api_key') {
+                        return (
+                          <Form.Item
+                            name="auth_token"
+                            label="API Key"
+                            rules={[{ required: true, message: '请输入API Key' }]}
+                          >
+                            <Input.Password placeholder="输入API Key" />
+                          </Form.Item>
+                        )
+                      }
+                      if (authType === 'basic') {
+                        return (
+                          <div style={{ display: 'flex', gap: 16 }}>
+                            <Form.Item
+                              name="auth_username"
+                              label="用户名"
+                              rules={[{ required: true, message: '请输入用户名' }]}
+                              style={{ flex: 1 }}
+                            >
+                              <Input placeholder="用户名" />
+                            </Form.Item>
+                            <Form.Item
+                              name="auth_password"
+                              label="密码"
+                              rules={[{ required: true, message: '请输入密码' }]}
+                              style={{ flex: 1 }}
+                            >
+                              <Input.Password placeholder="密码" />
+                            </Form.Item>
+                          </div>
+                        )
+                      }
+                      return null
+                    }}
+                  </Form.Item>
+
+                  <Form.Item name="timeout" label="超时时间(秒)">
+                    <InputNumber min={1} max={60} style={{ width: '100%' }} />
+                  </Form.Item>
+
+                  <Form.Item name="headers" label="自定义Headers">
+                    <Form.List name="headers">
+                      {(fields, { add, remove }) => (
+                        <>
+                          {fields.map(({ key, name, ...restField }) => (
+                            <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                              <Form.Item
+                                {...restField}
+                                name={[name, 'key']}
+                                style={{ flex: 1, marginBottom: 0 }}
+                              >
+                                <Input placeholder="Header名称" size="small" />
+                              </Form.Item>
+                              <Form.Item
+                                {...restField}
+                                name={[name, 'value']}
+                                style={{ flex: 1, marginBottom: 0 }}
+                              >
+                                <Input placeholder="Header值" size="small" />
+                              </Form.Item>
+                              <Button
+                                type="text"
+                                danger
+                                onClick={() => remove(name)}
+                                size="small"
+                              >
+                                删除
+                              </Button>
+                            </div>
+                          ))}
+                          <Button type="dashed" onClick={() => add({ key: '', value: '' })} size="small">
+                            + 添加Header
+                          </Button>
+                        </>
+                      )}
+                    </Form.List>
+                  </Form.Item>
+
+                  <Text type="secondary" style={{ fontSize: 12, color: '#86909c' }}>
+                    Base URL为API基础地址，具体查询路径在面板编辑时配置。
+                  </Text>
+                </>
+              )
+            }}
+          </Form.Item>
+        </Form>
+
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 10,
+            marginTop: 24,
+            paddingTop: 16,
+            borderTop: '1px solid #e5e6eb',
+          }}
+        >
+          <Button onClick={resetForm}>取消</Button>
+          <Button onClick={handleTestForm} loading={testingForm}>
+            {testingForm ? '测试中...' : '测试连接'}
+          </Button>
+          <Button type="primary" onClick={handleSave}>
+            {editId ? '保存修改' : '保存'}
+          </Button>
+        </div>
+      </Modal>
+
+      {/* 内联样式 */}
+      <style>{`
+        .ds-page {
+          padding: 24px 32px;
+          background: #f7f8fa;
+          min-height: 100vh;
+        }
+
+        .ds-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 16px;
+        }
+
+        .ds-title {
+          font-size: 20px;
+          font-weight: 600;
+          color: #1d2129;
+          margin: 0;
+        }
+
+        .ds-toolbar {
+          margin-bottom: 12px;
+        }
+
+        .ds-search {
+          width: 280px;
+          background: #fff;
+          border-radius: 6px;
+        }
+
+        .ds-search input {
+          background: transparent;
+        }
+
+        .ds-list {
+          background: #fff;
+          border: 1px solid #e5e6eb;
+          border-radius: 8px;
+          overflow: hidden;
+        }
+
+        .ds-empty {
+          padding: 48px 24px;
+          text-align: center;
+          color: #86909c;
+        }
+
+        .ds-row {
+          display: flex;
+          align-items: center;
+          padding: 14px 16px;
+          border-bottom: 1px solid #f0f0f0;
+          cursor: pointer;
+          transition: background 0.15s;
+        }
+
+        .ds-row:last-child {
+          border-bottom: none;
+        }
+
+        .ds-row:hover {
+          background: #f7f8fa;
+        }
+
+        .ds-row-left {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 200px;
+        }
+
+        .ds-row-icon {
+          width: 32px;
+          height: 32px;
+          border-radius: 6px;
+          background: rgba(229, 57, 53, 0.08);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .ds-row-icon.http-icon {
+          background: rgba(56, 113, 220, 0.08);
+        }
+
+        .ds-row-info {
+          display: flex;
+          align-items: center;
+        }
+
+        .ds-row-name {
+          font-size: 14px;
+          font-weight: 500;
+          color: #1d2129;
+        }
+
+        .ds-row-center {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          min-width: 0;
+          padding: 0 16px;
+        }
+
+        .ds-row-right {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .ds-row-actions {
+          opacity: 0;
+          transition: opacity 0.15s;
+        }
+
+        .ds-row:hover .ds-row-actions {
+          opacity: 1;
+        }
+      `}</style>
     </div>
   )
 }

@@ -5,6 +5,7 @@ package folders
 import (
 	"cmp_service_backend/model"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -21,8 +22,8 @@ type Server struct {
 // Interface 定义文件夹业务操作的接口。
 // 用于解耦控制器层和业务逻辑层，便于单元测试。
 type Interface interface {
-	// ListFolders 获取所有文件夹列表（含子仪表板）
-	ListFolders(ctx *gin.Context) (*FolderListRes, error)
+	// ListFolders 获取所有文件夹列表（含子仪表板），支持按标题搜索
+	ListFolders(ctx *gin.Context, req *FolderListReq) (*FolderListRes, error)
 	// GetFolder 获取单个文件夹详情
 	GetFolder(ctx *gin.Context, req *FolderReq) (*FolderRes, error)
 	// CreateFolder 创建新文件夹
@@ -40,13 +41,36 @@ func NewServer(db *gorm.DB, log *logrus.Logger) Interface {
 
 // ListFolders 获取所有未删除的文件夹，按创建时间升序排列。
 // 每个文件夹会附带其下所有未删除的仪表板列表。
-func (s *Server) ListFolders(ctx *gin.Context) (*FolderListRes, error) {
+// 如果提供了 title 参数，则返回匹配的文件夹和仪表板作为搜索结果。
+func (s *Server) ListFolders(ctx *gin.Context, req *FolderListReq) (*FolderListRes, error) {
+	// 搜索模式：返回匹配的文件夹和仪表板
+	if req.Title != "" {
+		var folders []*model.Folder
+		// 查询所有文件夹（用于后续查询）
+		if err := s.db.Where("deleted_at IS NULL").Order("created_at ASC").Find(&folders).Error; err != nil {
+			return nil, err
+		}
+
+		resList := make([]*FolderRes, 0, len(folders))
+		for _, f := range folders {
+			var dashboards []model.Dashboard
+			// 搜索文件夹下的仪表板（模糊匹配标题）
+			s.db.Where("folder_id = ? AND deleted_at IS NULL AND title LIKE ?", f.ID, "%"+req.Title+"%").
+				Order("created_at ASC").Find(&dashboards)
+
+			// 如果文件夹标题匹配或包含仪表板匹配，则添加到结果
+			if len(dashboards) > 0 || strings.Contains(f.Title, req.Title) {
+				resList = append(resList, ToFolderRes(f, dashboards))
+			}
+		}
+		return &FolderListRes{List: resList, Total: len(resList)}, nil
+	}
+
+	// 默认模式：返回所有文件夹及其仪表板
 	var folders []*model.Folder
-	// 查询所有未删除的文件夹
 	if err := s.db.Where("deleted_at IS NULL").Order("created_at ASC").Find(&folders).Error; err != nil {
 		return nil, err
 	}
-	// 为每个文件夹查询其下的仪表板
 	resList := make([]*FolderRes, 0, len(folders))
 	for _, f := range folders {
 		var dashboards []model.Dashboard

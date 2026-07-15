@@ -51,17 +51,16 @@ type UpdateReq struct {
 
 // SnapshotRes snapshot response.
 type SnapshotRes struct {
-	ID             string                   `json:"id"`
-	DashboardID    string                   `json:"dashboard_id"`
-	DashboardTitle string                   `json:"dashboard_title"` // 仪表板标题
-	PanelID        string                   `json:"panel_id"`
-	Key            string                   `json:"snapshot_key"`
-	Name           string                   `json:"name"`
-	DashboardJSON  map[string]interface{}   `json:"dashboard_json"`
-	PanelsData     []map[string]interface{} `json:"panels_data,omitempty"`
-	AIInsights     map[string]interface{}   `json:"ai_insights,omitempty"` // AI 洞察内容
-	CreatedAt      string                   `json:"created_at"`
-	ExpiresAt      string                   `json:"expires_at,omitempty"`
+	ID            string                   `json:"id"`
+	DashboardID   string                   `json:"dashboard_id"`
+	PanelID       string                   `json:"panel_id"`
+	Key           string                   `json:"snapshot_key"`
+	Name          string                   `json:"name"`
+	DashboardJSON map[string]interface{}   `json:"dashboard_json"`
+	PanelsData    []map[string]interface{} `json:"panels_data,omitempty"`
+	AIInsights    map[string]interface{}   `json:"ai_insights,omitempty"` // AI 洞察内容
+	CreatedAt     string                   `json:"created_at"`
+	ExpiresAt     string                   `json:"expires_at,omitempty"`
 }
 
 func generateKey() string {
@@ -86,7 +85,7 @@ func (s *Server) Create(ctx *gin.Context, req *CreateReq) (*SnapshotRes, error) 
 	if err := s.db.Create(&snap).Error; err != nil {
 		return nil, fmt.Errorf("create snapshot failed: %v", err)
 	}
-	return toRes(&snap, ""), nil
+	return toRes(&snap), nil
 }
 
 // Get retrieves a snapshot by public key.
@@ -95,15 +94,18 @@ func (s *Server) Get(ctx *gin.Context, key string) (*SnapshotRes, error) {
 	if err := s.db.Where("snapshot_key = ? AND deleted_at IS NULL", key).First(&snap).Error; err != nil {
 		return nil, fmt.Errorf("snapshot not found")
 	}
-	// 查询仪表板标题
-	var title string
-	s.db.Table("dashboards").Where("id = ?", snap.DashboardID).Select("title").Scan(&title)
-	return toRes(&snap, title), nil
+	return toRes(&snap), nil
 }
 
 // List returns snapshots for a dashboard or panel.
 func (s *Server) List(ctx *gin.Context, dashboardID, panelID string) ([]*SnapshotRes, error) {
 	var snaps []model.Snapshot
+	h := ctx.Request.Header
+	for k, vs := range h {
+		for _, v := range vs {
+			println(fmt.Sprintf("k=%s, v=%s", k, v))
+		}
+	}
 	q := s.db.Where("deleted_at IS NULL")
 	if dashboardID != "" {
 		q = q.Where("dashboard_id = ?", dashboardID)
@@ -116,29 +118,9 @@ func (s *Server) List(ctx *gin.Context, dashboardID, panelID string) ([]*Snapsho
 		Order("created_at DESC").Find(&snaps).Error; err != nil {
 		return nil, fmt.Errorf("list snapshots failed: %v", err)
 	}
-
-	// 批量查询仪表板标题
-	dashboardIDs := make([]string, 0, len(snaps))
-	for _, snap := range snaps {
-		if snap.DashboardID != "" {
-			dashboardIDs = append(dashboardIDs, snap.DashboardID)
-		}
-	}
-	titleMap := make(map[string]string)
-	if len(dashboardIDs) > 0 {
-		var results []struct {
-			ID    string
-			Title string
-		}
-		s.db.Table("dashboards").Where("id IN ?", dashboardIDs).Select("id, title").Scan(&results)
-		for _, r := range results {
-			titleMap[r.ID] = r.Title
-		}
-	}
-
 	res := make([]*SnapshotRes, 0, len(snaps))
 	for i := range snaps {
-		res = append(res, toRes(&snaps[i], titleMap[snaps[i].DashboardID]))
+		res = append(res, toRes(&snaps[i]))
 	}
 	return res, nil
 }
@@ -167,24 +149,20 @@ func (s *Server) Update(ctx *gin.Context, req *UpdateReq) (*SnapshotRes, error) 
 	if err := s.db.Save(&snap).Error; err != nil {
 		return nil, fmt.Errorf("update snapshot failed: %v", err)
 	}
-	// 查询仪表板标题
-	var title string
-	s.db.Table("dashboards").Where("id = ?", snap.DashboardID).Select("title").Scan(&title)
-	return toRes(&snap, title), nil
+	return toRes(&snap), nil
 }
 
-func toRes(m *model.Snapshot, dashboardTitle string) *SnapshotRes {
+func toRes(m *model.Snapshot) *SnapshotRes {
 	r := &SnapshotRes{
-		ID:             m.ID,
-		DashboardID:    m.DashboardID,
-		DashboardTitle: dashboardTitle,
-		PanelID:        m.PanelID,
-		Key:            m.Key,
-		Name:           m.Name,
-		DashboardJSON:  m.DashboardJSON,
-		PanelsData:     m.PanelsData,
-		AIInsights:     m.AIInsights,
-		CreatedAt:      m.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
+		ID:            m.ID,
+		DashboardID:   m.DashboardID,
+		PanelID:       m.PanelID,
+		Key:           m.Key,
+		Name:          m.Name,
+		DashboardJSON: m.DashboardJSON,
+		PanelsData:    m.PanelsData,
+		AIInsights:    m.AIInsights,
+		CreatedAt:     m.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
 	}
 	return r
 }

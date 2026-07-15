@@ -185,7 +185,7 @@ export default function AIChatDialog({
   // 获取完整面板列表（用于 # 下拉和 @ 注入上下文）
   const getPanelList = useCallback(() => {
     const panels = draftRef.current?.panels || panelsSummary
-    return panels.map((p: any) => ({
+    return panels.map((p: { id?: string; title?: string; type?: string }) => ({
       id: p.id || '',
       title: p.title || '',
       type: p.type || '',
@@ -279,7 +279,7 @@ export default function AIChatDialog({
     const panels = getPanelList()
     if (!text) return panels
     const lower = text.toLowerCase()
-    return panels.filter((p) =>
+    return panels.filter((p: { id: string; title: string; type: string }) =>
       p.title.toLowerCase().includes(lower) || p.id.toLowerCase().includes(lower)
     )
   }
@@ -535,7 +535,7 @@ export default function AIChatDialog({
     const hashRegex = /#([^\s]+)/g
     while ((m = hashRegex.exec(userText)) !== null) {
       const mention = m[0].slice(1)
-      const panel = panelListFull.find((p) => p.title === mention || p.id === mention)
+      const panel = panelListFull.find((p: { id: string; title: string; type: string }) => p.title === mention || p.id === mention)
       if (panel) {
         resolvedPanels.push({ mention, id: panel.id, title: panel.title, type: panel.type })
       }
@@ -977,7 +977,7 @@ export default function AIChatDialog({
                   }}>
                     选择面板（↑↓ 选择，Enter 确认，Esc 关闭，输入文字实时筛选）
                   </div>
-                  {filteredPanels.map((p, idx) => (
+                  {filteredPanels.map((p: { id: string; title: string; type: string }, idx: number) => (
                     <div
                       key={p.id}
                       onClick={() => selectPanel(p)}

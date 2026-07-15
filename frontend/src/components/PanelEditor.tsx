@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Modal, message } from 'antd'
 import type { PanelDef, TargetDef, DatasourceRes, DashboardJSON, PanelDataRes } from '../api'
 import * as api from '../api'
 
@@ -69,7 +70,7 @@ export default function PanelEditor({ panel, datasources, dashboardId, draftJson
       // 3. 确保有数据才创建快照
       const hasData = latestData.length > 0 && latestData.some((series: any) => series.length > 0)
       if (!hasData) {
-        alert('暂无预览数据，请先点击工具栏的「刷新」按钮获取数据后再创建快照')
+        message.warning('暂无预览数据，请先点击工具栏的「刷新」按钮获取数据后再创建快照')
         return
       }
 
@@ -93,15 +94,25 @@ export default function PanelEditor({ panel, datasources, dashboardId, draftJson
       })
       setSnapshots((prev) => [snap, ...prev])
       setSnapName('')
-    } catch (e: any) { alert('创建快照失败: ' + (e.message || '未知错误')) }
+      message.success('创建快照成功')
+    } catch (e: any) { message.error('创建快照失败: ' + (e.message || '未知错误')) }
   }
 
   const handleDeleteSnapshot = async (key: string) => {
-    if (!confirm('确认删除该快照？')) return
-    try {
-      await api.deleteSnapshot(key)
-      setSnapshots((prev) => prev.filter((s) => s.snapshot_key !== key))
-    } catch (e: any) { alert('删除失败: ' + (e.message || '未知错误')) }
+    Modal.confirm({
+      title: '确认删除',
+      content: '确认删除该快照？',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.deleteSnapshot(key)
+          setSnapshots((prev) => prev.filter((s) => s.snapshot_key !== key))
+          message.success('删除成功')
+        } catch (e: any) { message.error('删除失败: ' + (e.message || '未知错误')) }
+      },
+    })
   }
 
   const shareLink = `${window.location.origin}/snapshot/`
@@ -211,7 +222,7 @@ export default function PanelEditor({ panel, datasources, dashboardId, draftJson
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                 同一列中连续相同的值自动合并（类似 Excel 合并单元格）。
               </div>
-              {p.options?.enableCellMerge && (
+              {Boolean(p.options?.enableCellMerge) && (
                 <div style={{ marginTop: 8 }}>
                   <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>合并列名（逗号分隔）</label>
                   <input

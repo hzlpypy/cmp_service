@@ -176,7 +176,7 @@ export interface TargetDef {
 
 export interface DashboardDataRes {
   dashboard_id: string
-  dashboard_title: string
+  dashboard_title?: string
   dashboard_json: DashboardJSON
   panels_data: PanelDataRes[]
 }
@@ -191,22 +191,24 @@ export interface PanelDataRes {
 }
 
 export interface MetricRow {
-  id: string
-  created_at: string
-  metric_category: string
-  metric_name: string
-  node_type: string
-  current_value: string
-  historical_peak: string
-  mom_change: string
-  yoy_change: string
-  unit: string
+  id?: string
+  created_at?: string
+  metric_category?: string
+  metric_name?: string
+  node_type?: string
+  current_value?: string
+  historical_peak?: string
+  mom_change?: string
+  yoy_change?: string
+  unit?: string
+  [key: string]: any  // 索引签名，支持动态列访问
 }
 
 // ---- Folders API ----
 
-export async function listFolders(): Promise<{ list: FolderRes[]; total: number }> {
-  return request('/api/v1/folders/list')
+export async function listFolders(title?: string): Promise<{ list: FolderRes[]; total: number }> {
+  const url = title ? `/api/v1/folders/list?title=${encodeURIComponent(title)}` : '/api/v1/folders/list'
+  return request(url)
 }
 
 export async function getFolder(id: string): Promise<FolderRes> {
@@ -305,6 +307,7 @@ export async function testDatasource(data: { id?: string; name?: string; type?: 
 export interface SnapshotRes {
   id: string
   dashboard_id: string
+  dashboard_title?: string  // 仪表板标题
   panel_id: string
   snapshot_key: string
   name: string
@@ -351,6 +354,39 @@ export async function listSnapshots(dashboardId: string, panelId?: string): Prom
 
 export async function deleteSnapshot(key: string): Promise<void> {
   return request('/api/v1/snapshots/delete', { method: 'POST', body: JSON.stringify({ snapshot_key: key }) })
+}
+
+// ---- Snapshot Schedules API ----
+
+export interface SnapshotScheduleRes {
+  id: string
+  dashboard_id: string
+  name: string
+  cron_expr: string
+  enabled: boolean
+  last_run_at?: string
+  next_run_at?: string
+  created_at: string
+}
+
+export async function createSnapshotSchedule(req: { dashboard_id: string; name: string; cron_expr: string }): Promise<SnapshotScheduleRes> {
+  return request('/api/v1/snapshot-schedules/create', { method: 'POST', body: JSON.stringify(req) })
+}
+
+export async function listSnapshotSchedules(dashboardId: string): Promise<SnapshotScheduleRes[]> {
+  return request('/api/v1/snapshot-schedules/list', { method: 'POST', body: JSON.stringify({ dashboard_id: dashboardId }) })
+}
+
+export async function updateSnapshotSchedule(req: { id: string; name?: string; cron_expr?: string }): Promise<SnapshotScheduleRes> {
+  return request('/api/v1/snapshot-schedules/update', { method: 'POST', body: JSON.stringify(req) })
+}
+
+export async function deleteSnapshotSchedule(id: string): Promise<void> {
+  return request('/api/v1/snapshot-schedules/delete', { method: 'POST', body: JSON.stringify({ id }) })
+}
+
+export async function toggleSnapshotSchedule(id: string, enabled: boolean): Promise<SnapshotScheduleRes> {
+  return request('/api/v1/snapshot-schedules/toggle', { method: 'POST', body: JSON.stringify({ id, enabled }) })
 }
 
 // ---- Variables API ----

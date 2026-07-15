@@ -14,9 +14,12 @@ func NewController(svc Interface) *Controller { return &Controller{Interface: sv
 
 // ListFoldersController 获取文件夹列表（含子仪表板）。
 // GET /api/v1/folders/list
-// 无需请求参数，返回所有未删除的文件夹及其下的仪表板列表。
+// 支持按仪表板标题搜索：传递 title 参数时只返回匹配的仪表板。
 func (cont *Controller) ListFoldersController(ctx *gin.Context) {
-	resp, err := cont.ListFolders(ctx)
+	var req FolderListReq
+	// 从 query 参数中获取搜索关键字
+	req.Title = ctx.Query("title")
+	resp, err := cont.ListFolders(ctx, &req)
 	if err != nil {
 		ctx.JSON(500, gin.H{"errorCode": "50000", "errorMessage": err.Error(), "success": false})
 		return

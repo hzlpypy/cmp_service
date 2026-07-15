@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  # 前端服务（nginx）
+  frontend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: cmp-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - cmp-network
+
+  # 后端服务（Go）
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../backend/Dockerfile.backend
+    container_name: cmp-backend
+    ports:
+      - "3011:3011"
+    environment:
+      - GIN_MODE=release
+      - DB_PATH=/app/data/cmp_service.db
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/config:/app/config
+    networks:
+      - cmp-network
+
+networks:
+  cmp-network:
+    driver: bridge

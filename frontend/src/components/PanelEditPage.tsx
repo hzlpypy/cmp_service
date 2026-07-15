@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import type { ReactNode } from 'react'
+import { Modal, message } from 'antd'
 import ChartPanel from './ChartPanel'
 import QueryInspector from './QueryInspector'
 import VariableSelector from './VariableSelector'
@@ -34,7 +36,7 @@ const refLabels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 /* ── 可折叠分区组件 ── */
 function Section({ title, defaultOpen = true, children, badge }: {
-  title: string; defaultOpen?: boolean; children: React.ReactNode; badge?: string
+  title: string; defaultOpen?: boolean; children: ReactNode; badge?: string
 }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
@@ -345,7 +347,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
       // 3. 确保有数据才创建快照
       const hasData = latestData.length > 0 && latestData.some(series => series.length > 0)
       if (!hasData) {
-        alert('暂无预览数据，请先点击工具栏的「刷新」按钮获取数据后再创建快照')
+        message.warning('暂无预览数据，请先点击工具栏的「刷新」按钮获取数据后再创建快照')
         return
       }
 
@@ -367,15 +369,25 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
       })
       setSnapshots((prev) => [snap, ...prev])
       setSnapName('')
-    } catch (e: any) { alert('创建快照失败: ' + (e.message || '未知错误')) }
+      message.success('创建快照成功')
+    } catch (e: any) { message.error('创建快照失败: ' + (e.message || '未知错误')) }
   }
 
   const handleDeleteSnapshot = async (key: string) => {
-    if (!confirm('确认删除该快照？')) return
-    try {
-      await api.deleteSnapshot(key)
-      setSnapshots((prev) => prev.filter((s) => s.snapshot_key !== key))
-    } catch (e: any) { alert('删除失败: ' + (e.message || '未知错误')) }
+    Modal.confirm({
+      title: '确认删除',
+      content: '确认删除该快照？',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.deleteSnapshot(key)
+          setSnapshots((prev) => prev.filter((s) => s.snapshot_key !== key))
+          message.success('删除成功')
+        } catch (e: any) { message.error('删除失败: ' + (e.message || '未知错误')) }
+      },
+    })
   }
 
   const shareLink = `${window.location.origin}/snapshot/`
@@ -401,7 +413,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
         setLiveColumns(pd.columns || [])
       }
     } catch (e: any) {
-      alert('查询失败: ' + (e.message || '未知错误'))
+      message.error('查询失败: ' + (e.message || '未知错误'))
     } finally {
       setQueryLoading(false)
     }
@@ -448,9 +460,22 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
   }
 
   const handleDiscard = () => {
-    if (hasUnsaved && !confirm('确定要丢弃所有更改吗？')) return
-    setP(clonePanel(panel))
-    setHasUnsaved(false)
+    if (hasUnsaved) {
+      Modal.confirm({
+        title: '确认放弃',
+        content: '确定要丢弃所有更改吗？',
+        okText: '放弃',
+        okType: 'danger',
+        cancelText: '继续编辑',
+        onOk: () => {
+          setP(clonePanel(panel))
+          setHasUnsaved(false)
+        },
+      })
+    } else {
+      setP(clonePanel(panel))
+      setHasUnsaved(false)
+    }
   }
 
   const update = (patch: Partial<PanelDef>) => setP((prev) => ({ ...prev, ...patch }))
@@ -1383,7 +1408,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                     <div className="pe-hint-text" style={{ marginTop: 4, marginLeft: 0 }}>
                       同一列中连续相同的值自动合并为一个单元格（类似 Excel 合并）。
                     </div>
-                    {p.options?.enableCellMerge && (
+                    {Boolean(p.options?.enableCellMerge) && (
                       <div style={{ marginTop: 8 }}>
                         <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, display: 'block' }}>选择合并列</label>
                         {liveColumns.length > 0 ? (
@@ -1428,157 +1453,6 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                         <div className="pe-hint-text" style={{ marginTop: 6, marginLeft: 0 }}>
                           仅对勾选的列进行合并，未勾选则不合并。
                         </div>
-                      </div>
-                    )}
-
-                    {/* 条件告警 */}
-                    <label className="pe-toggle" style={{ marginTop: 12 }}>
-                      <input
-                        type="checkbox"
-                        checked={!!p.options?.enableCellAlert}
-                        onChange={(e) => {
-                          const checked = e.target.checked
-                          update({ options: { ...p.options, enableCellAlert: checked, cellAlerts: checked ? (p.options?.cellAlerts || []) : undefined, alertMode: checked ? (p.options?.alertMode || 'absolute') : undefined } })
-                        }}
-                      />
-                      <span className="pe-toggle-slider" />
-                      <span className="pe-toggle-label">条件告警</span>
-                    </label>
-                    <div className="pe-hint-text" style={{ marginTop: 4, marginLeft: 0 }}>
-                      当单元格数值满足条件时，以指定颜色高亮显示。
-                    </div>
-                    {p.options?.enableCellAlert && (
-                      <div style={{ marginTop: 10 }}>
-                        {/* 模式选择 */}
-                        <div style={{ marginBottom: 8 }}>
-                          <label style={{ fontSize: 11, color: 'var(--text-muted)', marginRight: 8 }}>比较模式</label>
-                          <select
-                            value={(p.options?.alertMode as string) || 'absolute'}
-                            onChange={(e) => update({ options: { ...p.options, alertMode: e.target.value } })}
-                            style={{ fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
-                          >
-                            <option value="absolute">绝对值</option>
-                            <option value="percentage">百分比（该列最大值=100%）</option>
-                          </select>
-                        </div>
-
-                        {/* 规则列表 */}
-                        {((p.options?.cellAlerts as any[]) || []).map((rule: any, idx: number) => {
-                          // 解析列名：从 aliasMap 获取别名对应的原始名，供下拉框值匹配
-                          const resolvedCol = (() => {
-                            const rc = rule.column || ''
-                            // 如果 rule.column 已经是 liveColumns 中的列名（别名），直接返回
-                            if (!rc || liveColumns.includes(rc)) return rc
-                            // 在 aliasMap 中查找对应的别名
-                            for (const t of p.targets) {
-                              if (!t.aliasMap) continue
-                              for (const [rawCol, alias] of Object.entries(t.aliasMap)) {
-                                if (rc === rawCol && alias && liveColumns.includes(alias)) return alias
-                                if (rc === alias && liveColumns.includes(rawCol)) return rawCol
-                              }
-                            }
-                            return rc
-                          })()
-                          return (
-                          <div key={idx} style={{
-                            display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6,
-                            padding: '6px 8px', background: '#f8f9fa', borderRadius: 4, flexWrap: 'wrap',
-                          }}>
-                            {/* 列选择 */}
-                            <select
-                              value={resolvedCol}
-                              onChange={(e) => {
-                                const alerts = [...((p.options?.cellAlerts as any[]) || [])]
-                                alerts[idx] = { ...alerts[idx], column: e.target.value }
-                                update({ options: { ...p.options, cellAlerts: alerts } })
-                              }}
-                              style={{ fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
-                            >
-                              <option value="">选择列</option>
-                              {liveColumns.map((col) => (
-                                <option key={col} value={col}>{col}</option>
-                              ))}
-                            </select>
-                            {/* 操作符 */}
-                            <select
-                              value={rule.op || '>'}
-                              onChange={(e) => {
-                                const alerts = [...((p.options?.cellAlerts as any[]) || [])]
-                                alerts[idx] = { ...alerts[idx], op: e.target.value }
-                                update({ options: { ...p.options, cellAlerts: alerts } })
-                              }}
-                              style={{ fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
-                            >
-                              <option value=">">&gt;</option>
-                              <option value=">=">&gt;=</option>
-                              <option value="<">&lt;</option>
-                              <option value="<=">&lt;=</option>
-                              <option value="=">=</option>
-                              <option value="!=">!=</option>
-                            </select>
-                            {/* 阈值 */}
-                            <input
-                              type="number"
-                              value={rule.value ?? ''}
-                              onChange={(e) => {
-                                const alerts = [...((p.options?.cellAlerts as any[]) || [])]
-                                alerts[idx] = { ...alerts[idx], value: e.target.value === '' ? '' : Number(e.target.value) }
-                                update({ options: { ...p.options, cellAlerts: alerts } })
-                              }}
-                              placeholder="阈值"
-                              style={{ width: 60, fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
-                            />
-                            {/* 颜色选择 */}
-                            <input
-                              type="color"
-                              value={rule.color || '#ffcc00'}
-                              onChange={(e) => {
-                                const alerts = [...((p.options?.cellAlerts as any[]) || [])]
-                                alerts[idx] = { ...alerts[idx], color: e.target.value }
-                                update({ options: { ...p.options, cellAlerts: alerts } })
-                              }}
-                              title="选择颜色"
-                              style={{ width: 24, height: 24, border: 'none', borderRadius: 3, cursor: 'pointer', padding: 0, background: 'transparent' }}
-                            />
-                            {/* 删除 */}
-                            <button
-                              onClick={() => {
-                                const alerts = ((p.options?.cellAlerts as any[]) || []).filter((_: any, i: number) => i !== idx)
-                                update({ options: { ...p.options, cellAlerts: alerts } })
-                              }}
-                              title="删除规则"
-                              style={{ fontSize: 11, padding: '2px 6px', background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 3, cursor: 'pointer' }}
-                            >
-                              ✕
-                            </button>
-                          </div>
-                          )})}
-
-                        {/* 添加规则 */}
-                        <button
-                          onClick={() => {
-                            const alerts = [...((p.options?.cellAlerts as any[]) || []), { column: '', op: '>', value: 1, color: '#ffcc00' }]
-                            update({ options: { ...p.options, cellAlerts: alerts } })
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.borderColor = '#e53935'
-                            e.currentTarget.style.color = '#e53935'
-                            e.currentTarget.style.background = 'rgba(229, 57, 53, 0.05)'
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.borderColor = 'var(--border-color)'
-                            e.currentTarget.style.color = 'var(--text-muted)'
-                            e.currentTarget.style.background = 'none'
-                          }}
-                          style={{
-                            fontSize: 11, padding: '4px 12px', marginTop: 4,
-                            background: 'none', color: 'var(--text-muted)',
-                            border: '1px dashed var(--border-color)', borderRadius: 4, cursor: 'pointer',
-                            transition: 'all 0.15s',
-                          }}
-                        >
-                          + 添加告警规则
-                        </button>
                       </div>
                     )}
 
@@ -1743,6 +1617,154 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                         </div>
                       )}
                     </div>
+                  </Section>
+                )}
+
+                {(p.type === 'table' || p.type === 'bar' || p.type === 'line' || p.type === 'pie') && (
+                  <Section title="条件告警" defaultOpen={false}>
+                    <label className="pe-toggle">
+                      <input
+                        type="checkbox"
+                        checked={!!p.options?.enableCellAlert}
+                        onChange={(e) => {
+                          const checked = e.target.checked
+                          update({ options: { ...p.options, enableCellAlert: checked, cellAlerts: checked ? (p.options?.cellAlerts || []) : undefined, alertMode: checked ? (p.options?.alertMode || 'absolute') : undefined } })
+                        }}
+                      />
+                      <span className="pe-toggle-slider" />
+                      <span className="pe-toggle-label">启用条件告警</span>
+                    </label>
+                    <div className="pe-hint-text" style={{ marginTop: 4, marginLeft: 0 }}>
+                      {p.type === 'table'
+                        ? '当单元格数值满足条件时，以指定颜色高亮显示。'
+                        : '当数据点数值满足条件时，以指定颜色高亮对应区域。'}
+                    </div>
+                    {Boolean(p.options?.enableCellAlert) && (
+                      <div style={{ marginTop: 10 }}>
+                        {/* 模式选择 */}
+                        <div style={{ marginBottom: 8 }}>
+                          <label style={{ fontSize: 11, color: 'var(--text-muted)', marginRight: 8 }}>比较模式</label>
+                          <select
+                            value={(p.options?.alertMode as string) || 'absolute'}
+                            onChange={(e) => update({ options: { ...p.options, alertMode: e.target.value } })}
+                            style={{ fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+                          >
+                            <option value="absolute">绝对值</option>
+                            <option value="percentage">百分比（该列最大值=100%）</option>
+                          </select>
+                        </div>
+
+                        {/* 规则列表 */}
+                        {((p.options?.cellAlerts as any[]) || []).map((rule: any, idx: number) => {
+                          // 解析列名：从 aliasMap 获取别名对应的原始名，供下拉框值匹配
+                          const resolvedCol = (() => {
+                            const rc = rule.column || ''
+                            if (!rc || liveColumns.includes(rc)) return rc
+                            for (const t of p.targets) {
+                              if (!t.aliasMap) continue
+                              for (const [rawCol, alias] of Object.entries(t.aliasMap)) {
+                                if (rc === rawCol && alias && liveColumns.includes(alias)) return alias
+                                if (rc === alias && liveColumns.includes(rawCol)) return rawCol
+                              }
+                            }
+                            return rc
+                          })()
+                          return (
+                          <div key={idx} style={{
+                            display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6,
+                            padding: '6px 8px', background: '#f8f9fa', borderRadius: 4, flexWrap: 'wrap',
+                          }}>
+                            <select
+                              value={resolvedCol}
+                              onChange={(e) => {
+                                const alerts = [...((p.options?.cellAlerts as any[]) || [])]
+                                alerts[idx] = { ...alerts[idx], column: e.target.value }
+                                update({ options: { ...p.options, cellAlerts: alerts } })
+                              }}
+                              style={{ fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+                            >
+                              <option value="">选择列</option>
+                              {liveColumns.map((col) => (
+                                <option key={col} value={col}>{col}</option>
+                              ))}
+                            </select>
+                            <select
+                              value={rule.op || '>'}
+                              onChange={(e) => {
+                                const alerts = [...((p.options?.cellAlerts as any[]) || [])]
+                                alerts[idx] = { ...alerts[idx], op: e.target.value }
+                                update({ options: { ...p.options, cellAlerts: alerts } })
+                              }}
+                              style={{ fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+                            >
+                              <option value=">">&gt;</option>
+                              <option value=">=">&gt;=</option>
+                              <option value="<">&lt;</option>
+                              <option value="<=">&lt;=</option>
+                              <option value="=">=</option>
+                              <option value="!=">!=</option>
+                            </select>
+                            <input
+                              type="number"
+                              value={rule.value ?? ''}
+                              onChange={(e) => {
+                                const alerts = [...((p.options?.cellAlerts as any[]) || [])]
+                                alerts[idx] = { ...alerts[idx], value: e.target.value === '' ? '' : Number(e.target.value) }
+                                update({ options: { ...p.options, cellAlerts: alerts } })
+                              }}
+                              placeholder="阈值"
+                              style={{ width: 60, fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+                            />
+                            <input
+                              type="color"
+                              value={rule.color || '#5470c6'}
+                              onChange={(e) => {
+                                const alerts = [...((p.options?.cellAlerts as any[]) || [])]
+                                alerts[idx] = { ...alerts[idx], color: e.target.value }
+                                update({ options: { ...p.options, cellAlerts: alerts } })
+                              }}
+                              title="选择颜色"
+                              style={{ width: 24, height: 24, border: 'none', borderRadius: 3, cursor: 'pointer', padding: 0, background: 'transparent' }}
+                            />
+                            <button
+                              onClick={() => {
+                                const alerts = ((p.options?.cellAlerts as any[]) || []).filter((_: any, i: number) => i !== idx)
+                                update({ options: { ...p.options, cellAlerts: alerts } })
+                              }}
+                              title="删除规则"
+                              style={{ fontSize: 11, padding: '2px 6px', background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 3, cursor: 'pointer' }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          )})}
+
+                        <button
+                          onClick={() => {
+                            const alerts = [...((p.options?.cellAlerts as any[]) || []), { column: '', op: '>', value: 1, color: '#5470c6' }]
+                            update({ options: { ...p.options, cellAlerts: alerts } })
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = '#5470c6'
+                            e.currentTarget.style.color = '#5470c6'
+                            e.currentTarget.style.background = 'rgba(84,112,198,0.05)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--border-color)'
+                            e.currentTarget.style.color = 'var(--text-muted)'
+                            e.currentTarget.style.background = 'none'
+                          }}
+                          style={{
+                            fontSize: 11, padding: '4px 12px', marginTop: 4,
+                            background: 'none', color: 'var(--text-muted)',
+                            border: '1px dashed var(--border-color)', borderRadius: 4, cursor: 'pointer',
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          + 添加告警规则
+                        </button>
+                      </div>
+                    )}
                   </Section>
                 )}
 

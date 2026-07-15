@@ -23,7 +23,7 @@ interface TimeFormatConfig {
 /**
  * 根据时间范围和数据点数量确定时间格式和刻度间隔（参考 Grafana）
  */
-function getTimeFormatConfig(rangeMs: number, dataPoints: number): TimeFormatConfig {
+function getTimeFormatConfig(rangeMs: number, _dataPoints: number): TimeFormatConfig {
   const SECOND = 1000
   const MINUTE = 60 * SECOND
   const HOUR = 60 * MINUTE
@@ -98,11 +98,34 @@ function formatTimestamp(ms: number, format?: string): string {
 }
 
 /**
+ * 格式化数值，最多保留两位小数。
+ */
+function formatNumber(val: number | string): string {
+  const num = typeof val === 'string' ? parseFloat(val) : val
+  if (isNaN(num)) return String(val)
+  // 如果是整数，不显示小数
+  if (Number.isInteger(num)) return String(num)
+  // 最多保留两位小数
+  return num.toFixed(2).replace(/\.?0+$/, '')
+}
+
+/**
  * 格式化值：如果是毫秒时间戳则转换为日期字符串，否则返回原值。
  */
 function formatValue(val: unknown): string {
   if (isMillisecondTimestamp(val)) {
     return formatTimestamp(val as number)
+  }
+  // 如果是数值，格式化并保留两位小数
+  if (typeof val === 'number') {
+    return formatNumber(val)
+  }
+  // 尝试解析为数值
+  if (typeof val === 'string' && val !== '') {
+    const num = parseFloat(val)
+    if (!isNaN(num) && String(num) === val) {
+      return formatNumber(num)
+    }
   }
   return String(val ?? '')
 }
@@ -141,23 +164,14 @@ function isDateColumn(colName: string): boolean {
   return kl.includes('date') || kl.includes('time') || kl.includes('日期') || kl.includes('时间') || kl === 'day'
 }
 
-function detectColumns(rows: MetricRow[], chartType?: string): { nameCol: string | null; valueCols: string[] } {
+function detectColumns(rows: MetricRow[], _chartType?: string): { nameCol: string | null; valueCols: string[] } {
   if (rows.length === 0) return { nameCol: null, valueCols: [] }
   const keys = Object.keys(rows[0])
   let nameCol: string | null = null
   const valueCols: string[] = []
 
+  // 第一步：先识别数值列（优先级最高）
   for (const k of keys) {
-    const kl = k.toLowerCase()
-    // 折线图/柱状图：日期列优先作为 X 轴
-    if (!nameCol && isDateColumn(k)) {
-      nameCol = k
-      continue
-    }
-    if (!nameCol && (kl.includes('name') || kl.includes('指标') || kl.includes('机房') || kl === '市场' || kl === 'market')) {
-      nameCol = k
-      continue
-    }
     const sample = rows.slice(0, 5)
     const allNumeric = sample.every((r) => {
       const v = r[k]
@@ -168,8 +182,30 @@ function detectColumns(rows: MetricRow[], chartType?: string): { nameCol: string
       valueCols.push(k)
     }
   }
+
+  // 第二步：从非数值列中识别名称列
+  const nonValueKeys = keys.filter((k) => !valueCols.includes(k))
+  for (const k of nonValueKeys) {
+    const kl = k.toLowerCase()
+    // 折线图/柱状图：日期列优先作为 X 轴
+    if (!nameCol && isDateColumn(k)) {
+      nameCol = k
+      continue
+    }
+    // 名称列关键词匹配（精确匹配优先）
+    if (!nameCol && (kl.includes('name') || kl.includes('node') || kl.includes('机房') || kl === '市场' || kl === 'market' || kl === '类型' || kl === 'type' || kl === 'category' || kl.includes('设备'))) {
+      nameCol = k
+      continue
+    }
+  }
+
+  // 第三步：如果还没找到名称列，取第一个非数值列
+  if (!nameCol && nonValueKeys.length > 0) {
+    nameCol = nonValueKeys[0]
+  }
+  // 兜底：如果所有列都是数值列，取第一个列作为名称列
   if (!nameCol) {
-    nameCol = keys.find((k) => !valueCols.includes(k)) || keys[0]
+    nameCol = keys[0]
   }
   return { nameCol, valueCols }
 }
@@ -183,9 +219,10 @@ function shortName(name: string): string {
     .replace('）', '')
 }
 
-const SERIES_COLORS = ['#5794f2', '#e24d4d', '#55bd6a', '#ff9830', '#b877d9', '#eca846']
+// 冷色调配色方案，避免红色/黄色引发告警误解
+const SERIES_COLORS = ['#5470c6', '#73c0de', '#91cc75', '#55bd6a', '#b877d9', '#9a60b4', '#3ba272', '#5b8ff9']
 
-export default memo(function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, panelKey, columns, dataLinks }: ChartPanelProps) {
+export default memo(function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, columns, dataLinks }: ChartPanelProps) {
   const chartRef = useRef<HTMLDivElement>(null)
   const chartInstanceRef = useRef<echarts.ECharts | null>(null)
   const [chartError, setChartError] = useState<string | null>(null)
@@ -261,31 +298,76 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
           const barOrientation = (options?.barOrientation as string) || 'vertical'
           const isHorizontal = type === 'bar' && barOrientation === 'horizontal'
 
+          // 条件告警颜色查找
+          const seriesAlerts = supportsCellAlerts ? cellAlertRules : []
+
           data.forEach((targetRows, ti) => {
             const tdef = targets[ti]
             const { valueCols: tValCols } = detectColumns(targetRows, type)
             const seriesBaseName = tdef?.metricName || tdef?.refId || (tValCols[0] || `查询${ti + 1}`)
 
             tValCols.forEach((col, ci) => {
+              const colorIdx = (ti * tValCols.length + ci) % SERIES_COLORS.length
+              const color = SERIES_COLORS[colorIdx]
+
+              // 逐项告警着色
+              const seriesData = targetRows.map((m) => {
+                const val = parseFloat(m[col]) || 0
+                const alertColor = getCellAlertColor(col, String(val))
+                return alertColor
+                  ? { value: val, itemStyle: { color: alertColor, borderColor: alertColor, borderRadius: type === 'bar' ? (isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]) : 0 } }
+                  : val
+              })
+
               series.push({
                 name: tValCols.length > 1 ? `${seriesBaseName}-${col}` : seriesBaseName,
                 type: type as 'bar' | 'line',
-                data: targetRows.map((m) => parseFloat(m[col]) || 0),
+                data: seriesData,
                 ...(type === 'bar'
                   ? {
-                      itemStyle: { color: SERIES_COLORS[(ti * tValCols.length + ci) % SERIES_COLORS.length], borderRadius: isHorizontal ? [0, 3, 3, 0] : [3, 3, 0, 0] },
-                      barMaxWidth: 30,
+                      itemStyle: {
+                        color,
+                        borderRadius: isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0],
+                      },
+                      barMaxWidth: 36,
+                      emphasis: {
+                        itemStyle: {
+                          shadowBlur: 8,
+                          shadowOffsetY: 2,
+                          shadowColor: 'rgba(0,0,0,0.12)',
+                        },
+                      },
                     }
                   : {
                       smooth: true,
-                      itemStyle: { color: SERIES_COLORS[(ti * tValCols.length + ci) % SERIES_COLORS.length] },
-                      symbol: 'circle', symbolSize: 6,
+                      lineStyle: { color, width: 2.5 },
+                      itemStyle: { color },
+                      symbol: 'circle',
+                      symbolSize: seriesAlerts.length > 0 ? 7 : 5,
+                      areaStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                          { offset: 0, color },
+                          { offset: 1, color: 'rgba(255,255,255,0)' },
+                        ]),
+                        opacity: 0.12,
+                      },
                     }),
               })
             })
           })
 
           const legendData = series.map((s) => s.name as string)
+
+          // 构建 series 索引 → valueCol 映射，供 tooltip 告警检查
+          const seriesColMap: Map<number, string> = new Map()
+          let seriesIdx = 0
+          data.forEach((targetRows, _ti) => {
+            const { valueCols: tValCols } = detectColumns(targetRows, type)
+            tValCols.forEach((col) => {
+              seriesColMap.set(seriesIdx, col)
+              seriesIdx++
+            })
+          })
 
           // 计算xAxis标签间隔（避免重叠）
           const calculateLabelInterval = (): number => {
@@ -322,46 +404,91 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
           const labelInterval = calculateLabelInterval()
 
           option = {
-            backgroundColor: '#ffffff',
-            tooltip: { trigger: 'axis', ...(type === 'bar' ? { axisPointer: { type: 'shadow' } } : {}), backgroundColor: '#22252b', borderColor: '#33363d', textStyle: { color: '#d8d9da' } },
-            legend: (isMultiTarget || valueCols.length > 1 || data.some((r, i) => (targets[i]?.metricName || '').length > 0))
-              ? { data: legendData, bottom: 0, textStyle: { color: '#a0a3a8', fontSize: 11 } }
-              : undefined,
-            // 根据标签旋转角度调整底部边距，避免标签被截断
-            grid: { 
-              left: '6%', right: '4%', 
-              bottom: legendData.length > 1 ? '15%' : (labelRotate > 30 ? '18%' : labelRotate > 0 ? '12%' : '10%'), 
-              top: '12%', 
-              containLabel: true 
+            backgroundColor: 'transparent',
+            color: SERIES_COLORS,
+            tooltip: {
+              trigger: 'axis',
+              backgroundColor: '#fff',
+              borderColor: '#e8ecf1',
+              borderWidth: 1,
+              padding: [12, 16],
+              extraCssText: 'border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.08);',
+              textStyle: { color: '#1d2129', fontSize: 12, lineHeight: 20 },
+              ...(type === 'bar' ? { axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(0,0,0,0.04)' } } } : {}),
+              formatter: (params: any) => {
+                if (!Array.isArray(params)) params = [params]
+                const parts = params.map((p: any) => {
+                  // 检查条件告警
+                  const colName = seriesColMap.get(p.seriesIndex)
+                  const alertColor = colName ? getCellAlertColor(colName, String(p.value)) : undefined
+                  return `<div style="display:flex;align-items:center;gap:8px;margin:2px 0">
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${alertColor || p.color};flex-shrink:0"></span>
+                    <span style="color:#86909c;min-width:80px">${p.seriesName}</span>
+                    <span style="color:${alertColor ? alertColor : '#1d2129'};font-weight:600">${formatNumber(p.value)}${alertColor ? ' ⚠' : ''}</span>
+                  </div>`
+                })
+                return `<div style="font-weight:600;color:#4e5969;margin-bottom:6px">${params[0].axisValueLabel}</div>${parts.join('')}`
+              },
             },
-            // 横向柱状图：交换 xAxis 和 yAxis
+            legend: (isMultiTarget || valueCols.length > 1 || data.some((_r, i) => (targets[i]?.metricName || '').length > 0))
+              ? {
+                  data: legendData,
+                  bottom: 0,
+                  icon: 'roundRect',
+                  itemWidth: 10,
+                  itemHeight: 10,
+                  itemGap: 16,
+                  textStyle: { color: '#86909c', fontSize: 11 },
+                }
+              : undefined,
+            grid: {
+              left: '3%',
+              right: '5%',
+              bottom: legendData.length > 1 ? '14%' : (labelRotate > 30 ? '16%' : labelRotate > 0 ? '12%' : '8%'),
+              top: '8%',
+              containLabel: true,
+            },
             xAxis: isHorizontal
-              ? { type: 'value', name: valueCols[0] || '', nameTextStyle: { color: '#6e7178' }, axisLabel: { color: '#6e7178' }, splitLine: { lineStyle: { color: '#2c2f36' } } }
+              ? {
+                  type: 'value',
+                  name: valueCols[0] || '',
+                  nameTextStyle: { color: '#86909c', fontSize: 11 },
+                  axisLabel: { color: '#86909c', fontSize: 10 },
+                  axisLine: { show: false },
+                  axisTick: { show: false },
+                  splitLine: { lineStyle: { color: '#f2f3f5', type: 'dashed' } },
+                }
               : {
                   type: 'category',
                   data: names,
                   ...(type === 'line' ? { boundaryGap: false } : {}),
                   axisLabel: {
                     rotate: labelRotate,
-                    fontSize: 11,
-                    color: '#a0a3a8',
+                    fontSize: 10,
+                    color: '#86909c',
                     interval: labelInterval,
-                    // 大量数据时隐藏重叠标签
                     hideOverlap: names.length > 25,
-                    // 超长标签截断
-                    formatter: (val: string) => {
-                      if (val && val.length > 12) {
-                        return val.slice(0, 12) + '...'
-                      }
-                      return val
-                    },
+                    formatter: (val: string) => val && val.length > 12 ? val.slice(0, 12) + '...' : val,
                   },
-                  axisLine: { lineStyle: { color: '#33363d' } },
+                  axisLine: { lineStyle: { color: '#e5e6eb' } },
                   axisTick: { show: false },
                 },
             yAxis: isHorizontal
-              ? { type: 'category', data: names, axisLabel: { fontSize: 10, color: '#a0a3a8' }, axisLine: { lineStyle: { color: '#33363d' } }, axisTick: { show: false } }
-              : { type: 'value', name: valueCols[0] || '', nameTextStyle: { color: '#6e7178' }, axisLabel: { color: '#6e7178' }, splitLine: { lineStyle: { color: '#2c2f36' } } },
+              ? {
+                  type: 'category', data: names,
+                  axisLabel: { fontSize: 10, color: '#86909c' },
+                  axisLine: { lineStyle: { color: '#e5e6eb' } },
+                  axisTick: { show: false },
+                }
+              : {
+                  type: 'value',
+                  name: valueCols[0] || '',
+                  nameTextStyle: { color: '#86909c', fontSize: 11 },
+                  axisLabel: { color: '#86909c', fontSize: 10 },
+                  axisLine: { show: false },
+                  axisTick: { show: false },
+                  splitLine: { lineStyle: { color: '#f2f3f5', type: 'dashed' } },
+                },
             series,
           }
           break
@@ -371,15 +498,87 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
           const primaryValues = valueCols.length > 0
             ? firstRows.map((m) => parseFloat(m[valueCols[0]]) || 0)
             : []
+          // 根据数据量动态调整布局
+          const dataCount = names.length
+          const isManyData = dataCount > 8
+          // 数据多时：使用右侧图例，饼图左移，标签隐藏（通过图例查看）
+          // 数据少时：使用左侧图例，饼图右移，标签外部显示
+          const pieCenter = isManyData ? ['40%', '50%'] : ['55%', '50%']
+          const pieRadius = isManyData ? ['35%', '55%'] : ['45%', '70%']
+
+          // 告警列名（供 tooltip 使用）
+          const pieAlertCol = valueCols.length > 0 ? valueCols[0] : null
+
           option = {
             backgroundColor: 'transparent',
-            tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)', backgroundColor: '#22252b', borderColor: '#33363d', textStyle: { color: '#d8d9da' } },
-            legend: { orient: 'vertical', left: 'left', top: 'middle', textStyle: { color: '#a0a3a8', fontSize: 11 } },
+            tooltip: {
+              trigger: 'item',
+              backgroundColor: '#22252b',
+              borderColor: '#33363d',
+              textStyle: { color: '#d8d9da' },
+              confine: true,
+              formatter: (params: any) => {
+                 const alertClr = pieAlertCol ? getCellAlertColor(pieAlertCol, String(params.value)) : undefined
+                 const base = `<b>${params.name}</b>: ${formatNumber(params.value)} (${formatNumber(params.percent)}%)`
+                 return alertClr ? `${base} <span style="color:${alertClr}">⚠</span>` : base
+               },
+            },
+            legend: isManyData ? {
+              type: 'scroll',
+              orient: 'vertical',
+              right: 10,
+              top: 'middle',
+              textStyle: { color: '#a0a3a8', fontSize: 11 },
+              itemWidth: 12,
+              itemHeight: 12,
+              itemGap: 6,
+              pageIconColor: '#a0a3a8',
+              pageIconInactiveColor: '#4e5969',
+              pageTextStyle: { color: '#a0a3a8' },
+            } : {
+              orient: 'vertical',
+              left: 10,
+              top: 'middle',
+              textStyle: { color: '#a0a3a8', fontSize: 11 },
+              itemWidth: 12,
+              itemHeight: 12,
+              itemGap: 6,
+            },
             series: [{
-              type: 'pie', radius: ['45%', '70%'], center: ['55%', '50%'],
+              type: 'pie',
+              radius: pieRadius,
+              center: pieCenter,
               data: names.map((n, i) => ({ name: n, value: primaryValues[i] || 0 })),
-              emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.5)' } },
-              label: { color: '#a0a3a8', fontSize: 10 },
+              emphasis: {
+                itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.5)' },
+                label: { show: true, fontWeight: 'bold' }, // 悬浮时显示标签
+              },
+              label: {
+                show: !isManyData, // 数据多时隐藏标签，通过图例查看
+                position: 'outer',
+                color: '#a0a3a8',
+                fontSize: 10,
+                formatter: isManyData ? '{b}' : '{b}\n{c} ({d}%)', // 数据多时只显示名称
+                alignTo: 'labelLine', // 标签对齐到引导线
+                bleedMargin: 5, // 标签出血边距
+              },
+              labelLine: {
+                show: !isManyData,
+                length: 10, // 第一段引导线长度
+                length2: 15, // 第二段引导线长度
+                smooth: false,
+                lineStyle: { color: '#4e5969', width: 1 },
+              },
+              labelLayout: {
+                hideOverlap: true, // 自动隐藏重叠的标签
+                moveOverlap: 'shiftY', // 垂直方向移动避免重叠
+              },
+              // 小数据时，鼠标悬浮显示完整信息
+              ...(isManyData ? {} : {
+                blur: {
+                  label: { opacity: 0.3 },
+                },
+              }),
             }],
           }
           break
@@ -391,16 +590,24 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
             : []
           const gaugeValue = primaryValues.length > 0 ? primaryValues[0] : 0
           const gaugeName = names.length > 0 ? names[0] : '使用率'
+          // 冷色调分级色：蓝 → 青 → 绿（不使用红/黄色）
+          const stageColors = gaugeValue > 80 ? '#5470c6' : gaugeValue > 50 ? '#73c0de' : '#3ba272'
           option = {
-            backgroundColor: '#ffffff',
+            backgroundColor: 'transparent',
             series: [{
               type: 'gauge', min: 0, max: 100, startAngle: 210, endAngle: -30,
               center: ['50%', '60%'], radius: '85%',
-              progress: { show: true, width: 14, itemStyle: { color: gaugeValue > 80 ? '#e24d4d' : gaugeValue > 60 ? '#ff9830' : '#55bd6a' } },
-              axisLine: { lineStyle: { width: 14, color: [[0.6, '#55bd6a'], [0.8, '#ff9830'], [1, '#e24d4d']] } },
+              progress: { show: true, width: 14, itemStyle: { color: stageColors } },
+              axisLine: {
+                lineStyle: {
+                  width: 14,
+                  color: [[0.5, '#3ba272'], [0.8, '#73c0de'], [1, '#5470c6']],
+                },
+              },
               axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
-              detail: { valueAnimation: true, fontSize: 26, offsetCenter: [0, '60%'], formatter: '{value}%', color: '#d8d9da' },
+              detail: { valueAnimation: true, fontSize: 28, offsetCenter: [0, '60%'], formatter: (val: number) => `${formatNumber(val)}%`, color: '#1d2129', fontWeight: 'bold' },
               data: [{ value: gaugeValue, name: shortName(gaugeName) }],
+              title: { color: '#86909c', fontSize: 12, offsetCenter: [0, '85%'] },
             }],
           }
           break
@@ -549,8 +756,9 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
 
   // 条件告警
   interface CellAlertRule { column: string; op: '>' | '>=' | '<' | '<=' | '=' | '!='; value: number; color: string }
+  const supportsCellAlerts = type === 'table' || type === 'bar' || type === 'line' || type === 'pie'
   const cellAlertRules: CellAlertRule[] = useMemo(() => {
-    if (type !== 'table') return []
+    if (!supportsCellAlerts) return []
     const raw = options?.cellAlerts
     if (!Array.isArray(raw)) return []
     const valid = raw.filter((r: any) => r && typeof r.column === 'string' && typeof r.op === 'string' && typeof r.value === 'number' && typeof r.color === 'string')
@@ -606,7 +814,10 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
         case '=': matched = compareVal === rule.value; break
         case '!=': matched = compareVal !== rule.value; break
       }
-      if (matched) matchColor = rule.color
+      if (matched) {
+        matchColor = rule.color
+        break // 第一条匹配的规则生效，后续不再覆盖
+      }
     }
     return matchColor
   }

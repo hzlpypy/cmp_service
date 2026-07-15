@@ -253,6 +253,24 @@ type Snapshot struct {
 // TableName 指定快照表名。
 func (Snapshot) TableName() string { return "snapshots" }
 
+// SnapshotSchedule 定时快照配置表，存储仪表板的定时快照生成规则。
+type SnapshotSchedule struct {
+	Base
+	DashboardID string `gorm:"column:dashboard_id;type:varchar(64);not null;index" json:"dashboard_id"`
+	Name        string `gorm:"type:varchar(256);default:''" json:"name"`
+	// CronExpr cron 表达式，如 "0 8 * * *" 表示每天 8:00
+	CronExpr string `gorm:"column:cron_expr;type:varchar(128);not null" json:"cron_expr"`
+	// Enabled 是否启用
+	Enabled bool `gorm:"default:true" json:"enabled"`
+	// LastRunAt 上次执行时间
+	LastRunAt *time.Time `gorm:"column:last_run_at" json:"last_run_at,omitempty"`
+	// NextRunAt 下次执行时间
+	NextRunAt *time.Time `gorm:"column:next_run_at" json:"next_run_at,omitempty"`
+}
+
+// TableName 指定定时快照表名。
+func (SnapshotSchedule) TableName() string { return "snapshot_schedules" }
+
 // Variable 仪表板变量表，存储仪表板级别的模板变量。
 // 变量可在 SQL 查询中使用 $varname 或 ${varname} 语法引用。
 // 对应数据库表：variables

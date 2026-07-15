@@ -79,10 +79,38 @@ body {
   object-fit: contain;
 }
 
+.top-header-logo:hover {
+  background: #f5f5f5;
+}
+
 .top-header-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
-  color: #e53935;
+  color: #1a1a1a;
+}
+
+.top-header-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.top-header-user:hover {
+  background: #f5f5f5;
+}
+
+.top-header-user svg {
+  color: #666;
+}
+
+.top-header-user .user-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
 }
 
 .sidebar-toggle-btn {
@@ -722,6 +750,91 @@ body {
   border-bottom: none;
 }
 
+/* ===== Ant Design Table 样式调整 ===== */
+.search-results-container .ant-table {
+  font-size: 13px;
+}
+
+.search-results-container .ant-table-thead > tr > th {
+  padding: 10px 16px;
+  background: #fafbfc;
+  font-weight: 600;
+  font-size: 13px;
+  color: #1d2129;
+}
+
+.search-results-container .ant-table-tbody > tr > td {
+  padding: 8px 16px;
+  border-bottom: 1px solid #f2f3f5;
+}
+
+.search-results-container .ant-table-tbody > tr:hover > td {
+  background: #f7f8fa;
+}
+
+.search-results-container .ant-table-tbody > tr:last-child > td {
+  border-bottom: none;
+}
+
+/* ===== Folder Content Container ===== */
+.folder-content-container {
+  background: #fff;
+  border: 1px solid #e5e6eb;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.folder-content-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: #fafbfc;
+  border-bottom: 1px solid #e5e6eb;
+  font-weight: 600;
+  font-size: 13px;
+  color: #1d2129;
+}
+
+.folder-content-list {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.folder-content-list .dashboard-item {
+  border-bottom: 1px solid #f2f3f5;
+}
+
+.folder-content-list .dashboard-item:last-child {
+  border-bottom: none;
+}
+
+/* ===== Ant Design Table 样式调整 ===== */
+.search-results-container .ant-table {
+  font-size: 13px;
+}
+
+.search-results-container .ant-table-thead > tr > th {
+  padding: 10px 16px;
+  background: #fafbfc;
+  font-weight: 600;
+  font-size: 13px;
+  color: #1d2129;
+}
+
+.search-results-container .ant-table-tbody > tr > td {
+  padding: 8px 16px;
+  border-bottom: 1px solid #f2f3f5;
+}
+
+.search-results-container .ant-table-tbody > tr:hover > td {
+  background: #f7f8fa;
+}
+
+.search-results-container .ant-table-tbody > tr:last-child > td {
+  border-bottom: none;
+}
+
 /* ===== Checkbox ===== */
 .list-item input[type="checkbox"] {
   width: 14px;
@@ -736,6 +849,91 @@ body {
   padding: 60px 20px;
   color: var(--text-muted);
   font-size: 14px;
+}
+
+/* ===== Snapshot List ===== */
+.snap-page {
+  padding: 24px;
+  background: #fff;
+  min-height: 100vh;
+}
+
+.snap-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.snap-search-bar {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: #fafbfc;
+  border-radius: 8px;
+  border: 1px solid #e5e6eb;
+}
+
+.snap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.snap-row {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e5e6eb;
+  border-radius: 8px;
+  padding: 16px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.snap-row:hover {
+  border-color: #e53935;
+  box-shadow: 0 2px 8px rgba(229, 57, 53, 0.1);
+}
+
+.snap-row-bar {
+  width: 4px;
+  height: 100%;
+  background: #e53935;
+  border-radius: 2px;
+  margin-right: 16px;
+  align-self: stretch;
+}
+
+.snap-row-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.snap-row-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.snap-row-meta {
+  margin-bottom: 6px;
+}
+
+.snap-row-link {
+  margin-bottom: 6px;
+}
+
+.snap-row-time {
+  margin-bottom: 4px;
+}
+
+.snap-row-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.snap-empty {
+  text-align: center;
+  padding: 60px 20px;
 }
 
 /* ===== Data Sources Page ===== */

@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import type { ReactNode } from 'react'
+import { Modal, message, Input, Table } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import * as api from '../api'
-import type { FolderRes, DashboardBriefRes } from '../api'
+import type { FolderRes } from '../api'
 import { sampleDashboards } from '../mock/dashboardSamples'
 
 function titleToSlug(title: string): string {
@@ -53,6 +55,7 @@ export default function BrowsePage() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['mine']))
   const [searchText, setSearchText] = useState('')
+  const [currentFolder, setCurrentFolder] = useState<FolderRes | null>(null) // 当前浏览的文件夹
 
   const [showNewFolder, setShowNewFolder] = useState(false)
   const [showNewDashboard, setShowNewDashboard] = useState(false)
@@ -75,11 +78,15 @@ export default function BrowsePage() {
   const [targetFolderId, setTargetFolderId] = useState('')
   const [moving, setMoving] = useState(false)
 
-  const loadFolders = async () => {
+  const loadFolders = async (searchKeyword?: string, expandFolderId?: string) => {
     try {
-      const res = await api.listFolders()
+      const res = await api.listFolders(searchKeyword)
       setFolders(res.list)
-      if (expandedFolders.size === 0 && res.list.length > 0) {
+      if (expandFolderId) {
+        // 如果指定了要展开的文件夹，展开它
+        setExpandedFolders(new Set([expandFolderId]))
+        setExpandedGroups(new Set(['mine']))
+      } else if (expandedFolders.size === 0 && res.list.length > 0) {
         setExpandedFolders(new Set([res.list[0].id]))
       }
     } catch (e: any) {
@@ -170,7 +177,7 @@ export default function BrowsePage() {
     }
   }
 
-  const totalSelected = selectedDashboards.size
+  const totalSelected = selectedFolders.size + selectedDashboards.size
 
   const handleCreateFolder = async () => {
     if (!newFolderName.trim()) return
@@ -179,15 +186,7 @@ export default function BrowsePage() {
       setNewFolderName('')
       setShowNewFolder(false)
       loadFolders()
-    } catch (e: any) { alert('创建文件夹失败: ' + e.message) }
-  }
-
-  const handleDeleteFolder = async (id: string) => {
-    if (!confirm('确定删除该文件夹及其下所有仪表板?')) return
-    try {
-      await api.deleteFolder(id)
-      loadFolders()
-    } catch (e: any) { alert('删除失败: ' + e.message) }
+    } catch (e: any) { message.error('创建文件夹失败: ' + e.message) }
   }
 
   const handleCreateDashboard = async () => {
@@ -204,27 +203,71 @@ export default function BrowsePage() {
       setNewMenuOpen(false)
       loadFolders()
       navigate(`/d/${db.id}/${titleToSlug(db.title)}`)
-    } catch (e: any) { alert('创建仪表板失败: ' + e.message) }
+    } catch (e: any) { message.error('创建仪表板失败: ' + e.message) }
   }
 
   const handleDeleteDashboard = async (id: string) => {
-    if (!confirm('确定删除此仪表板?')) return
-    try {
-      await api.deleteDashboard(id)
-      loadFolders()
-    } catch (e: any) { alert('删除失败: ' + e.message) }
+    Modal.confirm({
+      title: '确认删除',
+      content: '确定删除此仪表板？',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.deleteDashboard(id)
+          message.success('删除成功')
+          loadFolders()
+        } catch (e: any) { message.error('删除失败: ' + e.message) }
+      },
+    })
   }
 
   const handleBatchDelete = async () => {
-    if (selectedDashboards.size === 0) return
-    if (!confirm(`确定删除选中的 ${selectedDashboards.size} 个仪表板?`)) return
-    try {
-      const ids = Array.from(selectedDashboards)
-      await Promise.all(ids.map((id) => api.deleteDashboard(id)))
-      setSelectedDashboards(new Set())
-      setSelectedFolders(new Set())
-      loadFolders()
-    } catch (e: any) { alert('删除失败: ' + e.message) }
+    if (selectedFolders.size === 0 && selectedDashboards.size === 0) return
+
+    const folderCount = selectedFolders.size
+    const dashboardCount = selectedDashboards.size
+    let content = ''
+    if (folderCount > 0 && dashboardCount > 0) {
+      content = `确定删除选中的 ${folderCount} 个文件夹和 ${dashboardCount} 个仪表板？`
+    } else if (folderCount > 0) {
+      content = `确定删除选中的 ${folderCount} 个文件夹？`
+    } else {
+      content = `确定删除选中的 ${dashboardCount} 个仪表板？`
+    }
+
+    Modal.confirm({
+      title: '确认删除',
+      content,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          // 删除选中的文件夹（会自动删除关联的仪表板）
+          const folderIds = Array.from(selectedFolders)
+          for (const id of folderIds) {
+            await api.deleteFolder(id)
+          }
+          // 删除选中的仪表板
+          const dashboardIds = Array.from(selectedDashboards)
+          for (const id of dashboardIds) {
+            // 只删除不属于已删除文件夹的仪表板
+            const belongsToDeletedFolder = folders.some((f) =>
+              selectedFolders.has(f.id) && f.dashboards?.some((d) => d.id === id)
+            )
+            if (!belongsToDeletedFolder) {
+              await api.deleteDashboard(id)
+            }
+          }
+          message.success('删除成功')
+          setSelectedFolders(new Set())
+          setSelectedDashboards(new Set())
+          loadFolders()
+        } catch (e: any) { message.error('删除失败: ' + e.message) }
+      },
+    })
   }
 
   const handleOpenMoveModal = () => {
@@ -248,7 +291,7 @@ export default function BrowsePage() {
       setSelectedFolders(new Set())
       setShowMoveModal(false)
       loadFolders()
-    } catch (e: any) { alert('移动失败: ' + e.message) }
+    } catch (e: any) { message.error('移动失败: ' + e.message) }
     finally { setMoving(false) }
   }
 
@@ -258,7 +301,7 @@ export default function BrowsePage() {
       setEditingDashboard(db)
       setJsonEditText(JSON.stringify(db.dashboard_json, null, 2))
       setShowJsonEdit(true)
-    } catch (e: any) { alert('加载仪表板失败: ' + e.message) }
+    } catch (e: any) { message.error('加载仪表板失败: ' + e.message) }
   }
 
   const handleSaveDashboardJson = async () => {
@@ -267,27 +310,174 @@ export default function BrowsePage() {
       const newJson = JSON.parse(jsonEditText)
       await api.updateDashboard(editingDashboard.id, editingDashboard.title, editingDashboard.folder_id, newJson)
       setShowJsonEdit(false)
+      message.success('保存成功')
       loadFolders()
-    } catch (e: any) { alert('保存失败: ' + e.message) }
+    } catch (e: any) { message.error('保存失败: ' + e.message) }
   }
 
   const allDashboards = folders.flatMap((f) =>
     (f.dashboards || []).map((d) => ({ ...d, folderTitle: f.title, folderId: f.id }))
   )
-  const filteredDashboards = searchText
-    ? allDashboards.filter((d) => d.title.toLowerCase().includes(searchText.toLowerCase()))
-    : []
+
+  // 构建搜索结果数据（用于 Table 显示）
+  const searchResults = searchText ? folders.flatMap((folder) => {
+    const items: any[] = []
+    // 如果文件夹标题匹配，添加文件夹项
+    if (folder.title.toLowerCase().includes(searchText.toLowerCase())) {
+      items.push({
+        key: `folder-${folder.id}`,
+        id: folder.id,
+        name: folder.title,
+        type: '文件夹',
+        location: '',
+        itemType: 'folder',
+        data: folder,
+      })
+    }
+    // 添加匹配的仪表板项
+    folder.dashboards?.forEach((db) => {
+      if (db.title.toLowerCase().includes(searchText.toLowerCase())) {
+        items.push({
+          key: `dashboard-${db.id}`,
+          id: db.id,
+          name: db.title,
+          type: '仪表板',
+          location: folder.title,
+          itemType: 'dashboard',
+          data: db,
+          folderId: folder.id,
+        })
+      }
+    })
+    return items
+  }) : []
+
+  // 表格列定义
+  const searchColumns: ColumnsType<any> = [
+    {
+      title: '名称',
+      dataIndex: 'name',
+      key: 'name',
+      render: (text: string, record: any) => {
+        if (record.itemType === 'folder') {
+          return (
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+              onClick={() => {
+                // 点击文件夹：清空搜索，调用接口获取文件夹完整内容
+                setSearchText('')
+                // 调用 getFolder 接口获取文件夹的完整内容
+                api.getFolder(record.id).then((folderRes) => {
+                  console.log('getFolder 返回数据:', folderRes) // 调试日志
+                  setCurrentFolder(folderRes)
+                }).catch((err) => {
+                  console.error('获取文件夹内容失败:', err)
+                  message.error('获取文件夹内容失败')
+                })
+              }}
+            >
+              <span>{SVG_ICONS.folder}</span>
+              <span className="item-title" style={{ color: '#1890ff' }}>{text}</span>
+            </div>
+          )
+        }
+        return (
+          <Link to={`/d/${record.id}/${titleToSlug(text)}`} className="item-title-link">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>{SVG_ICONS.dash}</span>
+              <span>{text}</span>
+            </div>
+          </Link>
+        )
+      },
+    },
+    {
+      title: '类型',
+      dataIndex: 'type',
+      key: 'type',
+      width: 100,
+    },
+    {
+      title: '位置',
+      dataIndex: 'location',
+      key: 'location',
+      render: (text: string) => text || '-',
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 150,
+      render: (_: any, record: any) => {
+        if (record.itemType === 'dashboard') {
+          return (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn-sm"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleEditDashboardJson(record.id)
+                }}
+              >
+                编辑
+              </button>
+              <button
+                className="btn-sm btn-danger-text"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleDeleteDashboard(record.id)
+                }}
+              >
+                删除
+              </button>
+            </div>
+          )
+        }
+        return null
+      },
+    },
+  ]
 
   if (loading) return <div className="browse-page"><div className="empty-state">加载中...</div></div>
 
   return (
     <div className="browse-page">
       <div className="browse-list-header">
-        <h1 className="browse-title">仪表板</h1>
+        <h1 className="browse-title">
+          {/* 面包屑导航 */}
+          <span
+            style={{ cursor: currentFolder ? 'pointer' : 'default', color: currentFolder ? '#1890ff' : 'inherit' }}
+            onClick={() => {
+              if (currentFolder) {
+                setCurrentFolder(null)
+                setSearchText('')
+                loadFolders() // 重新加载所有数据
+              }
+            }}
+          >
+            仪表板
+          </span>
+          {currentFolder && (
+            <>
+              <span style={{ margin: '0 8px', color: '#999' }}>/</span>
+              <span style={{ color: '#333' }}>{currentFolder.title}</span>
+            </>
+          )}
+        </h1>
       </div>
 
       <div className="browse-toolbar">
         <div className="toolbar-left">
+          <Input.Search
+            placeholder="搜索仪表板"
+            allowClear
+            value={searchText}
+            onChange={(e) => {
+              setSearchText(e.target.value)
+              setCurrentFolder(null) // 搜索时清空当前文件夹
+              loadFolders(e.target.value)
+            }}
+            style={{ width: 280, marginRight: 16 }}
+          />
           <button className="btn-sm btn-toolbar" disabled={totalSelected === 0} onClick={handleOpenMoveModal}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M5 9l4-4 4 4" />
@@ -476,34 +666,82 @@ export default function BrowsePage() {
       )}
 
       {searchText && (
-        <div>
-          {filteredDashboards.length === 0 ? (
-            <div className="empty-state">未找到匹配的仪表板</div>
-          ) : (
-            <div className="dashboard-list-view">
-              {filteredDashboards.map((db) => (
-                <div key={db.id} className="list-item dashboard-item">
-                  <input
-                    type="checkbox"
-                    checked={selectedDashboards.has(db.id)}
-                    onChange={(e) => handleSelectDashboard(db.id, e.target.checked, db.folderId)}
-                  />
-                  <span className="item-icon">{SVG_ICONS.dash}</span>
-                  <Link
-                    to={`/d/${db.id}/${titleToSlug(db.title)}`}
-                    className="item-title-link"
-                  >
-                    {db.title}
-                  </Link>
-                  <span className="item-folder">{db.folderTitle}</span>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="search-results-container">
+          <Table
+            columns={searchColumns}
+            dataSource={searchResults}
+            pagination={false}
+            locale={{ emptyText: '未找到匹配的结果' }}
+            size="small"
+          />
         </div>
       )}
 
-      {!searchText && groups.map((group) => {
+      {/* 显示当前文件夹内容 */}
+      {!searchText && currentFolder && (
+        <div className="search-results-container">
+          <Table
+            columns={[
+              {
+                title: '名称',
+                dataIndex: 'title',
+                key: 'title',
+                render: (text: string, record: any) => (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span>{SVG_ICONS.dashboard}</span>
+                    <Link to={`/d/${record.id}/${titleToSlug(text)}`} className="item-title-link">
+                      {text}
+                    </Link>
+                  </div>
+                ),
+              },
+              {
+                title: '类型',
+                dataIndex: 'type',
+                key: 'type',
+                render: () => '仪表板',
+              },
+              {
+                title: '位置',
+                dataIndex: 'location',
+                key: 'location',
+                render: () => currentFolder.title,
+              },
+              {
+                title: '操作',
+                key: 'actions',
+                render: (_: any, record: any) => (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn-sm" onClick={(e) => { e.stopPropagation(); handleEditDashboardJson(record.id) }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="16 18 22 12 16 6" />
+                        <polyline points="8 6 2 12 8 18" />
+                      </svg>
+                      编辑JSON
+                    </button>
+                    <button className="btn-sm btn-danger-text" onClick={(e) => { e.stopPropagation(); handleDeleteDashboard(record.id) }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                      删除
+                    </button>
+                  </div>
+                ),
+              },
+            ]}
+            dataSource={currentFolder.dashboards?.map((db) => ({
+              ...db,
+              key: db.id,
+            })) || []}
+            pagination={false}
+            rowKey="id"
+          />
+        </div>
+      )}
+
+      {/* 显示全部仪表板列表 */}
+      {!searchText && !currentFolder && groups.map((group) => {
         const isGroupExpanded = expandedGroups.has(group.id)
         const count = getTotalDashboardCount(group.folders)
         return (

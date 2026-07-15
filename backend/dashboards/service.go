@@ -211,13 +211,16 @@ func (s *Server) GetDashboard(ctx *gin.Context, req *DashboardReq) (*DashboardRe
 // CreateDashboard 创建新仪表板，同时存储 dashboard_json 完整定义。
 // 也会将 dashboard_json 中的面板同步写入 panels 表，保证双存储一致性。
 func (s *Server) CreateDashboard(ctx *gin.Context, req *DashboardReq) (*DashboardRes, error) {
+	// 确保 dashboard_json.title 与用户输入的标题一致
+	if req.DashboardJSON == nil {
+		req.DashboardJSON = model.JSONMap{}
+	}
+	req.DashboardJSON["title"] = req.Title
+
 	record := &model.Dashboard{
 		Title:         req.Title,
 		FolderID:      req.FolderID,
 		DashboardJSON: req.DashboardJSON,
-	}
-	if record.DashboardJSON == nil {
-		record.DashboardJSON = model.JSONMap{}
 	}
 	record.ID = generateDBID()
 	if err := s.db.Create(record).Error; err != nil {
