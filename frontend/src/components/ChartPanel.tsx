@@ -23,7 +23,7 @@ interface TimeFormatConfig {
 /**
  * 根据时间范围和数据点数量确定时间格式和刻度间隔（参考 Grafana）
  */
-function getTimeFormatConfig(rangeMs: number, dataPoints: number): TimeFormatConfig {
+function getTimeFormatConfig(rangeMs: number, _dataPoints: number): TimeFormatConfig {
   const SECOND = 1000
   const MINUTE = 60 * SECOND
   const HOUR = 60 * MINUTE
@@ -164,7 +164,7 @@ function isDateColumn(colName: string): boolean {
   return kl.includes('date') || kl.includes('time') || kl.includes('日期') || kl.includes('时间') || kl === 'day'
 }
 
-function detectColumns(rows: MetricRow[], chartType?: string): { nameCol: string | null; valueCols: string[] } {
+function detectColumns(rows: MetricRow[], _chartType?: string): { nameCol: string | null; valueCols: string[] } {
   if (rows.length === 0) return { nameCol: null, valueCols: [] }
   const keys = Object.keys(rows[0])
   let nameCol: string | null = null
@@ -222,7 +222,7 @@ function shortName(name: string): string {
 // 冷色调配色方案，避免红色/黄色引发告警误解
 const SERIES_COLORS = ['#5470c6', '#73c0de', '#91cc75', '#55bd6a', '#b877d9', '#9a60b4', '#3ba272', '#5b8ff9']
 
-export default memo(function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, panelKey, columns, dataLinks }: ChartPanelProps) {
+export default memo(function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, columns, dataLinks }: ChartPanelProps) {
   const chartRef = useRef<HTMLDivElement>(null)
   const chartInstanceRef = useRef<echarts.ECharts | null>(null)
   const [chartError, setChartError] = useState<string | null>(null)
@@ -361,7 +361,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
           // 构建 series 索引 → valueCol 映射，供 tooltip 告警检查
           const seriesColMap: Map<number, string> = new Map()
           let seriesIdx = 0
-          data.forEach((targetRows, ti) => {
+          data.forEach((targetRows, _ti) => {
             const { valueCols: tValCols } = detectColumns(targetRows, type)
             tValCols.forEach((col) => {
               seriesColMap.set(seriesIdx, col)
@@ -430,7 +430,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
                 return `<div style="font-weight:600;color:#4e5969;margin-bottom:6px">${params[0].axisValueLabel}</div>${parts.join('')}`
               },
             },
-            legend: (isMultiTarget || valueCols.length > 1 || data.some((r, i) => (targets[i]?.metricName || '').length > 0))
+            legend: (isMultiTarget || valueCols.length > 1 || data.some((_r, i) => (targets[i]?.metricName || '').length > 0))
               ? {
                   data: legendData,
                   bottom: 0,

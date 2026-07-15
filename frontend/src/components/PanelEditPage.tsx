@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import type { ReactNode } from 'react'
 import { Modal, message } from 'antd'
 import ChartPanel from './ChartPanel'
 import QueryInspector from './QueryInspector'
@@ -35,7 +36,7 @@ const refLabels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 /* ── 可折叠分区组件 ── */
 function Section({ title, defaultOpen = true, children, badge }: {
-  title: string; defaultOpen?: boolean; children: React.ReactNode; badge?: string
+  title: string; defaultOpen?: boolean; children: ReactNode; badge?: string
 }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
@@ -1407,7 +1408,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                     <div className="pe-hint-text" style={{ marginTop: 4, marginLeft: 0 }}>
                       同一列中连续相同的值自动合并为一个单元格（类似 Excel 合并）。
                     </div>
-                    {p.options?.enableCellMerge && (
+                    {Boolean(p.options?.enableCellMerge) && (
                       <div style={{ marginTop: 8 }}>
                         <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, display: 'block' }}>选择合并列</label>
                         {liveColumns.length > 0 ? (
@@ -1638,7 +1639,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                         ? '当单元格数值满足条件时，以指定颜色高亮显示。'
                         : '当数据点数值满足条件时，以指定颜色高亮对应区域。'}
                     </div>
-                    {p.options?.enableCellAlert && (
+                    {Boolean(p.options?.enableCellAlert) && (
                       <div style={{ marginTop: 10 }}>
                         {/* 模式选择 */}
                         <div style={{ marginBottom: 8 }}>

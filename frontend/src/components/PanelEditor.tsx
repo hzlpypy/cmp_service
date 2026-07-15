@@ -222,7 +222,7 @@ export default function PanelEditor({ panel, datasources, dashboardId, draftJson
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                 同一列中连续相同的值自动合并（类似 Excel 合并单元格）。
               </div>
-              {p.options?.enableCellMerge && (
+              {Boolean(p.options?.enableCellMerge) && (
                 <div style={{ marginTop: 8 }}>
                   <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>合并列名（逗号分隔）</label>
                   <input

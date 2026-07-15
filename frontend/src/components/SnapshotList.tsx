@@ -8,6 +8,9 @@ import {
   Typography,
   Tooltip,
   Modal,
+  Input,
+  Select,
+  DatePicker,
 } from 'antd'
 import {
   ReloadOutlined,
@@ -18,14 +21,29 @@ import {
   AppstoreOutlined,
   CalendarOutlined,
   LinkOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
 import * as api from '../api'
+import dayjs from 'dayjs'
 
 const { Text, Title } = Typography
+const { RangePicker } = DatePicker
 
 export default function SnapshotList() {
   const [snaps, setSnaps] = useState<api.SnapshotRes[]>([])
   const [loading, setLoading] = useState(true)
+  
+  // 搜索条件（输入状态）
+  const [inputName, setInputName] = useState('')
+  const [inputDashboard, setInputDashboard] = useState('')
+  const [inputDateRange, setInputDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null)
+  const [inputType, setInputType] = useState<string>('')
+  
+  // 实际搜索条件（触发搜索后的状态）
+  const [searchName, setSearchName] = useState('')
+  const [searchDashboard, setSearchDashboard] = useState('')
+  const [searchDateRange, setSearchDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null)
+  const [searchType, setSearchType] = useState<string>('')
 
   const load = async () => {
     setLoading(true)
@@ -41,6 +59,70 @@ export default function SnapshotList() {
   useEffect(() => {
     load()
   }, [])
+
+  // 触发搜索
+  const handleSearch = () => {
+    setSearchName(inputName)
+    setSearchDashboard(inputDashboard)
+    setSearchDateRange(inputDateRange)
+    setSearchType(inputType)
+  }
+
+  // 清空搜索
+  const handleClearSearch = () => {
+    setInputName('')
+    setInputDashboard('')
+    setInputDateRange(null)
+    setInputType('')
+    setSearchName('')
+    setSearchDashboard('')
+    setSearchDateRange(null)
+    setSearchType('')
+  }
+
+  // 回车键触发搜索
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSearch()
+    }
+  }
+
+  // 搜索过滤逻辑
+  const filteredSnaps = snaps.filter((snap) => {
+    const isDashboard = !snap.panel_id
+
+    // 名称搜索
+    if (searchName.trim()) {
+      const name = (snap.name || '未命名快照').toLowerCase()
+      if (!name.includes(searchName.toLowerCase())) return false
+    }
+
+    // 所属仪表板搜索
+    if (searchDashboard.trim()) {
+      const dashboardTitle = (snap.dashboard_title || '未知仪表板').toLowerCase()
+      if (!dashboardTitle.includes(searchDashboard.toLowerCase())) return false
+    }
+
+    // 类型搜索
+    if (searchType) {
+      const type = isDashboard ? 'dashboard' : 'panel'
+      if (type !== searchType) return false
+    }
+
+    // 时间范围搜索
+    if (searchDateRange && searchDateRange[0] && searchDateRange[1]) {
+      if (snap.created_at) {
+        const createdTime = dayjs(snap.created_at)
+        if (createdTime.isBefore(searchDateRange[0]) || createdTime.isAfter(searchDateRange[1])) {
+          return false
+        }
+      } else {
+        return false
+      }
+    }
+
+    return true
+  })
 
   const shareLink = `${window.location.origin}/snapshot/`
 
@@ -80,21 +162,69 @@ export default function SnapshotList() {
         </Button>
       </div>
 
+      {/* 搜索栏 */}
+      <div className="snap-search-bar">
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Input
+            placeholder="搜索名称..."
+            prefix={<SearchOutlined style={{ color: '#86909c' }} />}
+            value={inputName}
+            onChange={(e) => setInputName(e.target.value)}
+            onKeyDown={handleKeyPress}
+            style={{ width: 200 }}
+            allowClear
+          />
+          <Input
+            placeholder="搜索所属仪表板..."
+            prefix={<DashboardOutlined style={{ color: '#86909c' }} />}
+            value={inputDashboard}
+            onChange={(e) => setInputDashboard(e.target.value)}
+            onKeyDown={handleKeyPress}
+            style={{ width: 200 }}
+            allowClear
+          />
+          <RangePicker
+            placeholder={['开始时间', '结束时间']}
+            value={inputDateRange as [dayjs.Dayjs, dayjs.Dayjs] | null}
+            onChange={(dates) => setInputDateRange(dates)}
+            style={{ width: 280 }}
+          />
+          <Select
+            placeholder="选择类型"
+            value={inputType || undefined}
+            onChange={(value) => setInputType(value || '')}
+            style={{ width: 140 }}
+            allowClear
+            options={[
+              { label: '仪表板', value: 'dashboard' },
+              { label: '单面板', value: 'panel' },
+            ]}
+          />
+          <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
+            搜索
+          </Button>
+          <Button onClick={handleClearSearch}>清空</Button>
+        </div>
+      </div>
+
       {/* 列表 */}
       <Spin spinning={loading}>
         <div className="snap-list">
-          {snaps.length === 0 ? (
+          {filteredSnaps.length === 0 ? (
             <div className="snap-empty">
-              <Text style={{ color: '#86909c', fontSize: 14 }}>暂无快照</Text>
-              <Text style={{ color: '#86909c', fontSize: 12, marginTop: 8 }}>
-                在仪表板编辑面板中切换到「共享」Tab 创建快照
+              <Text style={{ color: '#86909c', fontSize: 14 }}>
+                {searchName || searchDashboard || searchType || searchDateRange ? '没有匹配的快照' : '暂无快照'}
               </Text>
+              {!searchName && !searchDashboard && !searchType && !searchDateRange && (
+                <Text style={{ color: '#86909c', fontSize: 12, marginTop: 8 }}>
+                  在仪表板编辑面板中切换到「共享」Tab 创建快照
+                </Text>
+              )}
             </div>
           ) : (
-            snaps.map((snap) => {
+            filteredSnaps.map((snap) => {
               const isDashboard = !snap.panel_id
-              const dj = snap.dashboard_json || {}
-              const panels = dj.panels || []
+              const panels = snap.dashboard_json?.panels || []
               const panel = panels.find((p: any) => p.id === snap.panel_id)
 
               return (

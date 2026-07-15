@@ -191,16 +191,17 @@ export interface PanelDataRes {
 }
 
 export interface MetricRow {
-  id: string
-  created_at: string
-  metric_category: string
-  metric_name: string
-  node_type: string
-  current_value: string
-  historical_peak: string
-  mom_change: string
-  yoy_change: string
-  unit: string
+  id?: string
+  created_at?: string
+  metric_category?: string
+  metric_name?: string
+  node_type?: string
+  current_value?: string
+  historical_peak?: string
+  mom_change?: string
+  yoy_change?: string
+  unit?: string
+  [key: string]: any  // 索引签名，支持动态列访问
 }
 
 // ---- Folders API ----
@@ -306,6 +307,7 @@ export async function testDatasource(data: { id?: string; name?: string; type?: 
 export interface SnapshotRes {
   id: string
   dashboard_id: string
+  dashboard_title?: string  // 仪表板标题
   panel_id: string
   snapshot_key: string
   name: string

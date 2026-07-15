@@ -302,7 +302,7 @@ function buildDataSummary(panelsData: any[], panelsConfig: any[]): string {
   const summaries: string[] = []
   panelsData.slice(0, 8).forEach((p, idx) => {
     if (!p.data || p.data.length === 0) return
-    const config = panelsConfig.find((c: any) => c.id === p.id)
+    const config = panelsConfig.find((c) => c.id === p.id)
     const title = config?.title || p.title || `报表${idx + 1}`
     const type = p.type || config?.type || 'table'
     if (type === 'table') {
@@ -338,7 +338,7 @@ interface AIInsightsPanelProps {
   showPlan?: boolean
 }
 
-export function AIInsightsPanel({ dashboardId, dashboardTitle, panelsData, panelsConfig, trigger, editable = false, initialData, onDataChange, showPlan = false }: AIInsightsPanelProps) {
+export function AIInsightsPanel({ dashboardTitle, panelsData, panelsConfig, trigger, initialData, onDataChange, showPlan = false }: AIInsightsPanelProps) {
   const [contents, setContents] = useState({ score: initialData?.score ?? 75, conclusion: initialData?.conclusion ?? '', risks: initialData?.risks ?? [] as string[], evaluation: initialData?.evaluation ?? '', plan: initialData?.plan ?? '' })
   const [loading, setLoading] = useState({ score: !initialData?.conclusion, risks: false, evaluation: false, plan: false })
   const [isEditing, setIsEditing] = useState({ risk: false, plan: false })
@@ -356,7 +356,7 @@ export function AIInsightsPanel({ dashboardId, dashboardTitle, panelsData, panel
   useEffect(() => { onDataChange?.(contents) }, [contents, onDataChange])
 
   useEffect(() => {
-    if (initialData && initialData.conclusion && initialData.risks?.length > 0) return
+    if (initialData && initialData.conclusion && initialData.risks && initialData.risks.length > 0) return
     if (startedRef.current) return
     startedRef.current = true
     startGeneration()
