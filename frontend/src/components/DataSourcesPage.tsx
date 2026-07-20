@@ -193,10 +193,11 @@ export default function DataSourcesPage() {
   )
 
   const getDataSourceIcon = (type: string) => {
-    if (type === 'mysql') {
-      return <DatabaseOutlined style={{ fontSize: 18, color: '#e53935' }} />
-    }
-    return <ApiOutlined style={{ fontSize: 18, color: '#3871dc' }} />
+    return type === 'mysql' ? (
+      <DatabaseOutlined style={{ fontSize: 18, color: '#e53935' }} />
+    ) : (
+      <ApiOutlined style={{ fontSize: 18, color: '#3871dc' }} />
+    )
   }
 
   return (

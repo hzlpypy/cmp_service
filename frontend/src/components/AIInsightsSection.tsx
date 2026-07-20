@@ -52,7 +52,7 @@ function extractScore(content: string): number {
 function extractShortSummary(content: string): string[] {
   if (!content) return []
   const bullets = extractBullets(content)
-  if (bullets.length > 0) return bullets.slice(0, 2)
+  if (bullets.length > 0) return bullets
   const sentences = content.split(/[。.!?！？\n]/).map(s => s.trim()).filter(s => s && s.length > 3)
   const filtered = sentences.filter(s => !/^(分析|以下|以上|综上|总结|数据显示|从)/.test(s))
   return filtered.slice(0, 2)
@@ -284,20 +284,6 @@ function deepExtractValue(v: any, depth: number = 0): string {
   return String(v).substring(0, 30)
 }
 
-function formatRow(row: any, maxCols: number = 6): string[] {
-  if (!row) return []
-  const result: string[] = []
-  if (Array.isArray(row)) {
-    row.slice(0, maxCols).forEach((item: any) => { const val = deepExtractValue(item); if (val) result.push(val) })
-    return result
-  }
-  if (typeof row === 'object') {
-    Object.values(row).slice(0, maxCols).forEach((v: any) => { const val = deepExtractValue(v); if (val) result.push(val) })
-    return result
-  }
-  return [String(row).substring(0, 30)]
-}
-
 function buildDataSummary(panelsData: any[], panelsConfig: any[]): string {
   const summaries: string[] = []
   panelsData.slice(0, 8).forEach((p, idx) => {
@@ -305,18 +291,70 @@ function buildDataSummary(panelsData: any[], panelsConfig: any[]): string {
     const config = panelsConfig.find((c) => c.id === p.id)
     const title = config?.title || p.title || `报表${idx + 1}`
     const type = p.type || config?.type || 'table'
-    if (type === 'table') {
-      let columns: string[] = []
-      if (p.columns && Array.isArray(p.columns)) columns = p.columns.map((c: any) => deepExtractValue(c))
-      const rows = p.data.slice(0, 5)
-      let tableInfo = `【${title}】表格:\n`
-      if (columns.length > 0) tableInfo += `列: ${columns.join(', ')}\n`
-      if (rows.length > 0) { tableInfo += '数据:\n'; rows.forEach((row: any, i: number) => { const rowData = formatRow(row, 6); if (rowData.length > 0) tableInfo += `  第${i + 1}行: ${rowData.join(' | ')}\n` }) }
-      summaries.push(tableInfo)
-    } else if (type === 'gauge' || type === 'line' || type === 'bar' || type === 'pie') {
+
+    // 将 data（可能是二维数组 MetricRow[][]）展平为一维行数组
+    let allRows: any[] = []
+    if (Array.isArray(p.data)) {
+      // 检查是否为嵌套数组 (MetricRow[][])
+      if (p.data.length > 0 && Array.isArray(p.data[0])) {
+        // 二维数组：合并所有 target 的行
+        for (const targetRows of p.data) {
+          if (Array.isArray(targetRows)) {
+            allRows = allRows.concat(targetRows)
+          }
+        }
+      } else {
+        allRows = p.data
+      }
+    }
+
+    if (allRows.length === 0) return
+
+    // 获取列名
+    let columns: string[] = []
+    if (p.columns && Array.isArray(p.columns)) {
+      columns = p.columns.map((c: any) => deepExtractValue(c))
+    } else if (allRows.length > 0 && typeof allRows[0] === 'object' && !Array.isArray(allRows[0])) {
+      columns = Object.keys(allRows[0])
+    }
+
+    if (type === 'gauge') {
+      // 仪表板：取最后一行所有数值
       const nums: number[] = []
-      p.data.forEach((row: any) => { if (Array.isArray(row)) row.forEach((v: any) => { const val = deepExtractValue(v); const num = parseFloat(val); if (!isNaN(num)) nums.push(num) }); else { const val = deepExtractValue(row); const num = parseFloat(val); if (!isNaN(num)) nums.push(num) } })
-      if (nums.length > 0) { if (type === 'gauge') { summaries.push(`【${title}】仪表板: 当前值=${nums[nums.length - 1].toFixed(2)}`) } else { const recent = nums.slice(-5).map((v: number) => v.toFixed(2)).join(', '); summaries.push(`【${title}】图表: 最近值=[${recent}], 最小=${Math.min(...nums).toFixed(2)}, 最大=${Math.max(...nums).toFixed(2)}, 平均=${(nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2)}`) } }
+      const lastRow = allRows[allRows.length - 1]
+      if (lastRow && typeof lastRow === 'object' && !Array.isArray(lastRow)) {
+        Object.values(lastRow).forEach((v: any) => {
+          const num = parseFloat(deepExtractValue(v))
+          if (!isNaN(num)) nums.push(num)
+        })
+      }
+      if (nums.length > 0) {
+        summaries.push(`【${title}】仪表板: 值=${nums.map((v) => v.toFixed(2)).join(', ')}`)
+      }
+    } else {
+      // 表格和图表：输出列名 + 前20行数据
+      let tableInfo = `【${title}】(共${allRows.length}行)\n`
+      if (columns.length > 0) {
+        tableInfo += `列(${columns.length}列): ${columns.slice(0, 10).join(', ')}\n`
+      }
+      const sampleRows = allRows.slice(0, 50)
+      if (sampleRows.length > 0) {
+        tableInfo += '数据行:\n'
+        sampleRows.forEach((row: any, i: number) => {
+          if (typeof row === 'object' && !Array.isArray(row)) {
+            // 键值对格式
+            const keyVals = columns.slice(0, 8).map((col) => {
+              const val = row[col]
+              return `${col}=${deepExtractValue(val)}`
+            }).join(', ')
+            if (keyVals) tableInfo += `  ${keyVals}\n`
+          } else if (Array.isArray(row)) {
+            const vals = row.slice(0, 8).map((v: any) => deepExtractValue(v)).join(' | ')
+            if (vals) tableInfo += `  第${i + 1}行: ${vals}\n`
+          }
+        })
+      }
+      summaries.push(tableInfo)
     }
   })
   return summaries.join('\n\n')
@@ -368,7 +406,21 @@ export function AIInsightsPanel({ dashboardTitle, panelsData, panelsConfig, trig
     setContents({ score: 75, conclusion: '', risks: [], evaluation: '', plan: '' })
     const dataSummary = buildDataSummary(panelsData, panelsConfig)
     
-    const scorePrompt = `你是运维监控专家。分析以下仪表板数据，给出健康度评分和结论：\n仪表板名称: "${dashboardTitle}"\n报表数据:\n${dataSummary}\n请分析每个报表的数据，综合评估系统健康度：\n严格按以下格式输出：\n分数:XX\n- 基于数据分析得出的结论\n规则：\n- 分数范围0-100\n- 结论要具体\n- 不要其他任何文字`
+    const scorePrompt = [
+      '你是运维监控专家。分析以下仪表板数据，给出健康度评分和结论：',
+      `仪表板名称: "${dashboardTitle}"`,
+      `报表数据:\n${dataSummary}`,
+      '请分析每个报表的数据，综合评估系统健康度：',
+      '严格按以下格式输出：',
+      '分数:XX',
+      '- 结论要点',
+      '- 扣分项：简要列出扣分原因',
+      '规则：',
+      '- 分数范围0-100',
+      '- 结论要具体',
+      '- 扣分项要简洁明了',
+      '- 不要其他任何文字',
+    ].join('\n')
     const conclusionResult = await generateSingle(scorePrompt)
     const score = extractScore(conclusionResult)
     const summary = extractShortSummary(conclusionResult)
@@ -377,7 +429,21 @@ export function AIInsightsPanel({ dashboardTitle, panelsData, panelsConfig, trig
     
     await new Promise(r => setTimeout(r, 1000))
     
-    const risksPrompt = `你是运维监控专家。分析以下仪表板数据，识别关键风险：\n仪表板名称: "${dashboardTitle}"\n报表数据:\n${dataSummary}\n请分析每个报表的数据，识别具体风险：\n严格按以下格式输出风险要点：\n- 具体风险点（指出哪个报表、什么问题）\n规则：\n- 只输出 "- "开头的要点行\n- 每条风险要具体\n- 最多输出3-5条`
+    const risksPrompt = [
+      '你是运维监控专家。分析以下仪表板数据，识别关键风险：',
+      `仪表板名称: "${dashboardTitle}"`,
+      `健康度评分: ${score}分`,
+      `已有结论: ${summary.join('；')}`,
+      `报表数据:\n${dataSummary}`,
+      '请基于数据识别真正的风险点：',
+      '严格按以下格式输出风险要点：',
+      '- 具体风险点（指出哪个报表、什么问题）',
+      '规则：',
+      '- 只输出 "- "开头的要点行',
+      '- 每条风险要具体、有数据支撑',
+      '- 如果系统健康无明显风险，输出 "- 无明显风险" 即可，不要编造风险',
+      '- 有风险时最多3-5条，无风险时只输出1条',
+    ].join('\n')
     const risksResult = await generateSingle(risksPrompt)
     const risks = extractBullets(risksResult).slice(0, 5)
     setContents(prev => ({ ...prev, risks }))

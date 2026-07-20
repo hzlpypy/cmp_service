@@ -44,8 +44,22 @@ export default function GridLayout({
       }
     }
     updateWidth()
+    
+    // 使用 ResizeObserver 监听容器尺寸变化（包括 AI 对话框打开/关闭）
+    const resizeObserver = new ResizeObserver(() => {
+      updateWidth()
+    })
+    
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current)
+    }
+    
     window.addEventListener('resize', updateWidth)
-    return () => window.removeEventListener('resize', updateWidth)
+    
+    return () => {
+      resizeObserver.disconnect()
+      window.removeEventListener('resize', updateWidth)
+    }
   }, [])
 
   // 计算每个单元格宽度（containerWidth 为 0 时使用估算值）

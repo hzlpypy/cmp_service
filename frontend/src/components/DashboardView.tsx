@@ -96,6 +96,9 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
   // ---- 本地草稿状态：所有编辑操作仅修改此状态，不调 API ----
   const [draftJson, setDraftJson] = useState<any>(null)
+  const draftRef = useRef<any>(null)
+  // 同步 draftJson 到 ref
+  useEffect(() => { draftRef.current = draftJson }, [draftJson])
   // 上次保存时的快照，用于判断有无未保存变更
   const [savedJson, setSavedJson] = useState<any>(null)
   const [saving, setSaving] = useState(false)
@@ -604,6 +607,17 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     }
   }
 
+  // 刷新数据：保留草稿，只重新查询数据
+  const handleRefresh = async () => {
+    // 如果有未保存的草稿，使用草稿重新加载数据
+    if (draftJson && savedJson && JSON.stringify(draftJson) !== JSON.stringify(savedJson)) {
+      await reloadDataWithDraft(draftJson)
+    } else {
+      // 没有草稿或草稿已保存，重新加载仪表板
+      await loadData()
+    }
+  }
+
   // 用指定草稿 JSON 重新加载数据（面板编辑暂存后立即预览效果）
   const reloadDataWithDraft = async (draft: any) => {
     if (!draft) return
@@ -622,6 +636,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, draft as DashboardJSON, varMap)
       setDataRes(dbData)
     } catch (e: any) {
+      console.error('reloadDataWithDraft failed:', e)
       // 静默失败，不影响草稿编辑
     }
   }
@@ -687,6 +702,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     const panelData = dataMap.get(panel.id) || []
     return (
       <ChartPanel
+        key={`${panel.id}-${panel.type}`}
         type={panel.type || 'table'}
         title={panel.title || '未命名'}
         data={panelData}
@@ -1121,7 +1137,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
             </svg>
             添加面板
           </button>
-          <button className="btn-sm" onClick={loadData} title="刷新数据">
+          <button className="btn-sm" onClick={handleRefresh} title="刷新数据">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="23 4 23 10 17 10" />
               <polyline points="1 20 1 14 7 14" />
@@ -1475,6 +1491,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                       flexDirection: 'column',
                     }}>
                       <ChartPanel
+                        key={`${panel.id}-${panel.type}`}
                         type={panel.type || 'table'}
                         title={panel.title || '未命名'}
                         data={panelData}
