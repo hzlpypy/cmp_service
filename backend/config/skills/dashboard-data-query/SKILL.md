@@ -40,7 +40,7 @@ description: "告知智能体如何获取仪表盘相关数据。包括查询面
 **POST /api/v1/panels/data**
 
 ```bash
-curl -s http://127.0.0.1:3011/api/v1/panels/data \
+curl -s http://cmp-service-svc:3011/api/v1/panels/data \
   -H 'Content-Type: application/json' \
   -d '{
     "dashboard_id": "仪表盘ID",
@@ -84,7 +84,7 @@ curl -s http://127.0.0.1:3011/api/v1/panels/data \
 **POST /api/v1/panels/inspect**
 
 ```bash
-curl -s http://127.0.0.1:3011/api/v1/panels/inspect \
+curl -s http://cmp-service-svc:3011/api/v1/panels/inspect \
   -H 'Content-Type: application/json' \
   -d '{
     "datasource_id": "ds-1",
@@ -186,7 +186,7 @@ curl -s http://127.0.0.1:3011/api/v1/panels/inspect \
 
 **配置字段**：
 - `type`: `"mysql"`
-- `url`: 数据库连接地址（如 `127.0.0.1:3306`）
+- `url`: 数据库连接地址（如 `cmp-service-svc:3306`）
 - `name`: 数据源名称
 - `config`: 无特殊配置
 
@@ -398,7 +398,7 @@ interface VariableRes {
 
 **创建自定义变量**：
 ```bash
-curl -s http://127.0.0.1:3011/api/v1/variables/create \
+curl -s http://cmp-service-svc:3011/api/v1/variables/create \
   -H 'Content-Type: application/json' \
   -d '{
     "dashboard_id": "db-1",
@@ -416,7 +416,7 @@ curl -s http://127.0.0.1:3011/api/v1/variables/create \
 
 **创建查询变量**：
 ```bash
-curl -s http://127.0.0.1:3011/api/v1/variables/create \
+curl -s http://cmp-service-svc:3011/api/v1/variables/create \
   -H 'Content-Type: application/json' \
   -d '{
     "dashboard_id": "db-1",
@@ -464,7 +464,7 @@ curl -s http://127.0.0.1:3011/api/v1/variables/create \
 文件保存在后端运行目录下的 `./client_files/` 文件夹中。
 
 ```bash
-curl -X POST http://127.0.0.1:3011/api/v1/file/upload \
+curl -X POST http://cmp-service-svc:3011/api/v1/file/upload \
   -F "file=@/path/to/document.pdf"
 ```
 
@@ -475,7 +475,7 @@ curl -X POST http://127.0.0.1:3011/api/v1/file/upload \
 用于获取系统中所有可用的数据源。
 
 ```bash
-curl -s http://127.0.0.1:3011/api/v1/datasources/list \
+curl -s http://cmp-service-svc:3011/api/v1/datasources/list \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```

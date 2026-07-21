@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 
-const WS_URL = 'ws://127.0.0.1:8764'
+const WS_URL = 'ws://cmp-llm-svc:8764'
 
 interface AIInsightsProps {
   dashboardId: string

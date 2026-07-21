@@ -118,7 +118,7 @@ description: "告知智能体如何通过返回结构化 JSON 指令与前端交
   "action": "select_datasource",
   "datasources": [
     {"id": "ds-http-1", "name": "监控API", "type": "http", "url": "http://localhost:9999"},
-    {"id": "ds-1", "name": "网络指标数据库", "type": "mysql", "url": "127.0.0.1:3306"}
+    {"id": "ds-1", "name": "网络指标数据库", "type": "mysql", "url": "cmp-service-svc:3306"}
   ],
   "message": "创建报表需要先确定数据源。请从以下数据源中选择一个："
 }
@@ -128,7 +128,7 @@ description: "告知智能体如何通过返回结构化 JSON 指令与前端交
 
 **仅在无 @ 指定时调用**：
 ```bash
-curl -s http://127.0.0.1:3011/api/v1/datasources/list -H 'Content-Type: application/json' -d '{}'
+curl -s http://cmp-service-svc:3011/api/v1/datasources/list -H 'Content-Type: application/json' -d '{}'
 ```
 
 ### 禁止行为
