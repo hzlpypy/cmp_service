@@ -752,6 +752,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
               targets={p.targets || []}
               options={p.options}
               columns={liveColumns}
+              dataLinks={p.dataLinks}
               menuOpen={false}
               onToggleMenu={() => {}}
               onEdit={() => {}}

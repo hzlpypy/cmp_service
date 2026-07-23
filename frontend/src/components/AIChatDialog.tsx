@@ -98,8 +98,9 @@ function mergePanels(draftJson: any, newPanels: any[]) {
     if (idx >= 0) {
       // 已存在 → 合并更新
       // targets 按 refId 深度合并：AI 只需传要改的字段，保留原有其他字段
+      // 空数组不覆盖（AI 只想改类型时不传 targets）
       let mergedTargets = existingPanels[idx].targets || []
-      if (np.targets && Array.isArray(np.targets)) {
+      if (np.targets && Array.isArray(np.targets) && np.targets.length > 0) {
         mergedTargets = np.targets.map((newT: any) => {
           const existingT = (existingPanels[idx].targets || []).find(
             (t: any) => t.refId === newT.refId
