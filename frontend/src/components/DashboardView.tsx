@@ -597,7 +597,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       const title = db.title || '仪表板'
       const expectedSlug = titleToSlug(title)
       if (!slug || slug !== expectedSlug) {
-        navigate(`/d/${dashboardId}/${expectedSlug}${window.location.search}`, { replace: true })
+        navigate(`/capacity_mgt_platform/d/${dashboardId}/${expectedSlug}${window.location.search}`, { replace: true })
       }
       setSavedJson(dj)
     } catch (e: any) {
@@ -930,7 +930,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       <div style={{ padding: '12px 24px', background: '#fff', borderBottom: '1px solid #f0f0f0' }}>
         <Breadcrumb>
           <Breadcrumb.Item>
-            <Link to="/">
+            <Link to="/capacity_mgt_platform/">
               <HomeOutlined /> 仪表板
             </Link>
           </Breadcrumb.Item>
@@ -939,7 +939,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
               <Link to="/" onClick={(e) => {
                 e.preventDefault()
                 // TODO: 跳转到该文件夹
-                navigate('/')
+                navigate('/capacity_mgt_platform/')
               }}>
                 <FolderOutlined /> {dashboard.folder_name}
               </Link>
@@ -1355,7 +1355,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                           </div>
                         </div>
                         <button className="btn-sm"
-                          onClick={() => window.open(`/snapshot/${snap.snapshot_key}`, '_blank')}
+                          onClick={() => window.open(`/capacity_mgt_platform/snapshot/${snap.snapshot_key}`, '_blank')}
                           style={{ fontSize: 11, whiteSpace: 'nowrap', padding: '4px 10px' }}>
                           查看
                         </button>

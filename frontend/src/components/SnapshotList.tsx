@@ -301,7 +301,7 @@ export default function SnapshotList() {
                         type="text"
                         size="small"
                         icon={<EyeOutlined style={{ color: '#4e5969' }} />}
-                        onClick={() => window.open(`/snapshot/${snap.snapshot_key}`, '_blank')}
+                        onClick={() => window.open(`/capacity_mgt_platform/snapshot/${snap.snapshot_key}`, '_blank')}
                       />
                     </Tooltip>
                     <Tooltip title="复制链接">

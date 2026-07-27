@@ -475,7 +475,7 @@ export default function PanelEditor({ panel, datasources, dashboardId, draftJson
                       </div>
                     </div>
                     <button className="btn-sm"
-                      onClick={() => window.open(`/snapshot/${snap.snapshot_key}`, '_blank')}
+                      onClick={() => window.open(`/capacity_mgt_platform/snapshot/${snap.snapshot_key}`, '_blank')}
                       style={{ fontSize: 11, whiteSpace: 'nowrap', padding: '4px 10px' }}>
                       查看
                     </button>
