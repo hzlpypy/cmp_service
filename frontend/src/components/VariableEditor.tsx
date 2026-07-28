@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Modal, message } from 'antd'
+import { Modal, message, Input, Select as AntSelect } from 'antd'
 import * as api from '../api'
-import type { VariableRes, DatasourceRes } from '../api'
+import type { VariableRes, DatasourceRes, VariableOption } from '../api'
 
 interface VariableEditorProps {
   dashboardId: string
@@ -34,13 +34,21 @@ export default function VariableEditor({ dashboardId }: VariableEditorProps) {
     datasource_id: '',
     default: '',
     multi: false,
-    include_all: false,
-    all_value: '',
+    include_all: true,
+    depends_on: '',
+    auto_refresh: true,
+    hide: false,
     options: [],
   })
 
   // 自定义选项文本
   const [customOptionsText, setCustomOptionsText] = useState('')
+
+  // 查询预览值
+  const [previewValues, setPreviewValues] = useState<VariableOption[]>([])
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewExpanded, setPreviewExpanded] = useState(false)
+  const PREVIEW_LIMIT = 8 // 默认展示的条数
 
   useEffect(() => {
     loadData()
@@ -69,14 +77,45 @@ export default function VariableEditor({ dashboardId }: VariableEditorProps) {
       datasource_id: '',
       default: '',
       multi: false,
-      include_all: false,
-      all_value: '',
+      include_all: true,
+      depends_on: '',
+      auto_refresh: true,
+      hide: false,
       options: [],
     })
     setCustomOptionsText('')
     setEditingId(null)
     setShowForm(false)
+    setPreviewValues([])
+    setPreviewExpanded(false)
   }
+
+  /** 加载变量的查询预览值 */
+  const loadPreviewValues = async () => {
+    if (!editingId || form.type !== 'query') {
+      setPreviewValues([])
+      return
+    }
+    setPreviewLoading(true)
+    try {
+      const values = await api.getVariableValues(editingId, form.query, form.datasource_id)
+      setPreviewValues(values || [])
+    } catch {
+      setPreviewValues([])
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  // 编辑查询类型变量时自动加载预览值
+  useEffect(() => {
+    if (showForm && editingId && form.type === 'query') {
+      loadPreviewValues()
+    } else {
+      setPreviewValues([])
+      setPreviewExpanded(false)
+    }
+  }, [showForm, editingId, form.type])
 
   const handleNew = () => {
     resetForm()
@@ -94,7 +133,9 @@ export default function VariableEditor({ dashboardId }: VariableEditorProps) {
       default: variable.default,
       multi: variable.multi,
       include_all: variable.include_all,
-      all_value: variable.all_value,
+      depends_on: variable.depends_on || '',
+      auto_refresh: variable.auto_refresh !== false,
+      hide: variable.hide || false,
       options: variable.options || [],
     })
     // 解析自定义选项
@@ -235,14 +276,16 @@ export default function VariableEditor({ dashboardId }: VariableEditorProps) {
 
               <div className="form-group">
                 <label>类型</label>
-                <select
+                <AntSelect
+                  style={{ width: '100%' }}
                   value={form.type || 'custom'}
-                  onChange={(e) => updateForm('type', e.target.value as VariableRes['type'])}
-                >
-                  {VARIABLE_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
-                </select>
+                  onChange={(val) => updateForm('type', val as VariableRes['type'])}
+                  options={VARIABLE_TYPES.map((t) => ({
+                    label: t.label,
+                    value: t.value,
+                  }))}
+                  getPopupContainer={(trigger) => trigger.parentElement || document.body}
+                />
                 <div className="form-hint">
                   {VARIABLE_TYPES.find((t) => t.value === form.type)?.description}
                 </div>
@@ -274,25 +317,85 @@ export default function VariableEditor({ dashboardId }: VariableEditorProps) {
                 <>
                   <div className="form-group">
                     <label>数据源</label>
-                    <select
-                      value={form.datasource_id || ''}
-                      onChange={(e) => updateForm('datasource_id', e.target.value)}
-                    >
-                      <option value="">选择数据源</option>
-                      {datasources.map((ds) => (
-                        <option key={ds.id} value={ds.id}>{ds.name}</option>
-                      ))}
-                    </select>
+                    <AntSelect
+                      style={{ width: '100%' }}
+                      value={form.datasource_id || undefined}
+                      onChange={(val) => updateForm('datasource_id', val || '')}
+                      allowClear
+                      placeholder="选择数据源"
+                      options={datasources.map((ds) => ({
+                        label: ds.name,
+                        value: ds.id,
+                      }))}
+                      getPopupContainer={(trigger) => trigger.parentElement || document.body}
+                    />
                   </div>
                   <div className="form-group">
                     <label>查询语句</label>
-                    <textarea
+                    <Input.TextArea
                       value={form.query || ''}
                       onChange={(e) => updateForm('query', e.target.value)}
                       placeholder="SELECT DISTINCT server_name FROM servers"
-                      style={{ minHeight: 80, fontFamily: 'monospace', fontSize: 12 }}
+                      rows={4}
+                      style={{ fontFamily: 'monospace', fontSize: 12 }}
                     />
                   </div>
+
+                  {/* 预览值区域 */}
+                  {editingId && (
+                    <div className="form-group">
+                      <label>
+                        预览值
+                        <button
+                          className="preview-refresh-btn"
+                          onClick={loadPreviewValues}
+                          disabled={previewLoading}
+                          title="刷新预览"
+                          style={{
+                            marginLeft: 8,
+                            padding: '1px 6px',
+                            fontSize: 11,
+                            cursor: 'pointer',
+                            background: 'transparent',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 3,
+                            color: 'var(--text-secondary)',
+                          }}
+                        >
+                          {previewLoading ? '加载中...' : '刷新'}
+                        </button>
+                      </label>
+                      {previewLoading ? (
+                        <div className="preview-loading">正在获取值...</div>
+                      ) : previewValues.length > 0 ? (
+                        <div className="preview-values-container">
+                          <div className="preview-values-list">
+                            {(previewExpanded ? previewValues : previewValues.slice(0, PREVIEW_LIMIT)).map((opt, idx) => (
+                              <span key={idx} className="preview-value-tag">
+                                {opt.text}
+                              </span>
+                            ))}
+                          </div>
+                          {previewValues.length > PREVIEW_LIMIT && (
+                            <button
+                              className="preview-toggle-btn"
+                              onClick={() => setPreviewExpanded(!previewExpanded)}
+                            >
+                              {previewExpanded
+                                ? `收起（共 ${previewValues.length} 个值）`
+                                : `展示全部 ${previewValues.length} 个值`
+                              }
+                            </button>
+                          )}
+                          <div className="preview-values-count">
+                            共 {previewValues.length} 个值
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="preview-empty">暂无数据，请检查查询语句或点击刷新</div>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
 
@@ -320,7 +423,7 @@ export default function VariableEditor({ dashboardId }: VariableEditorProps) {
                 </div>
               )}
 
-              {/* 多选配置 */}
+              {/* 多选 / 全部 / 依赖 配置 */}
               {(form.type === 'custom' || form.type === 'query') && (
                 <>
                   <div className="form-group">
@@ -334,31 +437,69 @@ export default function VariableEditor({ dashboardId }: VariableEditorProps) {
                     </label>
                   </div>
 
-                  {form.multi && (
-                    <div className="form-group">
-                      <label className="checkbox-label">
-                        <input
-                          type="checkbox"
-                          checked={form.include_all || false}
-                          onChange={(e) => updateForm('include_all', e.target.checked)}
-                        />
-                        <span>包含"全部"选项</span>
-                      </label>
-                    </div>
-                  )}
-
-                  {form.multi && form.include_all && (
-                    <div className="form-group">
-                      <label>"全部"选项值</label>
+                  <div className="form-group">
+                    <label className="checkbox-label">
                       <input
-                        value={form.all_value || ''}
-                        onChange={(e) => updateForm('all_value', e.target.value)}
-                        placeholder="默认为通配符 *"
+                        type="checkbox"
+                        checked={form.include_all !== false}
+                        onChange={(e) => updateForm('include_all', e.target.checked)}
                       />
-                    </div>
+                      <span>包含"全部"选项（默认开启，选择"全部"时将使用所有查询到的值）</span>
+                    </label>
+                  </div>
+
+                  {/* 变量依赖配置（仅 query 类型） */}
+                  {form.type === 'query' && (
+                    <>
+                      <div className="form-group">
+                        <label>依赖变量</label>
+                        <AntSelect
+                          style={{ width: '100%' }}
+                          value={form.depends_on || undefined}
+                          onChange={(val) => updateForm('depends_on', val || '')}
+                          allowClear
+                          placeholder="无依赖（独立变量）"
+                          options={variables
+                            .filter((v) => v.id !== editingId)
+                            .map((v) => ({
+                              label: `${v.label || v.name} (${v.name})`,
+                              value: v.name,
+                            }))}
+                          getPopupContainer={(trigger) => trigger.parentElement || document.body}
+                        />
+                        <div className="form-hint">
+                          选择上游变量后，当上游变量值变化时，此变量的选项将自动刷新并全选
+                        </div>
+                      </div>
+
+                      <div className="form-group">
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={form.auto_refresh !== false}
+                            onChange={(e) => updateForm('auto_refresh', e.target.checked)}
+                          />
+                          <span>上游变化时自动刷新并全选</span>
+                        </label>
+                        <div className="form-hint">
+                          取消后，即使上游变量变化也不会自动刷新（用户手动选择的值会被保留）
+                        </div>
+                      </div>
+                    </>
                   )}
                 </>
               )}
+
+              <div className="form-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={form.hide || false}
+                    onChange={(e) => updateForm('hide', e.target.checked)}
+                  />
+                  <span>隐藏变量选择器（变量值仍然生效）</span>
+                </label>
+              </div>
             </div>
 
             <div className="variable-form-footer">

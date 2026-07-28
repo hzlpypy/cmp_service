@@ -6,7 +6,6 @@ import (
 	"cmp_service_backend/datasources"
 	"cmp_service_backend/model"
 	"cmp_service_backend/variables"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -16,7 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/sirupsen/logrus"
-	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -93,9 +91,9 @@ func buildCurlCommand(info *HTTPRequestInfo) string {
 
 // Server 仪表板业务服务，持有数据库连接和日志记录器。
 type Server struct {
-	db              *gorm.DB
-	log             *logrus.Logger
-	httpQueryExec   *datasources.HTTPQueryExecutor
+	db            *gorm.DB
+	log           *logrus.Logger
+	httpQueryExec *datasources.HTTPQueryExecutor
 }
 
 // Interface 定义仪表板业务操作的接口。
@@ -139,15 +137,13 @@ func NewServer(db *gorm.DB, log *logrus.Logger) Interface {
 }
 
 // getDatasourceDB 根据数据源 ID 获取对应的数据库连接。
-// 如果 datasourceID 为空，返回主应用数据库连接（s.db）。
-// 对于 MySQL 类型数据源，动态创建临时连接并返回 *gorm.DB。
-// 对于 HTTP 类型数据源，返回 nil，后续使用HTTP查询器处理。
+// 所有查询都复用 s.db（main.go 初始化的连接池），不额外创建连接。
+// 对于 HTTP 类型数据源，返回 nil。
 func (s *Server) getDatasourceDB(datasourceID string) (*gorm.DB, *model.Datasource, error) {
 	if datasourceID == "" {
 		return s.db, nil, nil
 	}
 
-	// 从数据库查询数据源配置
 	var ds model.Datasource
 	if err := s.db.Where("id = ? AND enabled = 1 AND deleted_at IS NULL", datasourceID).First(&ds).Error; err != nil {
 		return nil, nil, fmt.Errorf("数据源 %s 不存在或已禁用: %v", datasourceID, err)
@@ -155,24 +151,8 @@ func (s *Server) getDatasourceDB(datasourceID string) (*gorm.DB, *model.Datasour
 
 	switch ds.Type {
 	case "mysql":
-		dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s",
-			ds.Username, ds.Password, ds.URL, ds.DatabaseName)
-		sqlDB, err := sql.Open("mysql", dsn)
-		if err != nil {
-			return nil, nil, fmt.Errorf("连接数据源 %s 失败: %v", ds.Name, err)
-		}
-		sqlDB.SetConnMaxLifetime(5 * time.Minute)
-		sqlDB.SetMaxOpenConns(5)
-		sqlDB.SetMaxIdleConns(2)
-
-		gormDB, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB}), &gorm.Config{})
-		if err != nil {
-			sqlDB.Close()
-			return nil, nil, fmt.Errorf("初始化 GORM 连接失败: %v", err)
-		}
-		return gormDB, &ds, nil
+		return s.db, &ds, nil
 	case "http":
-		// HTTP数据源返回nil，使用HTTP查询器处理
 		return nil, &ds, nil
 	default:
 		return nil, nil, fmt.Errorf("不支持的数据源类型: %s", ds.Type)
@@ -502,6 +482,7 @@ func (s *Server) GetPanelData(ctx *gin.Context, req *PanelDataReq) (*PanelData, 
 func (s *Server) QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryInspectRes, error) {
 	// 获取变量值
 	varValues := s.getVariableValues(req.DashboardID, req.Variables)
+	s.log.Infof("[QueryInspect] DashboardID=%s, reqVars=%+v, resolved varValues=%+v", req.DashboardID, req.Variables, varValues)
 
 	res := &QueryInspectRes{
 		ProcessedSQL: "",
@@ -646,6 +627,7 @@ func (s *Server) QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryIns
 		// 使用共享的 SQL 处理逻辑（变量替换、系统变量、时间过滤）
 		// Query Inspector 不自动添加时间过滤（chartType 为空）
 		processedSQL := ProcessRawSQL(req.RawSQL, varValues, req.From, req.To, "")
+		s.log.Infof("[QueryInspect] RawSQL=%s, ProcessedSQL=%s", req.RawSQL, processedSQL)
 		res.ProcessedSQL = processedSQL
 
 		// 安全检查：只允许 SELECT 开头
@@ -691,11 +673,11 @@ func (s *Server) QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryIns
 
 // getVariableValues 获取变量值。
 // 优先使用请求中传入的变量值，否则从数据库加载变量的当前值。
+// 前端已直接传入所有实际值（不传 *），后端无需展开。
 func (s *Server) getVariableValues(dashboardID string, reqVars map[string]interface{}) []variables.VariableValue {
-	result := make([]variables.VariableValue, 0)
-
 	// 如果请求中传入了变量值，直接使用
 	if reqVars != nil && len(reqVars) > 0 {
+		result := make([]variables.VariableValue, 0, len(reqVars))
 		for name, val := range reqVars {
 			vv := variables.VariableValue{Name: name}
 			switch v := val.(type) {
@@ -705,8 +687,8 @@ func (s *Server) getVariableValues(dashboardID string, reqVars map[string]interf
 				vv.Multi = true
 				vv.Values = make([]string, 0, len(v))
 				for _, item := range v {
-					if s, ok := item.(string); ok {
-						vv.Values = append(vv.Values, s)
+					if ss, ok := item.(string); ok {
+						vv.Values = append(vv.Values, ss)
 					}
 				}
 				if len(vv.Values) > 0 {
@@ -728,9 +710,8 @@ func (s *Server) getVariableValues(dashboardID string, reqVars map[string]interf
 	dbVars, err := variables.GetVariableValuesFromDB(s.db, dashboardID)
 	if err != nil {
 		s.log.Warnf("加载仪表板变量失败: %v", err)
-		return result
+		return nil
 	}
-
 	return dbVars
 }
 

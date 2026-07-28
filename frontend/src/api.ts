@@ -412,7 +412,10 @@ export interface VariableRes {
   multi: boolean
   include_all: boolean
   all_value: string
+  depends_on: string
+  auto_refresh: boolean
   sort_order: number
+  hide: boolean
   created_at: string
   updated_at: string
 }
@@ -437,8 +440,13 @@ export async function deleteVariable(id: string): Promise<void> {
   return request('/api/v1/variables/delete', { method: 'POST', body: JSON.stringify({ id }) })
 }
 
-export async function getVariableValues(id: string): Promise<VariableOption[]> {
-  return request('/api/v1/variables/values', { method: 'POST', body: JSON.stringify({ id }) })
+export async function getVariableValues(id: string, query?: string, datasource_id?: string, variables?: Record<string, string | string[]>): Promise<VariableOption[]> {
+  const body: any = { id }
+  if (query) body.query = query
+  if (datasource_id) body.datasource_id = datasource_id
+  if (variables && Object.keys(variables).length > 0) body.variables = variables
+  const res = await request<{ values: VariableOption[] }>('/api/v1/variables/values', { method: 'POST', body: JSON.stringify(body) })
+  return res.values
 }
 
 // ---- Panels API ----
