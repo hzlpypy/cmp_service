@@ -55,7 +55,7 @@ export default function VariableSelector({
               onChange={(value) => onChange(variable.id, value, false)}
               reloadKey={reloadKey}
               variablesMap={variablesMap}
-              isManuallyTouched={true}
+              isManuallyTouched={false}
             />
           ))}
         </div>
