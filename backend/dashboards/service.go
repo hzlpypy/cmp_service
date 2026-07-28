@@ -94,6 +94,7 @@ type Server struct {
 	db            *gorm.DB
 	log           *logrus.Logger
 	httpQueryExec *datasources.HTTPQueryExecutor
+	dsConnMgr     *datasources.DSConnectionManager
 }
 
 // Interface 定义仪表板业务操作的接口。
@@ -128,16 +129,17 @@ type Interface interface {
 }
 
 // NewServer 创建仪表板业务服务实例。
-func NewServer(db *gorm.DB, log *logrus.Logger) Interface {
+func NewServer(db *gorm.DB, log *logrus.Logger, dsConnMgr *datasources.DSConnectionManager) Interface {
 	return &Server{
 		db:            db,
 		log:           log,
 		httpQueryExec: datasources.NewHTTPQueryExecutor(log),
+		dsConnMgr:     dsConnMgr,
 	}
 }
 
 // getDatasourceDB 根据数据源 ID 获取对应的数据库连接。
-// 所有查询都复用 s.db（main.go 初始化的连接池），不额外创建连接。
+// 对于 MySQL 类型数据源，使用连接管理器获取对应数据源的连接池。
 // 对于 HTTP 类型数据源，返回 nil。
 func (s *Server) getDatasourceDB(datasourceID string) (*gorm.DB, *model.Datasource, error) {
 	if datasourceID == "" {
@@ -151,7 +153,13 @@ func (s *Server) getDatasourceDB(datasourceID string) (*gorm.DB, *model.Datasour
 
 	switch ds.Type {
 	case "mysql":
-		return s.db, &ds, nil
+		connDB, err := s.dsConnMgr.GetDB(&ds)
+		if err != nil {
+			// 降级：连接管理器失败时回退到主库连接
+			s.log.Warnf("[getDatasourceDB] 数据源 %s 连接失败，回退到主库: %v", ds.Name, err)
+			return s.db, &ds, nil
+		}
+		return connDB, &ds, nil
 	case "http":
 		return nil, &ds, nil
 	default:

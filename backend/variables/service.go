@@ -16,8 +16,11 @@ import (
 
 // Server 变量业务服务，持有数据库连接和日志记录器。
 type Server struct {
-	db  *gorm.DB
-	log *logrus.Logger
+	db        *gorm.DB
+	log       *logrus.Logger
+	dsConnMgr interface {
+		GetDB(ds *model.Datasource) (*gorm.DB, error)
+	}
 }
 
 // Interface 定义变量业务操作的接口。
@@ -37,8 +40,10 @@ type Interface interface {
 }
 
 // NewServer 创建变量业务服务实例。
-func NewServer(db *gorm.DB, log *logrus.Logger) Interface {
-	return &Server{db: db, log: log}
+func NewServer(db *gorm.DB, log *logrus.Logger, dsConnMgr interface {
+	GetDB(ds *model.Datasource) (*gorm.DB, error)
+}) Interface {
+	return &Server{db: db, log: log, dsConnMgr: dsConnMgr}
 }
 
 // ListVariables 获取指定仪表板的所有变量，按 sort_order 排序。
@@ -313,11 +318,11 @@ func (s *Server) resolveVariableReferences(dashboardID, excludeID, query string,
 
 // executeQuery 执行查询语句获取变量值列表。
 func (s *Server) executeQuery(query string, datasourceID string) ([]VariableOption, error) {
-	return ExecuteQuery(s.db, query, datasourceID)
+	return s.ExecuteQuery(query, datasourceID)
 }
 
 // ExecuteQuery 包级函数：执行查询语句获取变量值列表。
-func ExecuteQuery(db *gorm.DB, query string, datasourceID string) ([]VariableOption, error) {
+func (s *Server) ExecuteQuery(query string, datasourceID string) ([]VariableOption, error) {
 	// 安全检查：只允许 SELECT 开头的语句
 	trimmed := strings.TrimSpace(query)
 	upper := strings.ToUpper(trimmed)
@@ -328,18 +333,23 @@ func ExecuteQuery(db *gorm.DB, query string, datasourceID string) ([]VariableOpt
 	// 如果指定了数据源，使用该数据源连接执行查询
 	if datasourceID != "" {
 		var ds model.Datasource
-		if err := db.Where("id = ? AND enabled = 1 AND deleted_at IS NULL", datasourceID).First(&ds).Error; err != nil {
+		if err := s.db.Where("id = ? AND enabled = 1 AND deleted_at IS NULL", datasourceID).First(&ds).Error; err != nil {
 			return nil, fmt.Errorf("数据源不可用: %v", err)
 		}
 
-		// 目前仅支持 MySQL 类型数据源
+		// MySQL 类型：使用连接管理器获取对应数据源的连接池
 		if ds.Type == "mysql" {
-			return executeMySQLQuery(db, trimmed, &ds)
+			connDB, err := s.dsConnMgr.GetDB(&ds)
+			if err != nil {
+				s.log.Warnf("[ExecuteQuery] 数据源 %s 连接失败，回退到主库: %v", ds.Name, err)
+				return executeLocalQuery(s.db, trimmed)
+			}
+			return executeLocalQuery(connDB, trimmed)
 		}
 	}
 
 	// 默认使用当前数据库连接执行查询
-	return executeLocalQuery(db, trimmed)
+	return executeLocalQuery(s.db, trimmed)
 }
 
 // executeLocalQuery 使用当前数据库连接执行查询。
@@ -352,11 +362,6 @@ func (s *Server) executeLocalQuery(query string) ([]VariableOption, error) {
 	}
 	s.log.Infof("[executeLocalQuery] query=%s count=%d", query, len(opts))
 	return opts, nil
-}
-
-// executeMySQLQuery 使用指定数据源连接执行查询。
-func (s *Server) executeMySQLQuery(query string, ds *model.Datasource) ([]VariableOption, error) {
-	return executeMySQLQuery(s.db, query, ds)
 }
 
 // executeQueryWithDB 使用指定数据库连接执行查询。
@@ -384,11 +389,6 @@ func formatValue(v interface{}) string {
 
 // executeLocalQuery 包级函数：使用指定数据库连接执行查询。
 func executeLocalQuery(db *gorm.DB, query string) ([]VariableOption, error) {
-	return queryRows(db, query)
-}
-
-// executeMySQLQuery 使用已有连接执行查询，不新建连接。
-func executeMySQLQuery(db *gorm.DB, query string, _ *model.Datasource) ([]VariableOption, error) {
 	return queryRows(db, query)
 }
 
