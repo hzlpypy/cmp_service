@@ -31,12 +31,18 @@ type VariableReq struct {
 	Current map[string]interface{} `json:"current"`
 	// Multi 是否支持多选
 	Multi bool `json:"multi"`
-	// IncludeAll 是否包含"全部"选项
+	// IncludeAll 是否包含"全部"选项（默认 true）
 	IncludeAll bool `json:"include_all"`
 	// AllValue "全部"选项的值
 	AllValue string `json:"all_value"`
+	// DependsOn 依赖的变量名（当上游变量变化时自动刷新选项）
+	DependsOn string `json:"depends_on"`
+	// AutoRefresh 当上游变量变化时是否自动刷新并全选（默认 true）
+	AutoRefresh bool `json:"auto_refresh"`
 	// SortOrder 排序序号
 	SortOrder int `json:"sort_order"`
+	// Hide 是否隐藏变量选择器
+	Hide bool `json:"hide"`
 }
 
 // VariableOption 变量选项结构。
@@ -80,8 +86,14 @@ type VariableRes struct {
 	IncludeAll bool `json:"include_all"`
 	// AllValue "全部"选项的值
 	AllValue string `json:"all_value"`
+	// DependsOn 依赖的变量名
+	DependsOn string `json:"depends_on"`
+	// AutoRefresh 是否自动刷新
+	AutoRefresh bool `json:"auto_refresh"`
 	// SortOrder 排序序号
 	SortOrder int `json:"sort_order"`
+	// Hide 是否隐藏变量选择器
+	Hide bool `json:"hide"`
 	// CreatedAt 创建时间
 	CreatedAt string `json:"created_at"`
 	// UpdatedAt 更新时间
@@ -112,6 +124,8 @@ type VariableValuesReq struct {
 	Query string `json:"query"`
 	// DatasourceID 数据源ID（用于执行查询）
 	DatasourceID string `json:"datasource_id"`
+	// Variables 当前变量值（前端传入，避免竞态条件）
+	Variables map[string]interface{} `json:"variables"`
 }
 
 // VariableValuesRes 变量可选值响应。
@@ -149,7 +163,10 @@ func ToVariableRes(m *model.Variable) *VariableRes {
 		Multi:        m.Multi,
 		IncludeAll:   m.IncludeAll,
 		AllValue:     m.AllValue,
+		DependsOn:    m.DependsOn,
+		AutoRefresh:  m.AutoRefresh,
 		SortOrder:    m.SortOrder,
+		Hide:         m.Hide,
 		CreatedAt:    m.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
 		UpdatedAt:    m.UpdatedAt.Format("2006-01-02T15:04:05+08:00"),
 	}

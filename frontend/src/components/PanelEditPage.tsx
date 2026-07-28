@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { Modal, message } from 'antd'
 import ChartPanel from './ChartPanel'
@@ -64,6 +64,12 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
   const [queryLoading, setQueryLoading] = useState(false)
   const [hasUnsaved, setHasUnsaved] = useState(false)
   const [variables, setVariables] = useState<VariableRes[]>(initialVariables || [])
+  const [variableReloadKey, setVariableReloadKey] = useState(0)
+  const [manuallyTouchedVarIds, setManuallyTouchedVarIds] = useState<Set<string>>(new Set())
+
+  // 防抖：批量处理多个变量自动全选触发的大量数据刷新
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingVarsRef = useRef<VariableRes[] | null>(null)
 
   // 时间范围选择（使用传入的初始值，若没有则从 localStorage 恢复）
   type TimePreset = '5m' | '30m' | '1h' | '6h' | '12h' | '24h' | '2d' | '7d' | '30d' | 'today' | 'yesterday' | 'day_before_yesterday' | 'last_week_today' | 'custom'
@@ -254,7 +260,10 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
   }
 
   // 处理变量值变化
-  const handleVariableChange = async (variableId: string, value: string | string[]) => {
+  const handleVariableChange = async (variableId: string, value: string | string[], isManual?: boolean) => {
+    if (isManual) {
+      setManuallyTouchedVarIds((prev) => new Set(prev).add(variableId))
+    }
     const updatedVars = variables.map((v) => {
       if (v.id !== variableId) return v
       const text = Array.isArray(value)
@@ -266,6 +275,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
       }
     })
     setVariables(updatedVars)
+    setVariableReloadKey((k) => k + 1)
 
     // 保存变量当前值到后端
     try {
@@ -277,8 +287,13 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
       } as any)
     } catch {}
 
-    // 刷新预览数据
-    handleRefreshPreviewWithVars(updatedVars)
+    // 防抖合并预览刷新：多个变量变化时只发一次请求
+    pendingVarsRef.current = updatedVars
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current)
+    reloadTimerRef.current = setTimeout(() => {
+      const vars = pendingVarsRef.current
+      if (vars) handleRefreshPreviewWithVars(vars)
+    }, 200)
   }
 
   useEffect(() => { setP(clonePanel(panel)) }, [panel])
@@ -730,6 +745,8 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
         <VariableSelector
           variables={variables}
           onChange={handleVariableChange}
+          reloadKey={variableReloadKey}
+          manuallyTouchedVarIds={manuallyTouchedVarIds}
         />
       )}
 
