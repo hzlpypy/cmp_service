@@ -1986,7 +1986,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                           </div>
                           <div className="pe-snapshot-actions">
                             <button className="pe-icon-btn" title="查看快照"
-                              onClick={() => window.open(`/snapshot/${snap.snapshot_key}`, '_blank')}>
+                              onClick={() => window.open(`/capacity_mgt_platform/snapshot/${snap.snapshot_key}`, '_blank')}>
                               <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M7 3a4 4 0 100 8 4 4 0 000-8zm0 1a3 3 0 110 6 3 3 0 010-6z" opacity=".7"/><path d="M7 1C3.5 1 .5 3.5 0 7c.5 3.5 3.5 6 7 6s6.5-2.5 7-6c-.5-3.5-3.5-6-7-6zm0 1.5C10 2.5 12.5 4.5 13 7c-.5 2.5-3 4.5-6 4.5S1.5 9.5 1 7c.5-2.5 3-4.5 6-4.5z" opacity=".7"/></svg>
                             </button>
                             <button className="pe-icon-btn" title="复制链接"

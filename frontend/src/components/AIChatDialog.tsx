@@ -139,7 +139,7 @@ function mergePanels(draftJson: any, newPanels: any[]) {
   return dj
 }
 
-const DEFAULT_WS_URL = 'ws://127.0.0.1:8765'
+const DEFAULT_WS_URL = `ws://${window.location.host}/ws/cmp_llm`
 
 const ALLOWED_EXTENSIONS = ['.txt', '.md', '.pdf', '.docx', '.xlsx', '.jpg', '.jpeg', '.png']
 

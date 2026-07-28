@@ -202,7 +202,7 @@ export default function BrowsePage() {
       setShowNewDashboard(false)
       setNewMenuOpen(false)
       loadFolders()
-      navigate(`/d/${db.id}/${titleToSlug(db.title)}`)
+      navigate(`/capacity_mgt_platform/d/${db.id}/${titleToSlug(db.title)}`)
     } catch (e: any) { message.error('创建仪表板失败: ' + e.message) }
   }
 
@@ -382,7 +382,7 @@ export default function BrowsePage() {
           )
         }
         return (
-          <Link to={`/d/${record.id}/${titleToSlug(text)}`} className="item-title-link">
+          <Link to={`/capacity_mgt_platform/d/${record.id}/${titleToSlug(text)}`} className="item-title-link">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span>{SVG_ICONS.dash}</span>
               <span>{text}</span>
@@ -689,7 +689,7 @@ export default function BrowsePage() {
                 render: (text: string, record: any) => (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span>{SVG_ICONS.dashboard}</span>
-                    <Link to={`/d/${record.id}/${titleToSlug(text)}`} className="item-title-link">
+                    <Link to={`/capacity_mgt_platform/d/${record.id}/${titleToSlug(text)}`} className="item-title-link">
                       {text}
                     </Link>
                   </div>
@@ -790,7 +790,7 @@ export default function BrowsePage() {
                                   onClick={(e) => e.stopPropagation()}
                                 />
                                 <Link
-                                  to={`/d/${db.id}/${titleToSlug(db.title)}`}
+                                  to={`/capacity_mgt_platform/d/${db.id}/${titleToSlug(db.title)}`}
                                   className="item-title-link"
                                 >
                                   {db.title}

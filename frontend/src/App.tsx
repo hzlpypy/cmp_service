@@ -30,11 +30,11 @@ function DashboardPageWrapper() {
   const [editingPanel, setEditingPanel] = useState<EditingPanelCtx | null>(null)
 
   if (!uid) {
-    navigate('/', { replace: true })
+    navigate('/capacity_mgt_platform/', { replace: true })
     return null
   }
 
-  const handleBack = () => navigate('/')
+  const handleBack = () => navigate('/capacity_mgt_platform/')
   const handleEditPanel = (ctx: any) => setEditingPanel(ctx)
 
   return (
@@ -70,12 +70,12 @@ function SnapshotPageWrapper() {
   const navigate = useNavigate()
 
   if (!key) {
-    navigate('/', { replace: true })
+    navigate('/capacity_mgt_platform/', { replace: true })
     return null
   }
 
   const handleClose = () => {
-    navigate('/')
+    navigate('/capacity_mgt_platform/')
   }
 
   return <SnapshotView snapshotKey={key} onClose={handleClose} />
@@ -88,8 +88,8 @@ function App() {
   const location = useLocation()
 
   // 判断当前是否在仪表板详情页或快照页
-  const isInDashboard = location.pathname.startsWith('/d/')
-  const isInSnapshot = location.pathname.startsWith('/snapshot/')
+  const isInDashboard = location.pathname.startsWith('/capacity_mgt_platform/d/')
+  const isInSnapshot = location.pathname.startsWith('/capacity_mgt_platform/snapshot/')
 
   // 初始化主题
   useEffect(() => {
@@ -169,13 +169,13 @@ function App() {
       <div className="main-wrapper">
         <main className="main-content" style={{ padding: isInSnapshot ? 0 : undefined }}>
           <Routes>
-            <Route path="/" element={
+            <Route path="/capacity_mgt_platform/" element={
               currentPage === 'browse' ? <BrowsePage /> :
               currentPage === 'snapshots' ? <SnapshotList key={snapshotListKey} /> :
               <DataSourcesPage />
             } />
-            <Route path="/d/:uid/:slug?" element={<DashboardPageWrapper />} />
-            <Route path="/snapshot/:key" element={<SnapshotPageWrapper />} />
+            <Route path="/capacity_mgt_platform/d/:uid/:slug?" element={<DashboardPageWrapper />} />
+            <Route path="/capacity_mgt_platform/snapshot/:key" element={<SnapshotPageWrapper />} />
           </Routes>
         </main>
       </div>
