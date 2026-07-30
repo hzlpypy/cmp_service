@@ -681,24 +681,29 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
       dataRes.panels_data.forEach((pd) => {
         const pType = panelTypeMap.get(pd.panel_id)
-        const shouldFilter = pType === 'line' && tr
+        const shouldFilter = (pType === 'line' || pType === 'timeseries') && tr
 
+        const raw = pd.target || []
         const filtered = shouldFilter
-          ? (pd.target || []).map((rows) => {
+          ? raw.map((rows) => {
               if (rows.length === 0) return rows
               const dateCol = Object.keys(rows[0]).find((k) => {
                 const kl = k.toLowerCase()
                 return kl.includes('date') || kl.includes('time') || kl.includes('日期') || kl.includes('时间') || kl === 'day'
               })
               if (!dateCol) return rows
-              return rows.filter((row: any) => {
+              const matched = rows.filter((row: any) => {
                 const val = row[dateCol]
                 if (!val) return false
-                const t = new Date(val).getTime()
+                // 支持 YYYY-MM、YYYY-MM-DD、ISO 格式等多种时间格式
+                const normalized = String(val).length === 7 ? val + '-01' : val
+                const t = new Date(normalized).getTime()
                 return !isNaN(t) && t >= fromMs && t <= toMs
               })
+              // 如果过滤后为空，退回原始数据（避免数据时间范围与仪表板时间预设不匹配导致图表空白）
+              return matched.length > 0 ? matched : rows
             })
-          : (pd.target || [])
+          : raw
 
         dMap.set(pd.panel_id, filtered)
         cMap.set(pd.panel_id, pd.columns || [])

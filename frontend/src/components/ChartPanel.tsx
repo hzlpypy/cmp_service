@@ -131,7 +131,7 @@ function formatValue(val: unknown): string {
 }
 
 interface ChartPanelProps {
-  type: 'bar' | 'line' | 'pie' | 'gauge' | 'table'
+  type: 'bar' | 'line' | 'timeseries' | 'pie' | 'gauge' | 'table'
   title: string
   /** 多查询数据：data[i] 是第 i 个 target 的结果行 */
   data: MetricRow[][]
@@ -155,58 +155,98 @@ interface ChartPanelProps {
 
 /**
  * 从数据行中自动探测「名称列」和「数值列」。
- * - 名称列：第一个非空字符串列
- * - 数值列：所有可解析为数字的列
+ * - 名称列：优先取值为时间格式的列 > 日期/时间类列名 > 第一个非数值列
+ * - 数值列：所有可解析为数字的列，排除行号列和时间值列
  */
+
+/** 判断字符串值是否为时间/日期格式 */
+function isTimeValue(v: unknown): boolean {
+  const s = String(v ?? '').trim()
+  if (!s) return false
+  // YYYY-MM-DD HH:mm:ss 或 YYYY-MM-DD 或 YYYY-MM 等
+  if (/^\d{4}-\d{2}(-\d{2})?(\s+\d{2}:\d{2}(:\d{2})?)?$/.test(s)) return true
+  // YYYY/MM/DD 等
+  if (/^\d{4}\/\d{2}(\/\d{2})?$/.test(s)) return true
+  // 纯毫秒时间戳 (13位数字，年份2000-2100)
+  if (/^1[3-9]\d{11}$/.test(s)) return true
+  return false
+}
+
 /** 判断列名是否为日期/时间类型 */
 function isDateColumn(colName: string): boolean {
   const kl = colName.toLowerCase()
   return kl.includes('date') || kl.includes('time') || kl.includes('日期') || kl.includes('时间') || kl === 'day'
 }
 
+/** 判断列是否为行号列（列名 # 或值从1开始连续递增） */
+function isRowNumberCol(rows: MetricRow[], col: string): boolean {
+  const kl = col.trim().toLowerCase()
+  if (kl === '#' || kl === 'no' || kl === '序号' || kl === '行号') return true
+  // 检查值是否为 1, 2, 3, ... 连续递增
+  const vals = rows.map((r) => r[col])
+  if (vals.length < 2) return false
+  for (let i = 0; i < vals.length; i++) {
+    const v = Number(vals[i])
+    if (isNaN(v) || v !== i + 1) return false
+  }
+  return true
+}
+
 function detectColumns(rows: MetricRow[], _chartType?: string): { nameCol: string | null; valueCols: string[] } {
   if (rows.length === 0) return { nameCol: null, valueCols: [] }
   const keys = Object.keys(rows[0])
-  let nameCol: string | null = null
-  const valueCols: string[] = []
+  const sample = rows.slice(0, 5)
 
-  // 第一步：先识别数值列（优先级最高）
+  // 1. 分类：日期值列、日期名列、行号列、数值列
+  const dateValueCols: string[] = []   // 值像时间格式的列
+  const dateNameCols: string[] = []    // 列名是时间关键词的列
+  const rowNumCols: string[] = []      // 行号列（需排除）
+  const numericCols: string[] = []     // 真正的数值列
+
   for (const k of keys) {
-    const sample = rows.slice(0, 5)
+    if (isRowNumberCol(rows, k)) {
+      rowNumCols.push(k)
+      continue
+    }
+    // 检查值是否全为时间格式
+    const allTimeVals = sample.every((r) => {
+      const v = r[k]
+      return v !== undefined && v !== null && v !== '' && isTimeValue(v)
+    })
+    if (allTimeVals) {
+      dateValueCols.push(k)
+      continue
+    }
+    // 检查是否全为数值
     const allNumeric = sample.every((r) => {
       const v = r[k]
       if (v === undefined || v === null || v === '') return false
       return !isNaN(parseFloat(v))
     })
     if (allNumeric && sample.some((r) => r[k] !== '' && r[k] !== undefined)) {
-      valueCols.push(k)
+      numericCols.push(k)
+      continue
+    }
+    // 非数值列中，记录时间关键词列
+    if (isDateColumn(k)) {
+      dateNameCols.push(k)
     }
   }
 
-  // 第二步：从非数值列中识别名称列
-  const nonValueKeys = keys.filter((k) => !valueCols.includes(k))
-  for (const k of nonValueKeys) {
-    const kl = k.toLowerCase()
-    // 折线图/柱状图：日期列优先作为 X 轴
-    if (!nameCol && isDateColumn(k)) {
-      nameCol = k
-      continue
-    }
-    // 名称列关键词匹配（精确匹配优先）
-    if (!nameCol && (kl.includes('name') || kl.includes('node') || kl.includes('机房') || kl === '市场' || kl === 'market' || kl === '类型' || kl === 'type' || kl === 'category' || kl.includes('设备'))) {
-      nameCol = k
-      continue
-    }
+  // 2. 确定名称列：优先时间值列 > 时间名列 > 第一个非数值非行号列
+  let nameCol: string | null = null
+  if (dateValueCols.length > 0) {
+    nameCol = dateValueCols[0]
+  } else if (dateNameCols.length > 0) {
+    nameCol = dateNameCols[0]
+  } else {
+    const nonNumericKeys = keys.filter((k) => !numericCols.includes(k) && !rowNumCols.includes(k))
+    nameCol = nonNumericKeys.length > 0 ? nonNumericKeys[0] : (keys.length > 0 ? keys[0] : null)
   }
 
-  // 第三步：如果还没找到名称列，取第一个非数值列
-  if (!nameCol && nonValueKeys.length > 0) {
-    nameCol = nonValueKeys[0]
-  }
-  // 兜底：如果所有列都是数值列，取第一个列作为名称列
-  if (!nameCol) {
-    nameCol = keys[0]
-  }
+  // 3. 数值列排除行号列和时间值列（时间值列如果已被选为名称列，就不要重复当数值）
+  const valueCols = numericCols.filter((k) => !rowNumCols.includes(k) && !dateValueCols.includes(k))
+
   return { nameCol, valueCols }
 }
 
@@ -225,7 +265,11 @@ const SERIES_COLORS = ['#5470c6', '#73c0de', '#91cc75', '#55bd6a', '#b877d9', '#
 export default memo(function ChartPanel({ type, title, data, targets, menuOpen, onToggleMenu, onEdit, onRemove, showMenu = true, options, columns, dataLinks }: ChartPanelProps) {
   const chartRef = useRef<HTMLDivElement>(null)
   const chartInstanceRef = useRef<echarts.ECharts | null>(null)
+  // 多查询模式：每个查询独立渲染一个 ECharts 图表
+  const chartContainersRef = useRef<Map<number, HTMLDivElement>>(new Map())
+  const chartInstancesRef = useRef<Map<number, echarts.ECharts>>(new Map())
   const [chartError, setChartError] = useState<string | null>(null)
+  const [chartErrors, setChartErrors] = useState<Map<number, string>>(new Map())
   const [linkMenu, setLinkMenu] = useState<{ x: number; y: number; links: DataLinkDef[]; data: Record<string, any> } | null>(null)
 
   // 合并所有 target 数据为扁平数组（用于表格和列探测）
@@ -238,443 +282,462 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
     return detectColumns(data[0] || [], type)
   }, [data, type])
 
+  // 构建单个 target 的 Gauge option（用于多查询独立渲染）
+  const buildGaugeChartOption = (
+    targetRows: MetricRow[],
+    ti: number,
+  ): echarts.EChartsOption => {
+    const { nameCol: tNameCol, valueCols: tValCols } = detectColumns(targetRows, type)
+    const primaryValues = tValCols.length > 0 ? targetRows.map((m) => parseFloat(m[tValCols[0]]) || 0) : []
+    const gaugeValue = primaryValues.length > 0 ? primaryValues[0] : 0
+    const tNames = tNameCol ? targetRows.map((m) => formatValue(m[tNameCol!])) : []
+    const gaugeName = (tNameCol && tValCols.length > 0 && tNameCol === tValCols[0])
+      ? tNameCol
+      : (tNames.length > 0 ? tNames[0] : (targets[ti]?.metricName || targets[ti]?.refId || `查询${ti + 1}`))
+    const gMin = (options?.min as number) ?? 0
+    const gMax = (options?.max as number) ?? 100
+    const gUnit = (options?.unit as string) ?? ''
+    const gColor = (options?.color as string) ?? '#1F7A3F'
+    const gBgColor = (options?.bgColor as string) ?? '#D9E8DC'
+    const gValueMode = (options?.valueMode as string) ?? 'absolute'
+    let displayValue = gaugeValue
+    if (gValueMode === 'percentage') displayValue = gMax !== gMin ? ((gaugeValue - gMin) / (gMax - gMin)) * 100 : 0
+
+    return {
+      backgroundColor: 'transparent',
+      series: [{
+        type: 'gauge',
+        startAngle: 225, endAngle: -45, center: ['50%', '50%'], radius: '88%',
+        min: gValueMode === 'percentage' ? 0 : gMin,
+        max: gValueMode === 'percentage' ? 100 : gMax,
+        progress: { show: true, width: 36, roundCap: true, itemStyle: { color: gColor } },
+        axisLine: { lineStyle: { width: 36, color: [[1, gBgColor]] } },
+        axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
+        anchor: { show: false }, pointer: { show: false },
+        detail: {
+          valueAnimation: true, fontSize: 30, offsetCenter: [0, '0%'],
+          formatter: (val: number) => gValueMode === 'percentage' ? `${val.toFixed(1)}%` : `${formatNumber(val)}${gUnit ? ' ' + gUnit : ''}`,
+          color: gColor, fontWeight: 600, fontFamily: 'Inter, -apple-system, sans-serif',
+        },
+        title: { color: '#666', fontSize: 13, offsetCenter: [0, '40%'], fontFamily: 'Inter, -apple-system, sans-serif' },
+        data: [{ value: displayValue, name: gaugeName || undefined }],
+      }],
+    }
+  }
+
   useEffect(() => {
-    if (!chartRef.current || type === 'table') return
+    if (type === 'table') return
 
     try {
       setChartError(null)
+      setChartErrors(new Map())
 
-      // 如果已有实例，先 dispose
+      // 清理旧的单图表实例
       if (chartInstanceRef.current) {
         chartInstanceRef.current.dispose()
         chartInstanceRef.current = null
       }
+      // 清理旧的多图表实例
+      chartInstancesRef.current.forEach((inst) => { try { inst.dispose() } catch {} })
+      chartInstancesRef.current = new Map()
 
-      // 确保容器有尺寸
-      const el = chartRef.current
-      if (el.offsetWidth === 0 || el.offsetHeight === 0) return
+      if (data.length === 0) return
 
-      const chart = echarts.init(el, undefined, { renderer: 'canvas' })
-      chartInstanceRef.current = chart
-
-      // X 轴名称：从第一个 target 数据中取
+      // ---- 数据排序（共用） ----
       const firstRows = data[0] || []
-      
-      // 检测是否为时间序列数据（X轴是时间戳）
+      if (nameCol && firstRows.length > 1) {
+        const sortByTime = firstRows.every((m) => isTimeValue(m[nameCol!]))
+        if (sortByTime) {
+          const getTimeOrder = (val: unknown): number => {
+            const s = String(val ?? '').trim()
+            const normalized = s.length === 7 ? s + '-01' : s
+            return new Date(normalized).getTime()
+          }
+          const sortedIndices = firstRows
+            .map((m, i) => ({ idx: i, t: getTimeOrder(m[nameCol!]) }))
+            .sort((a, b) => a.t - b.t)
+            .map((x) => x.idx)
+          for (let ti = 0; ti < data.length; ti++) {
+            if (data[ti].length === firstRows.length) {
+              data[ti] = sortedIndices.map((i) => data[ti][i])
+            }
+          }
+        }
+      }
+
+      // ---- 时间序列检测（共用） ----
       const isTimeSeries = nameCol && firstRows.length > 0 && isMillisecondTimestamp(firstRows[0][nameCol!])
-      
-      // 计算时间范围和格式配置（如果是时间序列）
       let timeFormat = ''
-      let timeConfig: TimeFormatConfig | null = null
       if (isTimeSeries && firstRows.length > 1) {
         const timestamps = firstRows.map((m) => m[nameCol!] as number).filter((t) => isMillisecondTimestamp(t))
         if (timestamps.length >= 2) {
           const minTs = Math.min(...timestamps)
           const maxTs = Math.max(...timestamps)
           const rangeMs = maxTs - minTs
-          timeConfig = getTimeFormatConfig(rangeMs, timestamps.length)
-          timeFormat = timeConfig.format
+          timeFormat = getTimeFormatConfig(rangeMs, timestamps.length).format
         }
       }
-      
+
       const names = nameCol ? firstRows.map((m) => {
         const v = m[nameCol!]
-        // 如果是毫秒时间戳，根据时间范围转换为对应格式的日期字符串
-        if (isMillisecondTimestamp(v)) {
-          return formatTimestamp(v as number, timeFormat)
-        }
+        if (isMillisecondTimestamp(v)) return formatTimestamp(v as number, timeFormat)
         const str = String(v || '')
         return str.length > 15 ? shortName(str) : str
       }) : []
 
-      let option: echarts.EChartsOption
+      // ---- 判断是否多查询独立渲染 ----
+      const isMultiTarget = data.length > 1 && type === 'gauge'
+      const isTimeseries = type === 'timeseries'
+      const fieldStyles = (options?.fieldStyles || {}) as Record<string, 'lines' | 'bars' | 'points'>
+      const fieldColors = (options?.fieldColors || {}) as Record<string, string>
 
-      switch (type) {
-        case 'bar':
-        case 'line': {
-          // 多 target 模式：每个 target 作为一个独立的 series
-          const isMultiTarget = data.length > 1
-          const series: echarts.SeriesOption[] = []
-          const barOrientation = (options?.barOrientation as string) || 'vertical'
-          const isHorizontal = type === 'bar' && barOrientation === 'horizontal'
+      // ---- 单查询 / pie / gauge：走原有单图表路径 ----
+      if (!isMultiTarget) {
+        if (!chartRef.current) return
+        const el = chartRef.current
+        if (el.offsetWidth === 0 || el.offsetHeight === 0) return
 
-          // 条件告警颜色查找
-          const seriesAlerts = supportsCellAlerts ? cellAlertRules : []
+        const chart = echarts.init(el, undefined, { renderer: 'canvas' })
+        chartInstanceRef.current = chart
 
-          data.forEach((targetRows, ti) => {
-            const tdef = targets[ti]
-            const { valueCols: tValCols } = detectColumns(targetRows, type)
-            const seriesBaseName = tdef?.metricName || tdef?.refId || (tValCols[0] || `查询${ti + 1}`)
+        let option: echarts.EChartsOption
 
-            tValCols.forEach((col, ci) => {
-              const colorIdx = (ti * tValCols.length + ci) % SERIES_COLORS.length
-              const color = SERIES_COLORS[colorIdx]
+        switch (type) {
+          case 'bar':
+          case 'line':
+          case 'timeseries': {
+            const series: echarts.SeriesOption[] = []
+            const hasBars = isTimeseries && Object.values(fieldStyles).some((s) => s === 'bars')
 
-              // 逐项告警着色
-              const seriesData = targetRows.map((m) => {
-                const val = parseFloat(m[col]) || 0
-                const alertColor = getCellAlertColor(col, String(val))
-                return alertColor
-                  ? { value: val, itemStyle: { color: alertColor, borderColor: alertColor, borderRadius: type === 'bar' ? (isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]) : 0 } }
-                  : val
-              })
+            data.forEach((targetRows, ti) => {
+              const tdef = targets[ti]
+              const { valueCols: tValCols } = detectColumns(targetRows, type)
+              const seriesBaseName = tdef?.metricName || tdef?.refId || (tValCols[0] || `查询${ti + 1}`)
 
-              series.push({
-                name: tValCols.length > 1 ? `${seriesBaseName}-${col}` : seriesBaseName,
-                type: type as 'bar' | 'line',
-                data: seriesData,
-                ...(type === 'bar'
-                  ? {
-                      itemStyle: {
-                        color,
-                        borderRadius: isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0],
-                      },
-                      barMaxWidth: 36,
-                      emphasis: {
-                        itemStyle: {
-                          shadowBlur: 8,
-                          shadowOffsetY: 2,
-                          shadowColor: 'rgba(0,0,0,0.12)',
-                        },
-                      },
-                    }
-                  : {
-                      smooth: true,
-                      lineStyle: { color, width: 2.5 },
-                      itemStyle: { color },
-                      symbol: 'circle',
-                      symbolSize: seriesAlerts.length > 0 ? 7 : 5,
-                      areaStyle: {
-                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                          { offset: 0, color },
-                          { offset: 1, color: 'rgba(255,255,255,0)' },
-                        ]),
-                        opacity: 0.12,
-                      },
-                    }),
+              tValCols.forEach((col, ci) => {
+                const colorIdx = (ti * tValCols.length + ci) % SERIES_COLORS.length
+                const defaultColor = SERIES_COLORS[colorIdx]
+                const color = (isTimeseries && fieldColors[col]) ? fieldColors[col] : defaultColor
+                const fieldStyle: 'lines' | 'bars' | 'points' = isTimeseries
+                  ? (fieldStyles[col] || 'lines')
+                  : (type === 'bar' ? 'bars' : 'lines')
+                const isBarStyle = fieldStyle === 'bars'
+                const isPointsStyle = fieldStyle === 'points'
+                const isHorizontal = type === 'bar' && ((options?.barOrientation as string) || 'vertical') === 'horizontal'
+
+                const seriesData = targetRows.map((m) => {
+                  const val = parseFloat(m[col]) || 0
+                  const alertColor = getCellAlertColor(col, String(val))
+                  return alertColor
+                    ? { value: val, itemStyle: { color: alertColor, borderColor: alertColor, borderRadius: isBarStyle ? (isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]) : 0 } }
+                    : val
+                })
+
+                if (isBarStyle) {
+                  series.push({
+                    name: tValCols.length > 1 ? `${seriesBaseName}-${col}` : seriesBaseName,
+                    type: 'bar',
+                    data: seriesData,
+                    barMaxWidth: 36,
+                    itemStyle: { color, borderRadius: isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0] },
+                    emphasis: { itemStyle: { shadowBlur: 8, shadowOffsetY: 2, shadowColor: 'rgba(0,0,0,0.12)' } },
+                  })
+                } else if (isPointsStyle) {
+                  series.push({
+                    name: tValCols.length > 1 ? `${seriesBaseName}-${col}` : seriesBaseName,
+                    type: 'line',
+                    data: seriesData,
+                    symbol: 'circle',
+                    symbolSize: 7,
+                    lineStyle: { width: 0 },
+                    itemStyle: { color, borderColor: color, borderWidth: 1 },
+                  })
+                } else {
+                  series.push({
+                    name: tValCols.length > 1 ? `${seriesBaseName}-${col}` : seriesBaseName,
+                    type: 'line',
+                    data: seriesData,
+                    lineStyle: { color, width: 2.5 },
+                    itemStyle: { color },
+                    symbol: 'circle',
+                    symbolSize: 5,
+                    areaStyle: {
+                      color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color },
+                        { offset: 1, color: 'rgba(255,255,255,0)' },
+                      ]),
+                      opacity: 0.12,
+                    },
+                  })
+                }
               })
             })
-          })
 
-          const legendData = series.map((s) => s.name as string)
+            const barOrientation = (options?.barOrientation as string) || 'vertical'
+            const isHorizontal = type === 'bar' && barOrientation === 'horizontal'
+            const legendData = series.map((s) => s.name as string)
 
-          // 构建 series 索引 → valueCol 映射，供 tooltip 告警检查
-          const seriesColMap: Map<number, string> = new Map()
-          let seriesIdx = 0
-          data.forEach((targetRows, _ti) => {
-            const { valueCols: tValCols } = detectColumns(targetRows, type)
-            tValCols.forEach((col) => {
-              seriesColMap.set(seriesIdx, col)
-              seriesIdx++
-            })
-          })
-
-          // 计算xAxis标签间隔（避免重叠）
-          const calculateLabelInterval = (): number => {
-            // 根据数据点数量估算可显示的标签数量
-            // 假设每个标签需要约50px宽度（含间距）
-            const avgLabelWidth = 50
-            // 使用实际图表宽度（容器宽度 - 左右边距）
-            const chartWidth = el?.offsetWidth || 400
-            const usableWidth = chartWidth * 0.85 // 减去左右边距
-            const maxLabels = Math.floor(usableWidth / avgLabelWidth)
-            if (names.length > maxLabels && maxLabels > 0) {
-              return Math.ceil(names.length / maxLabels) - 1
-            }
-            return 0
-          }
-
-          // 计算标签旋转角度
-          const calculateRotate = (): number => {
-            if (isHorizontal) return 0
-            // 时间序列数据：根据数据点数量决定旋转
-            if (isTimeSeries) {
-              if (names.length > 20) return 45
-              if (names.length > 10) return 30
+            const calculateLabelInterval = (): number => {
+              const avgLabelWidth = 50
+              const chartWidth = el.offsetWidth || 400
+              const usableWidth = chartWidth * 0.85
+              const maxLabels = Math.floor(usableWidth / avgLabelWidth)
+              if (names.length > maxLabels && maxLabels > 0) return Math.ceil(names.length / maxLabels) - 1
               return 0
             }
-            // 非时间序列数据：根据标签文本长度决定旋转
-            const avgLabelLen = names.reduce((sum, n) => sum + (n?.length || 0), 0) / names.length
-            if (names.length > 15 || avgLabelLen > 8) return 30
-            if (names.length > 10 || avgLabelLen > 5) return 15
-            return 0
-          }
+            const calculateRotate = (): number => {
+              if (isHorizontal) return 0
+              if (isTimeSeries) {
+                if (names.length > 20) return 45
+                if (names.length > 10) return 30
+                return 0
+              }
+              const avgLabelLen = names.reduce((sum, n) => sum + (n?.length || 0), 0) / names.length
+              if (names.length > 15 || avgLabelLen > 8) return 30
+              if (names.length > 10 || avgLabelLen > 5) return 15
+              return 0
+            }
+            const labelRotate = calculateRotate()
+            const labelInterval = calculateLabelInterval()
 
-          const labelRotate = calculateRotate()
-          const labelInterval = calculateLabelInterval()
+            // series → col 映射供 tooltip
+            const seriesColMap: Map<number, string> = new Map()
+            let sIdx = 0
+            data.forEach((tRows) => {
+              const { valueCols: tv } = detectColumns(tRows, type)
+              tv.forEach((c) => { seriesColMap.set(sIdx, c); sIdx++ })
+            })
 
-          option = {
-            backgroundColor: 'transparent',
-            color: SERIES_COLORS,
-            tooltip: {
-              trigger: 'axis',
-              backgroundColor: '#fff',
-              borderColor: '#e8ecf1',
-              borderWidth: 1,
-              padding: [12, 16],
-              extraCssText: 'border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.08);',
-              textStyle: { color: '#1d2129', fontSize: 12, lineHeight: 20 },
-              ...(type === 'bar' ? { axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(0,0,0,0.04)' } } } : {}),
-              formatter: (params: any) => {
-                if (!Array.isArray(params)) params = [params]
-                const parts = params.map((p: any) => {
-                  // 检查条件告警
-                  const colName = seriesColMap.get(p.seriesIndex)
-                  const alertColor = colName ? getCellAlertColor(colName, String(p.value)) : undefined
-                  return `<div style="display:flex;align-items:center;gap:8px;margin:2px 0">
-                    <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${alertColor || p.color};flex-shrink:0"></span>
-                    <span style="color:#86909c;min-width:80px">${p.seriesName}</span>
-                    <span style="color:${alertColor ? alertColor : '#1d2129'};font-weight:600">${formatNumber(p.value)}${alertColor ? ' ⚠' : ''}</span>
-                  </div>`
-                })
-                return `<div style="font-weight:600;color:#4e5969;margin-bottom:6px">${params[0].axisValueLabel}</div>${parts.join('')}`
+            option = {
+              backgroundColor: 'transparent',
+              color: SERIES_COLORS,
+              tooltip: {
+                trigger: 'axis',
+                backgroundColor: '#fff',
+                borderColor: '#e8ecf1',
+                borderWidth: 1,
+                padding: [12, 16],
+                extraCssText: 'border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.08);',
+                textStyle: { color: '#1d2129', fontSize: 12, lineHeight: 20 },
+                ...((isTimeseries && hasBars) || type === 'bar' ? { axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(0,0,0,0.04)' } } } : {}),
+                formatter: (params: any) => {
+                  if (!Array.isArray(params)) params = [params]
+                  const parts = params.map((p: any) => {
+                    const colName = seriesColMap.get(p.seriesIndex)
+                    const alertColor = colName ? getCellAlertColor(colName, String(p.value)) : undefined
+                    return `<div style="display:flex;align-items:center;gap:8px;margin:2px 0"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${alertColor || p.color};flex-shrink:0"></span><span style="color:#86909c;min-width:80px">${p.seriesName}</span><span style="color:${alertColor ? alertColor : '#1d2129'};font-weight:600">${formatNumber(p.value)}${alertColor ? ' ⚠' : ''}</span></div>`
+                  })
+                  return `<div style="font-weight:600;color:#4e5969;margin-bottom:6px">${params[0].axisValueLabel}</div>${parts.join('')}`
+                },
               },
-            },
-            legend: (isMultiTarget || valueCols.length > 1 || data.some((_r, i) => (targets[i]?.metricName || '').length > 0))
-              ? {
-                  data: legendData,
-                  bottom: 0,
-                  icon: 'roundRect',
-                  itemWidth: 10,
-                  itemHeight: 10,
-                  itemGap: 16,
-                  textStyle: { color: '#86909c', fontSize: 11 },
-                }
-              : undefined,
-            grid: {
-              left: '3%',
-              right: '5%',
-              bottom: legendData.length > 1 ? '14%' : (labelRotate > 30 ? '16%' : labelRotate > 0 ? '12%' : '8%'),
-              top: '8%',
-              containLabel: true,
-            },
-            xAxis: isHorizontal
-              ? {
-                  type: 'value',
-                  name: valueCols[0] || '',
-                  nameTextStyle: { color: '#86909c', fontSize: 11 },
-                  axisLabel: { color: '#86909c', fontSize: 10 },
-                  axisLine: { show: false },
-                  axisTick: { show: false },
-                  splitLine: { lineStyle: { color: '#f2f3f5', type: 'dashed' } },
-                }
-              : {
-                  type: 'category',
-                  data: names,
-                  ...(type === 'line' ? { boundaryGap: false } : {}),
-                  axisLabel: {
-                    rotate: labelRotate,
-                    fontSize: 10,
-                    color: '#86909c',
-                    interval: labelInterval,
-                    hideOverlap: names.length > 25,
-                    formatter: (val: string) => val && val.length > 12 ? val.slice(0, 12) + '...' : val,
+              legend: (data.length > 1 || valueCols.length > 1 || data.some((_r, i) => (targets[i]?.metricName || '').length > 0))
+                ? { data: legendData, bottom: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10, itemGap: 16, textStyle: { color: '#86909c', fontSize: 11 } }
+                : undefined,
+              grid: {
+                left: '3%', right: '5%',
+                bottom: legendData.length > 1 ? '14%' : (labelRotate > 30 ? '16%' : labelRotate > 0 ? '12%' : '8%'),
+                top: '8%',
+                containLabel: true,
+              },
+              xAxis: isHorizontal
+                ? { type: 'value', name: valueCols[0] || '', nameTextStyle: { color: '#86909c', fontSize: 11 }, axisLabel: { color: '#86909c', fontSize: 10 }, axisLine: { show: false }, axisTick: { show: false }, splitLine: { lineStyle: { color: '#f2f3f5', type: 'dashed' } } }
+                : {
+                    type: 'category', data: names,
+                    ...(isTimeseries ? (hasBars ? { boundaryGap: true } : { boundaryGap: false }) : type === 'line' ? { boundaryGap: false } : {}),
+                    axisLabel: { rotate: labelRotate, fontSize: 10, color: '#86909c', interval: labelInterval, hideOverlap: names.length > 25, formatter: (val: string) => val && val.length > 12 ? val.slice(0, 12) + '...' : val },
+                    axisLine: { lineStyle: { color: '#e5e6eb' } },
+                    axisTick: { show: false },
                   },
-                  axisLine: { lineStyle: { color: '#e5e6eb' } },
-                  axisTick: { show: false },
-                },
-            yAxis: isHorizontal
-              ? {
-                  type: 'category', data: names,
-                  axisLabel: { fontSize: 10, color: '#86909c' },
-                  axisLine: { lineStyle: { color: '#e5e6eb' } },
-                  axisTick: { show: false },
-                }
-              : {
-                  type: 'value',
-                  name: valueCols[0] || '',
-                  nameTextStyle: { color: '#86909c', fontSize: 11 },
-                  axisLabel: { color: '#86909c', fontSize: 10 },
-                  axisLine: { show: false },
-                  axisTick: { show: false },
-                  splitLine: { lineStyle: { color: '#f2f3f5', type: 'dashed' } },
-                },
-            series,
+              yAxis: isHorizontal
+                ? { type: 'category', data: names, axisLabel: { fontSize: 10, color: '#86909c' }, axisLine: { lineStyle: { color: '#e5e6eb' } }, axisTick: { show: false } }
+                : { type: 'value', name: valueCols[0] || '', nameTextStyle: { color: '#86909c', fontSize: 11 }, axisLabel: { color: '#86909c', fontSize: 10 }, axisLine: { show: false }, axisTick: { show: false }, splitLine: { lineStyle: { color: '#f2f3f5', type: 'dashed' } } },
+              series,
+            }
+            break
           }
-          break
+
+          case 'pie': {
+            const primaryValues = valueCols.length > 0 ? firstRows.map((m) => parseFloat(m[valueCols[0]]) || 0) : []
+            const dataCount = names.length
+            const isManyData = dataCount > 8
+            const pieCenter = isManyData ? ['40%', '50%'] : ['55%', '50%']
+            const pieRadius = isManyData ? ['35%', '55%'] : ['45%', '70%']
+            const pieAlertCol = valueCols.length > 0 ? valueCols[0] : null
+
+            option = {
+              backgroundColor: 'transparent',
+              tooltip: {
+                trigger: 'item',
+                backgroundColor: '#22252b',
+                borderColor: '#33363d',
+                textStyle: { color: '#d8d9da' },
+                confine: true,
+                formatter: (params: any) => {
+                  const alertClr = pieAlertCol ? getCellAlertColor(pieAlertCol, String(params.value)) : undefined
+                  return alertClr ? `<b>${params.name}</b>: ${formatNumber(params.value)} (${formatNumber(params.percent)}%) <span style="color:${alertClr}">⚠</span>` : `<b>${params.name}</b>: ${formatNumber(params.value)} (${formatNumber(params.percent)}%)`
+                },
+              },
+              legend: isManyData ? {
+                type: 'scroll', orient: 'vertical', right: 10, top: 'middle',
+                textStyle: { color: '#a0a3a8', fontSize: 11 }, itemWidth: 12, itemHeight: 12, itemGap: 6,
+                pageIconColor: '#a0a3a8', pageIconInactiveColor: '#4e5969', pageTextStyle: { color: '#a0a3a8' },
+              } : {
+                orient: 'vertical', left: 10, top: 'middle',
+                textStyle: { color: '#a0a3a8', fontSize: 11 }, itemWidth: 12, itemHeight: 12, itemGap: 6,
+              },
+              series: [{
+                type: 'pie', radius: pieRadius, center: pieCenter,
+                data: names.map((n, i) => ({ name: n, value: primaryValues[i] || 0 })),
+                emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.5)' }, label: { show: true, fontWeight: 'bold' } },
+                label: {
+                  show: !isManyData, position: 'outer', color: '#a0a3a8', fontSize: 10,
+                  formatter: isManyData ? '{b}' : '{b}\n{c} ({d}%)', alignTo: 'labelLine', bleedMargin: 5,
+                },
+                labelLine: { show: !isManyData, length: 10, length2: 15, smooth: false, lineStyle: { color: '#4e5969', width: 1 } },
+                labelLayout: { hideOverlap: true, moveOverlap: 'shiftY' },
+                ...(isManyData ? {} : { blur: { label: { opacity: 0.3 } } }),
+              }],
+            }
+            break
+          }
+
+          case 'gauge': {
+            const primaryValues = valueCols.length > 0 ? firstRows.map((m) => parseFloat(m[valueCols[0]]) || 0) : []
+            const gaugeValue = primaryValues.length > 0 ? primaryValues[0] : 0
+            const gaugeName = (nameCol && valueCols.length > 0 && nameCol === valueCols[0]) ? nameCol : (names.length > 0 ? names[0] : '')
+            const gMin = (options?.min as number) ?? 0
+            const gMax = (options?.max as number) ?? 100
+            const gUnit = (options?.unit as string) ?? ''
+            const gColor = (options?.color as string) ?? '#1F7A3F'
+            const gBgColor = (options?.bgColor as string) ?? '#D9E8DC'
+            const gValueMode = (options?.valueMode as string) ?? 'absolute'
+            let displayValue = gaugeValue
+            if (gValueMode === 'percentage') displayValue = gMax !== gMin ? ((gaugeValue - gMin) / (gMax - gMin)) * 100 : 0
+
+            option = {
+              backgroundColor: 'transparent',
+              series: [{
+                type: 'gauge',
+                startAngle: 225, endAngle: -45, center: ['50%', '50%'], radius: '88%',
+                min: gValueMode === 'percentage' ? 0 : gMin,
+                max: gValueMode === 'percentage' ? 100 : gMax,
+                progress: { show: true, width: 36, roundCap: true, itemStyle: { color: gColor } },
+                axisLine: { lineStyle: { width: 36, color: [[1, gBgColor]] } },
+                axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
+                anchor: { show: false }, pointer: { show: false },
+                detail: {
+                  valueAnimation: true, fontSize: 30, offsetCenter: [0, '0%'],
+                  formatter: (val: number) => gValueMode === 'percentage' ? `${val.toFixed(1)}%` : `${formatNumber(val)}${gUnit ? ' ' + gUnit : ''}`,
+                  color: gColor, fontWeight: 600, fontFamily: 'Inter, -apple-system, sans-serif',
+                },
+                title: { color: '#666', fontSize: 13, offsetCenter: [0, '40%'], fontFamily: 'Inter, -apple-system, sans-serif' },
+                data: [{ value: displayValue, name: gaugeName || undefined }],
+              }],
+            }
+            break
+          }
+
+          default: option = {}
         }
 
-        case 'pie': {
-          const primaryValues = valueCols.length > 0
-            ? firstRows.map((m) => parseFloat(m[valueCols[0]]) || 0)
-            : []
-          // 根据数据量动态调整布局
-          const dataCount = names.length
-          const isManyData = dataCount > 8
-          // 数据多时：使用右侧图例，饼图左移，标签隐藏（通过图例查看）
-          // 数据少时：使用左侧图例，饼图右移，标签外部显示
-          const pieCenter = isManyData ? ['40%', '50%'] : ['55%', '50%']
-          const pieRadius = isManyData ? ['35%', '55%'] : ['45%', '70%']
+        chart.setOption(option)
 
-          // 告警列名（供 tooltip 使用）
-          const pieAlertCol = valueCols.length > 0 ? valueCols[0] : null
-
-          option = {
-            backgroundColor: 'transparent',
-            tooltip: {
-              trigger: 'item',
-              backgroundColor: '#22252b',
-              borderColor: '#33363d',
-              textStyle: { color: '#d8d9da' },
-              confine: true,
-              formatter: (params: any) => {
-                 const alertClr = pieAlertCol ? getCellAlertColor(pieAlertCol, String(params.value)) : undefined
-                 const base = `<b>${params.name}</b>: ${formatNumber(params.value)} (${formatNumber(params.percent)}%)`
-                 return alertClr ? `${base} <span style="color:${alertClr}">⚠</span>` : base
-               },
-            },
-            legend: isManyData ? {
-              type: 'scroll',
-              orient: 'vertical',
-              right: 10,
-              top: 'middle',
-              textStyle: { color: '#a0a3a8', fontSize: 11 },
-              itemWidth: 12,
-              itemHeight: 12,
-              itemGap: 6,
-              pageIconColor: '#a0a3a8',
-              pageIconInactiveColor: '#4e5969',
-              pageTextStyle: { color: '#a0a3a8' },
-            } : {
-              orient: 'vertical',
-              left: 10,
-              top: 'middle',
-              textStyle: { color: '#a0a3a8', fontSize: 11 },
-              itemWidth: 12,
-              itemHeight: 12,
-              itemGap: 6,
-            },
-            series: [{
-              type: 'pie',
-              radius: pieRadius,
-              center: pieCenter,
-              data: names.map((n, i) => ({ name: n, value: primaryValues[i] || 0 })),
-              emphasis: {
-                itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.5)' },
-                label: { show: true, fontWeight: 'bold' }, // 悬浮时显示标签
-              },
-              label: {
-                show: !isManyData, // 数据多时隐藏标签，通过图例查看
-                position: 'outer',
-                color: '#a0a3a8',
-                fontSize: 10,
-                formatter: isManyData ? '{b}' : '{b}\n{c} ({d}%)', // 数据多时只显示名称
-                alignTo: 'labelLine', // 标签对齐到引导线
-                bleedMargin: 5, // 标签出血边距
-              },
-              labelLine: {
-                show: !isManyData,
-                length: 10, // 第一段引导线长度
-                length2: 15, // 第二段引导线长度
-                smooth: false,
-                lineStyle: { color: '#4e5969', width: 1 },
-              },
-              labelLayout: {
-                hideOverlap: true, // 自动隐藏重叠的标签
-                moveOverlap: 'shiftY', // 垂直方向移动避免重叠
-              },
-              // 小数据时，鼠标悬浮显示完整信息
-              ...(isManyData ? {} : {
-                blur: {
-                  label: { opacity: 0.3 },
-                },
-              }),
-            }],
-          }
-          break
-        }
-
-        case 'gauge': {
-          const primaryValues = valueCols.length > 0
-            ? firstRows.map((m) => parseFloat(m[valueCols[0]]) || 0)
-            : []
-          const gaugeValue = primaryValues.length > 0 ? primaryValues[0] : 0
-          const gaugeName = names.length > 0 ? names[0] : '使用率'
-          // 冷色调分级色：蓝 → 青 → 绿（不使用红/黄色）
-          const stageColors = gaugeValue > 80 ? '#5470c6' : gaugeValue > 50 ? '#73c0de' : '#3ba272'
-          option = {
-            backgroundColor: 'transparent',
-            series: [{
-              type: 'gauge', min: 0, max: 100, startAngle: 210, endAngle: -30,
-              center: ['50%', '60%'], radius: '85%',
-              progress: { show: true, width: 14, itemStyle: { color: stageColors } },
-              axisLine: {
-                lineStyle: {
-                  width: 14,
-                  color: [[0.5, '#3ba272'], [0.8, '#73c0de'], [1, '#5470c6']],
-                },
-              },
-              axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
-              detail: { valueAnimation: true, fontSize: 28, offsetCenter: [0, '60%'], formatter: (val: number) => `${formatNumber(val)}%`, color: '#1d2129', fontWeight: 'bold' },
-              data: [{ value: gaugeValue, name: shortName(gaugeName) }],
-              title: { color: '#86909c', fontSize: 12, offsetCenter: [0, '85%'] },
-            }],
-          }
-          break
-        }
-
-        default:
-          option = {}
-      }
-
-      chart.setOption(option)
-
-      // 添加点击事件处理（Data Links）
-      if (dataLinks && dataLinks.length > 0) {
-        chart.on('click', (params: any) => {
-          if (!dataLinks || dataLinks.length === 0) return
-
-          // 构建变量替换数据
-          const linkData: Record<string, any> = {
-            '__value': params.value,
-            '__series.name': params.seriesName,
-            '__series.index': params.seriesIndex,
-            '__data.name': params.name,
-            '__data.index': params.dataIndex,
-          }
-
-          // 显示链接菜单
-          setLinkMenu({
-            x: params.event?.event?.clientX || 0,
-            y: params.event?.event?.clientY || 0,
-            links: dataLinks,
-            data: linkData,
+        // Data Links 点击事件
+        if (dataLinks && dataLinks.length > 0) {
+          chart.on('click', (params: any) => {
+            if (!dataLinks || dataLinks.length === 0) return
+            const linkData: Record<string, any> = {
+              '__value': params.value, '__series.name': params.seriesName,
+              '__series.index': params.seriesIndex, '__data.name': params.name,
+              '__data.index': params.dataIndex,
+            }
+            setLinkMenu({ x: params.event?.event?.clientX || 0, y: params.event?.event?.clientY || 0, links: dataLinks, data: linkData })
           })
-        })
+        }
+
+        const handleResize = () => { try { chart.resize() } catch {} }
+        window.addEventListener('resize', handleResize)
+        const resizeObserver = new ResizeObserver(() => { try { chart.resize() } catch {} })
+        if (el) resizeObserver.observe(el)
+
+        return () => {
+          resizeObserver.disconnect()
+          window.removeEventListener('resize', handleResize)
+          if (dataLinks && dataLinks.length > 0) chart.off('click')
+          try { chart.dispose(); chartInstanceRef.current = null } catch {}
+        }
       }
 
-      const handleResize = () => {
-        try { chart.resize() } catch {}
-      }
-      window.addEventListener('resize', handleResize)
+      // ---- 多查询独立渲染：每个 target 一个独立的 ECharts 图表 ----
+      const disposers: (() => void)[] = []
 
-      // 监听容器大小变化
-      const resizeObserver = new ResizeObserver(() => {
-        try { chart.resize() } catch {}
+      // 构建 refId → 首个数值的映射表（用于表达式计算）
+      const refValues: Record<string, number> = {}
+      data.forEach((targetRows, ti) => {
+        const tdef = targets[ti]
+        if (tdef?.targetType === 'expression') return
+        const { valueCols: tvCols } = detectColumns(targetRows, type)
+        if (tvCols.length > 0 && targetRows.length > 0) {
+          refValues[tdef?.refId || String(ti)] = parseFloat(targetRows[0][tvCols[0]]) || 0
+        }
       })
-      if (el) resizeObserver.observe(el)
+
+      /** 计算 Math 表达式的值 */
+      const evaluateExpression = (expr: string): number => {
+        try {
+          let resolved = expr
+          // 替换 $A, $B 等引用
+          for (const [refId, val] of Object.entries(refValues)) {
+            resolved = resolved.replace(new RegExp('\\$' + refId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), String(val))
+          }
+          // 安全的 Math 运算（只允许数字、运算符、括号、空格）
+          if (!/^[\d\s+\-*/().%]+$/.test(resolved)) return 0
+          const result = Function('"use strict"; return (' + resolved + ')')()
+          return typeof result === 'number' && !isNaN(result) ? result : 0
+        } catch { return 0 }
+      }
+
+      data.forEach((targetRows, ti) => {
+        const tdef = targets[ti]
+        const isExpr = tdef?.targetType === 'expression'
+
+        const container = chartContainersRef.current.get(ti)
+        if (!container || container.offsetWidth === 0 || container.offsetHeight === 0) return
+
+        const targetChart = echarts.init(container, undefined, { renderer: 'canvas' })
+        chartInstancesRef.current.set(ti, targetChart)
+
+        // 表达式 query：计算值并构造虚拟行
+        let effectiveRows = targetRows
+        if (isExpr && tdef?.expression) {
+          const computedVal = evaluateExpression(tdef.expression)
+          const exprName = tdef.metricName || tdef.refId || `Expr${ti}`
+          effectiveRows = [{ [exprName]: computedVal }]
+        }
+
+        const option = buildGaugeChartOption(effectiveRows, ti)
+        targetChart.setOption(option)
+
+        const handleResize = () => { try { targetChart.resize() } catch {} }
+        window.addEventListener('resize', handleResize)
+        const resizeObserver = new ResizeObserver(() => { try { targetChart.resize() } catch {} })
+        resizeObserver.observe(container)
+        disposers.push(() => {
+          resizeObserver.disconnect()
+          window.removeEventListener('resize', handleResize)
+          try { targetChart.dispose() } catch {}
+        })
+      })
 
       return () => {
-        resizeObserver.disconnect()
-        window.removeEventListener('resize', handleResize)
-        // 移除点击事件
-        if (dataLinks && dataLinks.length > 0) {
-          chart.off('click')
-        }
-        try {
-          chart.dispose()
-          chartInstanceRef.current = null
-        } catch {}
+        disposers.forEach((d) => d())
+        chartInstancesRef.current = new Map()
       }
     } catch (err: any) {
       console.error('ChartPanel init error:', err)
       setChartError(err.message || '图表初始化失败')
-      // 清理可能的残留实例
       try {
-        if (chartInstanceRef.current) {
-          chartInstanceRef.current.dispose()
-          chartInstanceRef.current = null
-        }
+        if (chartInstanceRef.current) { chartInstanceRef.current.dispose(); chartInstanceRef.current = null }
       } catch {}
     }
   }, [type, data, nameCol, valueCols, targets, options])
@@ -756,7 +819,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
 
   // 条件告警
   interface CellAlertRule { column: string; op: '>' | '>=' | '<' | '<=' | '=' | '!='; value: number; color: string }
-  const supportsCellAlerts = type === 'table' || type === 'bar' || type === 'line' || type === 'pie'
+  const supportsCellAlerts = type === 'table' || type === 'bar' || type === 'line' || type === 'timeseries' || type === 'pie'
   const cellAlertRules: CellAlertRule[] = useMemo(() => {
     if (!supportsCellAlerts) return []
     const raw = options?.cellAlerts
@@ -1181,6 +1244,19 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
               <span style={{ marginLeft: 4 }}>共 {filteredSortedData.length} 条</span>
             </div>
           )}
+        </div>
+      ) : data.length > 1 && type === 'gauge' ? (
+        <div style={{ display: 'flex', flexDirection: 'row', flex: 1, gap: 4, minHeight: '200px', alignItems: 'stretch' }}>
+          {data.map((_, ti) => {
+            return (
+              <div key={ti} style={{ flex: 1, minHeight: 160, display: 'flex', flexDirection: 'column' }}>
+                <div
+                  ref={(el) => { if (el) chartContainersRef.current.set(ti, el); else chartContainersRef.current.delete(ti) }}
+                  style={{ width: '100%', flex: 1, minHeight: 160 }}
+                />
+              </div>
+            )
+          })}
         </div>
       ) : (
         <div ref={chartRef} style={{ width: '100%', flex: 1, minHeight: '200px' }}>
