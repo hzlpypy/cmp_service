@@ -109,6 +109,8 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
   // AI 对话面板
   const [chatOpen, setChatOpen] = useState(false)
+  const [chatWidth, setChatWidth] = useState(380) // 可调整的宽度
+  const [isResizing, setIsResizing] = useState(false)
 
   // 创建仪表板快照
   const [snapModalOpen, setSnapModalOpen] = useState(false)
@@ -750,6 +752,8 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
       const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
       setDataRes(dbData)
+      // 保存成功提示
+      message.success('仪表板保存成功')
     } catch (e: any) {
       message.error('保存失败: ' + (e.message || e))
     } finally {
@@ -1257,16 +1261,6 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                   </svg>
                   生成报告
                 </button>
-                <button
-                  className="btn-sm"
-                  onClick={() => { setChatOpen(!chatOpen); setMoreMenuOpen(false) }}
-                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                  </svg>
-                  {chatOpen ? '关闭AI' : 'AI 助手'}
-                </button>
               </div>
             )}
           </div>
@@ -1284,6 +1278,18 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
               <polyline points="7 3 7 8 15 8" />
             </svg>
             {saving ? '保存中...' : '保存仪表板'}
+          </button>
+
+          {/* AI 助手按钮 */}
+          <button
+            className={`btn-sm ${chatOpen ? 'primary' : ''}`}
+            onClick={() => setChatOpen(!chatOpen)}
+            title={chatOpen ? '关闭AI助手' : '打开AI助手'}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            {chatOpen ? '关闭AI' : 'AI 助手'}
           </button>
         </div>
       </div>
@@ -1530,11 +1536,51 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
         {/* AI 聊天侧边栏 */}
         <div style={{
-            width: chatOpen ? 380 : 0, flexShrink: 0,
+            width: chatOpen ? chatWidth : 0, flexShrink: 0,
             borderLeft: chatOpen ? '1px solid var(--border-color)' : 'none',
             overflow: 'hidden',
-            transition: 'width 0.2s',
+            transition: isResizing ? 'none' : 'width 0.2s',
+            position: 'relative',
           }}>
+            {/* 可拖动的分隔条 */}
+            {chatOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 5,
+                  cursor: 'col-resize',
+                  background: isResizing ? 'var(--primary)' : 'transparent',
+                  zIndex: 10,
+                  transition: 'background 0.2s',
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  setIsResizing(true)
+                  const startX = e.clientX
+                  const startWidth = chatWidth
+
+                  const handleMouseMove = (moveEvent: MouseEvent) => {
+                    const newWidth = startWidth - (moveEvent.clientX - startX)
+                    // 限制最小和最大宽度
+                    if (newWidth >= 280 && newWidth <= 800) {
+                      setChatWidth(newWidth)
+                    }
+                  }
+
+                  const handleMouseUp = () => {
+                    setIsResizing(false)
+                    document.removeEventListener('mousemove', handleMouseMove)
+                    document.removeEventListener('mouseup', handleMouseUp)
+                  }
+
+                  document.addEventListener('mousemove', handleMouseMove)
+                  document.addEventListener('mouseup', handleMouseUp)
+                }}
+              />
+            )}
             <AIChatDialog
               visible={chatOpen}
               dashboardId={dashboardId}

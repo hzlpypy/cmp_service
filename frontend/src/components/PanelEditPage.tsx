@@ -64,6 +64,10 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
   const [queryLoading, setQueryLoading] = useState(false)
   const [hasUnsaved, setHasUnsaved] = useState(false)
   const [variables, setVariables] = useState<VariableRes[]>(initialVariables || [])
+  
+  // 侧边栏宽度调整
+  const [sidebarWidth, setSidebarWidth] = useState(420)
+  const [isResizing, setIsResizing] = useState(false)
 
   // 时间范围选择（使用传入的初始值，若没有则从 localStorage 恢复）
   type TimePreset = '5m' | '30m' | '1h' | '6h' | '12h' | '24h' | '2d' | '7d' | '30d' | 'today' | 'yesterday' | 'day_before_yesterday' | 'last_week_today' | 'custom'
@@ -703,6 +707,12 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
               </div>
             )}
           </div>
+          <button className="btn-sm" onClick={onBack} title="返回面板">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5M12 19l-7-7 7-7"/>
+            </svg>
+            返回
+          </button>
           {hasUnsaved && (
             <button className="btn-sm" onClick={handleDiscard} title="丢弃更改">
               丢弃
@@ -763,7 +773,51 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
         </div>
 
         {/* 右侧：侧边栏 */}
-        <div className="pe-sidebar">
+        <div className="pe-sidebar" style={{ 
+          width: sidebarWidth, 
+          minWidth: 320, 
+          maxWidth: '80vw',
+          transition: isResizing ? 'none' : 'width 0.2s',
+          position: 'relative'
+        }}>
+          {/* 可拖动的分隔条 */}
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: 5,
+              cursor: 'col-resize',
+              background: isResizing ? 'var(--primary)' : 'transparent',
+              zIndex: 10,
+              transition: 'background 0.2s',
+            }}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              setIsResizing(true)
+              const startX = e.clientX
+              const startWidth = sidebarWidth
+
+              const handleMouseMove = (moveEvent: MouseEvent) => {
+                const newWidth = startWidth - (moveEvent.clientX - startX)
+                // 限制最小和最大宽度
+                if (newWidth >= 320 && newWidth <= window.innerWidth * 0.8) {
+                  setSidebarWidth(newWidth)
+                }
+              }
+
+              const handleMouseUp = () => {
+                setIsResizing(false)
+                document.removeEventListener('mousemove', handleMouseMove)
+                document.removeEventListener('mouseup', handleMouseUp)
+              }
+
+              document.addEventListener('mousemove', handleMouseMove)
+              document.addEventListener('mouseup', handleMouseUp)
+            }}
+          />
+          
           {/* 侧边栏 Tab 切换 */}
           <div className="pe-sidebar-tabs">
             {(['query', 'options', 'share'] as SidebarTab[]).map((t) => (
