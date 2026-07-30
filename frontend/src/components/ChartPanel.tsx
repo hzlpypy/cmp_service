@@ -269,7 +269,6 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
   const chartContainersRef = useRef<Map<number, HTMLDivElement>>(new Map())
   const chartInstancesRef = useRef<Map<number, echarts.ECharts>>(new Map())
   const [chartError, setChartError] = useState<string | null>(null)
-  const [chartErrors, setChartErrors] = useState<Map<number, string>>(new Map())
   const [linkMenu, setLinkMenu] = useState<{ x: number; y: number; links: DataLinkDef[]; data: Record<string, any> } | null>(null)
 
   // 合并所有 target 数据为扁平数组（用于表格和列探测）
@@ -330,7 +329,6 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
 
     try {
       setChartError(null)
-      setChartErrors(new Map())
 
       // 清理旧的单图表实例
       if (chartInstanceRef.current) {

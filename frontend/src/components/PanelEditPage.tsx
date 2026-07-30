@@ -691,13 +691,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
     }))
   }
 
-  const addExpression = () => {
-    const nextRef = refLabels[p.targets.length] || `Q${p.targets.length}`
-    setP((prev) => ({
-      ...prev,
-      targets: [...prev.targets, { refId: nextRef, targetType: 'expression', expression: '', rawSql: '', aliasMap: {}, category: '', metricName: '' }],
-    }))
-  }
+
 
   const removeTarget = (ti: number) => {
     setP((prev) => ({
