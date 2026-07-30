@@ -554,7 +554,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
     })
   }
 
-  const shareLink = `${window.location.origin}/snapshot/`
+  const shareLink = `${window.location.origin}/capacity_mgt_platform/snapshot/`
 
   // ---- 刷新预览数据 ----
   const handleRefreshPreview = async () => {

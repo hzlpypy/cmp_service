@@ -124,7 +124,7 @@ export default function SnapshotList() {
     return true
   })
 
-  const shareLink = `${window.location.origin}/snapshot/`
+  const shareLink = `${window.location.origin}/capacity_mgt_platform/snapshot/`
 
   const handleDelete = async (key: string) => {
     Modal.confirm({
