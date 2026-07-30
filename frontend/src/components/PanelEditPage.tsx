@@ -1068,10 +1068,21 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                           value={target.rawSql || ''}
                           onChange={(value) => updateTarget(ti, { rawSql: value })}
                           placeholder="SELECT market, date, weekday FROM calendar LIMIT 100"
-                            height="150px"
-                            dialect="mysql"
-                          />
-                        )
+                          height="150px"
+                          dialect="mysql"
+                          variables={[
+                            // 系统内置变量
+                            { name: '__from', label: '开始时间（ISO）' },
+                            { name: '__to', label: '结束时间（ISO）' },
+                            { name: '__fromUnix', label: '开始时间（Unix秒）' },
+                            { name: '__toUnix', label: '结束时间（Unix秒）' },
+                            { name: '__fromMs', label: '开始时间（毫秒）' },
+                            { name: '__toMs', label: '结束时间（毫秒）' },
+                            // 用户自定义变量
+                            ...variables.map(v => ({ name: v.name, label: v.label || v.name })),
+                          ]}
+                        />
+                      )
                       } else if (selectedDs.type === 'http') {
                         // HTTP数据源 - 显示HTTP配置
                         return (
