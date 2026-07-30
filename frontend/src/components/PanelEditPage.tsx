@@ -643,6 +643,9 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
   }
 
   const update = (patch: Partial<PanelDef>) => setP((prev) => ({ ...prev, ...patch }))
+  const updateGrid = (field: 'x' | 'y' | 'w' | 'h', value: number) => {
+    setP((prev) => ({ ...prev, gridPos: { ...prev.gridPos, [field]: value || 0 } }))
+  }
 
   const updateTarget = (ti: number, patch: Partial<TargetDef>) => {
     setP((prev) => ({
@@ -684,7 +687,15 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
     const nextRef = refLabels[p.targets.length] || `Q${p.targets.length}`
     setP((prev) => ({
       ...prev,
-      targets: [...prev.targets, { refId: nextRef, rawSql: '', aliasMap: {}, category: '', metricName: '' }],
+      targets: [...prev.targets, { refId: nextRef, targetType: 'query', rawSql: '', aliasMap: {}, category: '', metricName: '' }],
+    }))
+  }
+
+  const addExpression = () => {
+    const nextRef = refLabels[p.targets.length] || `Q${p.targets.length}`
+    setP((prev) => ({
+      ...prev,
+      targets: [...prev.targets, { refId: nextRef, targetType: 'expression', expression: '', rawSql: '', aliasMap: {}, category: '', metricName: '' }],
     }))
   }
 
@@ -1605,46 +1616,296 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
 
                 <Section title="布局" defaultOpen={false}>
                   <div className="pe-grid-fields">
-                    <div className="pe-label-sm">系统内置变量（时间范围）</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
-                      {[
-                        { name: '$__from', desc: '开始时间（ISO格式，自动加引号）' },
-                        { name: '$__to', desc: '结束时间（ISO格式，自动加引号）' },
-                        { name: '$__fromUnix', desc: '开始时间（Unix秒，数字）' },
-                        { name: '$__toUnix', desc: '结束时间（Unix秒，数字）' },
-                        { name: '$__fromMs', desc: '开始时间（毫秒，数字）' },
-                        { name: '$__toMs', desc: '结束时间（毫秒，数字）' },
-                        { name: '$__timeFilter(column)', desc: '时间过滤宏' },
-                      ].map((item) => (
-                        <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
-                          <code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>{item.name}</code>
-                          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{item.desc}</span>
-                        </div>
-                      ))}
+                    <div className="pe-field">
+                      <label className="pe-label-sm">X</label>
+                      <input type="number" value={p.gridPos?.x ?? 0} onChange={(e) => updateGrid('x', Number(e.target.value))} className="pe-input-xs" />
                     </div>
-                    <div className="pe-hint-text">
-                      示例：WHERE date &gt; $__from（自动替换为 WHERE date &gt; '2026-06-21T10:00:00Z'）
+                    <div className="pe-field">
+                      <label className="pe-label-sm">Y</label>
+                      <input type="number" value={p.gridPos?.y ?? 0} onChange={(e) => updateGrid('y', Number(e.target.value))} className="pe-input-xs" />
+                    </div>
+                    <div className="pe-field">
+                      <label className="pe-label-sm">宽</label>
+                      <input type="number" value={p.gridPos?.w ?? 24} onChange={(e) => updateGrid('w', Number(e.target.value))} className="pe-input-xs" min={1} max={24} />
+                    </div>
+                    <div className="pe-field">
+                      <label className="pe-label-sm">高</label>
+                      <input type="number" value={p.gridPos?.h ?? 8} onChange={(e) => updateGrid('h', Number(e.target.value))} className="pe-input-xs" min={1} />
                     </div>
                   </div>
-                  {/* 用户自定义变量 */}
-                  {variables.length > 0 && (
-                    <div>
-                      <div className="pe-label-sm">仪表板变量</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
-                        {variables.map((v) => (
-                          <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
-                            <code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>${v.name}</code>
-                            <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{v.label || v.name}</span>
-                            {v.multi && <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-input)', padding: '1px 6px', borderRadius: 3 }}>(多选)</span>}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {variables.length === 0 && (
-                    <div className="pe-hint-text" style={{ background: 'transparent', borderLeft: 'none', padding: '4px 0' }}>暂无自定义变量，可在仪表板设置中添加</div>
-                  )}
+                  <div className="pe-hint-text" style={{ marginTop: 4 }}>24 栅格布局系统</div>
                 </Section>
+
+                {p.type === 'table' && (
+                  <Section title="表格选项" defaultOpen={true}>
+                    <label className="pe-toggle">
+                      <input
+                        type="checkbox"
+                        checked={!!p.options?.enableColumnFilter}
+                        onChange={(e) => update({ options: { ...p.options, enableColumnFilter: e.target.checked } })}
+                      />
+                      <span className="pe-toggle-slider" />
+                      <span className="pe-toggle-label">启用列筛选</span>
+                    </label>
+                    <div className="pe-hint-text" style={{ marginTop: 4, marginLeft: 0 }}>
+                      开启后，表格每列表头旁会出现筛选按钮，点击可按该列值过滤行。
+                    </div>
+                    <div style={{ marginTop: 12 }}>
+                      <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>每页显示条数</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={typeof p.options?.pageSize === 'number' ? p.options.pageSize : 5}
+                        onChange={(e) => {
+                          const v = Math.max(1, Math.min(500, parseInt(e.target.value) || 5))
+                          update({ options: { ...p.options, pageSize: v } })
+                        }}
+                        style={{ width: 80, fontSize: 12, padding: '4px 8px' }}
+                      />
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 8 }}>范围 1-500，默认 5</span>
+                    </div>
+                    <label className="pe-toggle" style={{ marginTop: 12 }}>
+                      <input
+                        type="checkbox"
+                        checked={!!p.options?.enableCellMerge}
+                        onChange={(e) => {
+                          const checked = e.target.checked
+                          update({ options: { ...p.options, enableCellMerge: checked, mergeColumns: checked ? (p.options?.mergeColumns || '') : undefined } })
+                        }}
+                      />
+                      <span className="pe-toggle-slider" />
+                      <span className="pe-toggle-label">合并单元格</span>
+                    </label>
+                    <div className="pe-hint-text" style={{ marginTop: 4, marginLeft: 0 }}>
+                      同一列中连续相同的值自动合并为一个单元格（类似 Excel 合并）。
+                    </div>
+                    {Boolean(p.options?.enableCellMerge) && (
+                      <div style={{ marginTop: 8 }}>
+                        <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, display: 'block' }}>选择合并列</label>
+                        {liveColumns.length > 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {liveColumns.map((col) => {
+                              const selected = ((p.options?.mergeColumns as string) || '').split(',').map((s: string) => s.trim()).filter(Boolean)
+                              let checked = selected.includes(col)
+                              if (!checked) {
+                                for (const t of p.targets) {
+                                  if (!t.aliasMap) continue
+                                  for (const [rawCol, alias] of Object.entries(t.aliasMap)) {
+                                    if (alias === col && selected.includes(rawCol)) { checked = true; break }
+                                    if (rawCol === col && selected.includes(alias)) { checked = true; break }
+                                  }
+                                  if (checked) break
+                                }
+                              }
+                              return (
+                                <label key={col} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      const next = checked
+                                        ? selected.filter((s: string) => s !== col)
+                                        : [...selected, col]
+                                      update({ options: { ...p.options, mergeColumns: next.join(',') } })
+                                    }}
+                                  />
+                                  {col}
+                                </label>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            暂无列数据，请先点击「刷新」获取预览数据。
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 字段显示配置 */}
+                    <div style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, display: 'block' }}>
+                        字段显示配置
+                      </label>
+                      <div className="pe-hint-text" style={{ marginBottom: 8, marginLeft: 0 }}>
+                        勾选要显示的字段，未勾选的字段将被隐藏（默认全显示）。可拖动调整显示顺序。
+                      </div>
+                      {liveColumns.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 250, overflowY: 'auto', padding: '4px 0' }}>
+                          {(() => {
+                            const hiddenColumns = (p.options?.hiddenColumns as string[] | undefined) || []
+                            const columnOrder = (p.options?.columnOrder as string[] | undefined) || []
+                            let orderedColumns: string[] = []
+                            if (columnOrder.length > 0) {
+                              for (const orderedCol of columnOrder) {
+                                if (liveColumns.includes(orderedCol)) {
+                                  orderedColumns.push(orderedCol)
+                                }
+                              }
+                              for (const col of liveColumns) {
+                                if (!orderedColumns.includes(col)) {
+                                  orderedColumns.push(col)
+                                }
+                              }
+                            } else {
+                              orderedColumns = liveColumns
+                            }
+                            return orderedColumns.map((col, idx) => {
+                              const checked = !hiddenColumns.includes(col)
+                              return (
+                                <div key={col} style={{
+                                  display: 'flex', alignItems: 'center', gap: 6,
+                                  padding: '6px 8px', borderRadius: 4,
+                                  background: checked ? 'var(--bg-input)' : 'transparent',
+                                  border: '1px solid var(--border-color)',
+                                  transition: 'all 0.2s',
+                                  opacity: checked ? 1 : 0.7
+                                }}>
+                                  {checked && (
+                                    <div style={{ display: 'flex', gap: 2 }}>
+                                      <button
+                                        onClick={() => {
+                                          if (idx === 0) return
+                                          const newOrder = [...orderedColumns]
+                                          const temp = newOrder[idx - 1]
+                                          newOrder[idx - 1] = newOrder[idx]
+                                          newOrder[idx] = temp
+                                          update({ options: { ...p.options, columnOrder: newOrder } })
+                                        }}
+                                        disabled={idx === 0}
+                                        style={{
+                                          width: 20, height: 20, fontSize: 10,
+                                          background: idx === 0 ? 'transparent' : 'var(--bg-hover)',
+                                          color: idx === 0 ? 'var(--text-muted)' : 'var(--text-primary)',
+                                          border: 'none', borderRadius: 3, cursor: idx === 0 ? 'not-allowed' : 'pointer',
+                                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                        }}
+                                        title="上移"
+                                      >
+                                        ↑
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          if (idx === orderedColumns.length - 1) return
+                                          const newOrder = [...orderedColumns]
+                                          const temp = newOrder[idx]
+                                          newOrder[idx] = newOrder[idx + 1]
+                                          newOrder[idx + 1] = temp
+                                          update({ options: { ...p.options, columnOrder: newOrder } })
+                                        }}
+                                        disabled={idx === orderedColumns.length - 1}
+                                        style={{
+                                          width: 20, height: 20, fontSize: 10,
+                                          background: idx === orderedColumns.length - 1 ? 'transparent' : 'var(--bg-hover)',
+                                          color: idx === orderedColumns.length - 1 ? 'var(--text-muted)' : 'var(--text-primary)',
+                                          border: 'none', borderRadius: 3, cursor: idx === orderedColumns.length - 1 ? 'not-allowed' : 'pointer',
+                                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                        }}
+                                        title="下移"
+                                      >
+                                        ↓
+                                      </button>
+                                    </div>
+                                  )}
+                                  {!checked && <div style={{ width: 44 }} />}
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      const hiddenColumns = (p.options?.hiddenColumns as string[] | undefined) || []
+                                      const columnOrder = (p.options?.columnOrder as string[] | undefined) || []
+                                      const nextHidden = checked
+                                        ? [...hiddenColumns, col]
+                                        : hiddenColumns.filter((c) => c !== col)
+                                      const nextOrder = checked
+                                        ? columnOrder.filter(c => c !== col)
+                                        : columnOrder
+                                      update({ options: { ...p.options, hiddenColumns: nextHidden, columnOrder: nextOrder } })
+                                    }}
+                                    style={{ cursor: 'pointer' }}
+                                  />
+                                  <span style={{ flex: 1, fontSize: 12, color: checked ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                                    {col}
+                                  </span>
+                                  {checked && (
+                                    <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-hover)', padding: '1px 4px', borderRadius: 2 }}>
+                                      #{idx + 1}
+                                    </span>
+                                  )}
+                                  {!checked && (
+                                    <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 2 }}>
+                                      已隐藏
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })
+                          })()}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>
+                          暂无列数据，请先点击「刷新」获取预览数据。
+                        </div>
+                      )}
+                      {liveColumns.length > 0 && (
+                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                          <span>显示: {liveColumns.length - ((p.options?.hiddenColumns as string[] | undefined) || []).length} / {liveColumns.length}</span>
+                          <button
+                            onClick={() => update({ options: { ...p.options, hiddenColumns: [], columnOrder: [] } })}
+                            style={{ fontSize: 10, padding: '2px 8px', background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 3, cursor: 'pointer' }}
+                          >
+                            全部显示（恢复默认顺序）
+                          </button>
+                          <button
+                            onClick={() => update({ options: { ...p.options, hiddenColumns: liveColumns, columnOrder: [] } })}
+                            style={{ fontSize: 10, padding: '2px 8px', background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 3, cursor: 'pointer' }}
+                          >
+                            全部隐藏
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </Section>
+                )}
+
+                {(p.type === 'table' || p.type === 'bar' || p.type === 'line' || p.type === 'timeseries' || p.type === 'pie') && (
+                  <Section title="条件告警" defaultOpen={false}>
+                    <label className="pe-toggle">
+                      <input
+                        type="checkbox"
+                        checked={!!p.options?.enableCellAlert}
+                        onChange={(e) => {
+                          const checked = e.target.checked
+                          update({ options: { ...p.options, enableCellAlert: checked, cellAlerts: checked ? (p.options?.cellAlerts || []) : undefined, alertMode: checked ? (p.options?.alertMode || 'absolute') : undefined } })
+                        }}
+                      />
+                      <span className="pe-toggle-slider" />
+                      <span className="pe-toggle-label">启用条件告警</span>
+                    </label>
+                    <div className="pe-hint-text" style={{ marginTop: 4, marginLeft: 0 }}>
+                      {p.type === 'table'
+                        ? '当单元格数值满足条件时，以指定颜色高亮显示。'
+                        : '当数据点数值满足条件时，以指定颜色高亮对应区域。'}
+                    </div>
+                    {Boolean(p.options?.enableCellAlert) && (
+                      <div style={{ marginTop: 10 }}>
+                        {/* 模式选择 */}
+                        <div style={{ marginBottom: 8 }}>
+                          <label style={{ fontSize: 11, color: 'var(--text-muted)', marginRight: 8 }}>比较模式</label>
+                          <select
+                            value={(p.options?.alertMode as string) || 'absolute'}
+                            onChange={(e) => update({ options: { ...p.options, alertMode: e.target.value } })}
+                            style={{ fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+                          >
+                            <option value="absolute">绝对值</option>
+                            <option value="percentage">百分比（该列最大值=100%）</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </Section>
+                )}
               </>
             )}
 

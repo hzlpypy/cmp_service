@@ -123,7 +123,7 @@ export interface DashboardJSON {
 export interface PanelDef {
   id: string
   title: string
-  type: 'bar' | 'line' | 'pie' | 'gauge' | 'table'
+  type: 'bar' | 'line' | 'timeseries' | 'pie' | 'gauge' | 'table'
   gridPos: { x: number; y: number; w: number; h: number }
   datasource_id?: string
   targets: TargetDef[]
@@ -146,6 +146,10 @@ export interface DataLinkDef {
 
 export interface TargetDef {
   refId: string
+  /** 查询类型：query(普通SQL查询) | expression(表达式) */
+  targetType?: 'query' | 'expression'
+  /** 表达式内容，如 "$A + $B"，仅 targetType='expression' 时生效 */
+  expression?: string
   /** 用户自定义 SQL 语句（如 SELECT date FROM calendar） - MySQL数据源 */
   rawSql?: string
   /** 列名别名映射，如 {"date": "日期", "market": "市场"} */

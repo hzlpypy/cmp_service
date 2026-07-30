@@ -84,6 +84,12 @@ func main() {
 	l.Info("Database connection established")
 
 	// ============================================================
+	// 初始化数据源连接管理器（为所有MySQL数据源预建立连接池）
+	// ============================================================
+	dsConnMgr := datasources.NewDSConnectionManager(db, l)
+	defer dsConnMgr.Close()
+
+	// ============================================================
 	// 全局中间件
 	// ============================================================
 
@@ -144,7 +150,7 @@ func main() {
 	datasources.RegisterDatasourcesRouter(e, dsCtrl)
 
 	// 仪表板管理：/api/v1/dashboards/*
-	dbSvc := dashboards.NewServer(db, l)
+	dbSvc := dashboards.NewServer(db, l, dsConnMgr)
 	dbCtrl := dashboards.NewController(dbSvc)
 	dashboards.RegisterDashboardsRouter(e, dbCtrl)
 
@@ -165,7 +171,7 @@ func main() {
 	schedSvc.StartScheduler()
 
 	// 变量管理：/api/v1/variables/*
-	varSvc := variables.NewServer(db, l)
+	varSvc := variables.NewServer(db, l, dsConnMgr)
 	varCtrl := variables.NewController(varSvc)
 	variables.RegisterVariablesRouter(e, varCtrl)
 
