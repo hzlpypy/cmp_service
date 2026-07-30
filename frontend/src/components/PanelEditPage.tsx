@@ -5,7 +5,7 @@ import ChartPanel from './ChartPanel'
 import QueryInspector from './QueryInspector'
 import VariableSelector from './VariableSelector'
 import SqlEditor from './SqlEditor'
-import type { PanelDef, TargetDef, DatasourceRes, DashboardJSON, PanelDataRes, MetricRow, VariableRes } from '../api'
+import type { PanelDef, TargetDef, DatasourceRes, DashboardJSON, PanelDataRes, MetricRow, VariableRes, DataLinkDef } from '../api'
 import * as api from '../api'
 
 export interface PanelEditPageProps {
@@ -22,12 +22,12 @@ export interface PanelEditPageProps {
   onBack: () => void
 }
 
-type SidebarTab = 'options' | 'share'
+type SidebarTab = 'query' | 'options' | 'share'
 
 const CHART_TYPES: { value: PanelDef['type']; label: string; icon: string; hint: string }[] = [
   { value: 'table', label: '表格', icon: '⊞', hint: 'SQL 返回多行多列即展示为表格' },
   { value: 'bar', label: '柱状图', icon: '▐', hint: '第一列作为X轴(分类)，数值列作为Y轴(柱高)' },
-  { value: 'line', label: '折线图', icon: '⌇', hint: '第一列作为X轴，数值列作为Y轴(折线)' },
+  { value: 'timeseries', label: '时间序列', icon: '⌇', hint: '仿 Grafana Time Series，X轴时间，Y轴支持混合 Lines/Bars/Points' },
   { value: 'pie', label: '饼图', icon: '◉', hint: '第一列作为扇形名称，数值列作为扇形大小' },
   { value: 'gauge', label: '仪表板', icon: '◎', hint: '第一行第一列数值作为仪表值' },
 ]
@@ -691,7 +691,13 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
     }))
   }
 
-
+  const addExpression = () => {
+    const nextRef = refLabels[p.targets.length] || `Q${p.targets.length}`
+    setP((prev) => ({
+      ...prev,
+      targets: [...prev.targets, { refId: nextRef, targetType: 'expression', expression: '', rawSql: '', aliasMap: {}, category: '', metricName: '' }],
+    }))
+  }
 
   const removeTarget = (ti: number) => {
     setP((prev) => ({
@@ -700,7 +706,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
     }))
   }
 
-  const isMultiQuery = p.type === 'line' || p.type === 'bar'
+  const isMultiQuery = p.type === 'line' || p.type === 'timeseries' || p.type === 'bar'
   const panelType = (liveData || []).length > 0 ? p.type : 'table'
   const currentChartInfo = CHART_TYPES.find((c) => c.value === p.type)
 
@@ -1056,8 +1062,28 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                   onUpdate={(field, value) => updateTarget(ti, { [field]: value })}
                   onRemove={() => removeTarget(ti)}
                 >
-                  {/* 根据数据源类型显示不同的查询配置 */}
-                  {(() => {
+                  {/* 根据查询类型显示不同的配置 */}
+                  {target.targetType === 'expression' ? (
+                    // 表达式查询
+                    <div style={{ padding: '12px', background: 'rgba(124,58,237,0.04)', borderRadius: '0 0 6px 6px' }}>
+                      <div className="pe-field" style={{ marginBottom: 4 }}>
+                        <label className="pe-label-sm">Math 表达式</label>
+                        <input
+                          value={target.expression || ''}
+                          onChange={(e) => updateTarget(ti, { expression: e.target.value })}
+                          placeholder="如：$A + $B 或 $A / $B * 100"
+                          className="pe-input-sm"
+                          style={{ fontFamily: 'monospace', fontSize: 13, width: '100%' }}
+                        />
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+                        可用引用：{p.targets.filter(t => t.targetType !== 'expression').map(t => '$' + t.refId).join('、') || '无'}
+                      </div>
+                    </div>
+                  ) : (
+                    // 根据数据源类型显示不同的查询配置
+                    <>
+                    {(() => {
                     const selectedDs = datasources.find(ds => ds.id === p.datasource_id)
                     if (!p.datasource_id) {
                       // 未选择数据源 - 提示选择
@@ -1471,13 +1497,21 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                       from={getTimeRange()?.from}
                       to={getTimeRange()?.to}
                     />
+                  </>
+                  )}
                   </QueryBlock>
                 ))}
 
-              <button className="pe-add-query-btn" onClick={addTarget}>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>
-                添加查询
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="pe-add-query-btn" onClick={addTarget}>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>
+                  添加查询
+                </button>
+                <button className="pe-add-query-btn" onClick={addExpression}>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M3 3h6M3 6h6M3 9h6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>
+                  添加表达式
+                </button>
+              </div>
               {isMultiQuery && (
                 <div className="pe-hint-block">
                   折线图和柱状图支持多条查询，每条查询作为图表中的一个数据系列。
@@ -1535,25 +1569,81 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
           
           {/* 侧边栏 Tab 切换 */}
           <div className="pe-sidebar-tabs">
-            {(['options', 'share'] as SidebarTab[]).map((t) => (
+            {(['query', 'options', 'share'] as SidebarTab[]).map((t) => (
               <button
                 key={t}
                 className={`pe-sidebar-tab ${sidebarTab === t ? 'active' : ''}`}
                 onClick={() => setSidebarTab(t)}
               >
+                {t === 'query' && (
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M1 1h5v5H1V1zm7 0h5v5H8V1zM1 8h5v5H1V8zm7 0h5v5H8V8z" opacity=".7"/></svg>
+                )}
                 {t === 'options' && (
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M7 4.5a2.5 2.5 0 110 5 2.5 2.5 0 010-5zM7 3a4 4 0 100 8 4 4 0 000-8z" opacity=".7"/></svg>
                 )}
                 {t === 'share' && (
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M10.5 9a2.5 2.5 0 10-2.17-1.26L5.67 9.5a2.5 2.5 0 100 2l2.66-1.76A2.49 2.49 0 0010.5 9z" opacity=".7"/></svg>
                 )}
-                {t === 'options' ? '选项' : '共享'}
+                {t === 'query' ? '查询' : t === 'options' ? '选项' : '共享'}
               </button>
             ))}
           </div>
 
           {/* 侧边栏内容 */}
           <div className="pe-sidebar-content">
+            {/* ═══ 查询 Tab ═══ */}
+            {sidebarTab === 'query' && (
+              <>
+                <Section title="可用变量" defaultOpen={true}>
+                  {/* 系统内置变量 */}
+                  <div style={{ marginBottom: 12 }}>
+                    <div className="pe-label-sm">系统内置变量（时间范围）</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+                      {[
+                        { name: '$__from', desc: '开始时间（ISO格式，自动加引号）' },
+                        { name: '$__to', desc: '结束时间（ISO格式，自动加引号）' },
+                        { name: '$__fromUnix', desc: '开始时间（Unix秒，数字）' },
+                        { name: '$__toUnix', desc: '结束时间（Unix秒，数字）' },
+                        { name: '$__fromMs', desc: '开始时间（毫秒，数字）' },
+                        { name: '$__toMs', desc: '结束时间（毫秒，数字）' },
+                        { name: '$__timeFilter(column)', desc: '时间过滤宏' },
+                      ].map((item) => (
+                        <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
+                          <code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>{item.name}</code>
+                          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{item.desc}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="pe-hint-text">
+                      示例：WHERE date &gt; $__from（自动替换为 WHERE date &gt; '2026-06-21T10:00:00Z'）
+                    </div>
+                  </div>
+                  {/* 用户自定义变量 */}
+                  {variables.length > 0 && (
+                    <div>
+                      <div className="pe-label-sm">仪表板变量</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+                        {variables.map((v) => (
+                          <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
+                            <code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>${v.name}</code>
+                            <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{v.label || v.name}</span>
+                            {v.multi && <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-input)', padding: '1px 6px', borderRadius: 3 }}>(多选)</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {variables.length === 0 && (
+                    <div className="pe-hint-text" style={{ background: 'transparent', borderLeft: 'none', padding: '4px 0' }}>暂无自定义变量，可在仪表板设置中添加</div>
+                  )}
+                </Section>
+
+                <div className="pe-hint-block" style={{ marginTop: 12 }}>
+                  查询配置在下方主区域中编辑，请点击下方区域进行配置。
+                </div>
+              </>
+            )}
+
             {/* ═══ 选项 Tab ═══ */}
             {sidebarTab === 'options' && (
               <>
@@ -1604,6 +1694,215 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                     </div>
                     <div className="pe-hint-text" style={{ marginTop: 4, marginLeft: 0 }}>
                       纵向：分类在X轴，数值在Y轴。横向：分类在Y轴，数值在X轴。
+                    </div>
+                  </Section>
+                )}
+
+                {p.type === 'timeseries' && (() => {
+                  const previewRows = liveData?.[0] || []
+                  const sampleKeys = previewRows.length > 0 ? Object.keys(previewRows[0] || {}) : []
+                  const valueFieldNames = sampleKeys.filter((k) => {
+                    const kl = k.toLowerCase()
+                    if (kl.includes('date') || kl.includes('time') || kl.includes('日期') || kl.includes('时间') || kl === 'day') return false
+                    return previewRows.some((r: any) => {
+                      const v = r[k]
+                      return v !== undefined && v !== null && v !== '' && !isNaN(parseFloat(v))
+                    })
+                  })
+                  const currentStyles = (p.options?.fieldStyles || {}) as Record<string, string>
+                  const currentColors = (p.options?.fieldColors || {}) as Record<string, string>
+                  const defaultPalette = ['#5470c6', '#73c0de', '#91cc75', '#55bd6a', '#b877d9', '#9a60b4', '#3ba272', '#5b8ff9']
+
+                  return (
+                    <Section title="Graph styles" defaultOpen={true}>
+                      <div className="pe-hint-text" style={{ marginBottom: 8 }}>
+                        为每个数值字段选择展示样式和颜色：Lines(折线) / Bars(柱状) / Points(散点)
+                      </div>
+                      {valueFieldNames.length === 0 && (
+                        <div className="pe-hint-text">暂无预览数据，请先执行查询后再配置字段样式。</div>
+                      )}
+                      {valueFieldNames.map((field, fi) => {
+                        const fieldColor = currentColors[field] || defaultPalette[fi % defaultPalette.length]
+                        return (
+                        <div key={field} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                          <span style={{ fontSize: 12, minWidth: 80, color: '#4e5969', fontWeight: 500 }}>{field}</span>
+                          <div style={{ display: 'flex', gap: 0, background: '#f2f3f5', borderRadius: 4, padding: 2 }}>
+                            {(['lines', 'bars', 'points'] as const).map((style) => {
+                              const active = (currentStyles[field] || 'lines') === style
+                              const labels = { lines: 'Lines', bars: 'Bars', points: 'Points' }
+                              const icons = { lines: '⌇', bars: '▐', points: '●' } as Record<string, string>
+                              return (
+                                <button
+                                  key={style}
+                                  onClick={() => {
+                                    const next = { ...currentStyles, [field]: style }
+                                    if (style === 'lines') delete next[field]
+                                    update({ options: { ...p.options, fieldStyles: next } })
+                                  }}
+                                  style={{
+                                    padding: '3px 12px',
+                                    fontSize: 12,
+                                    border: 'none',
+                                    borderRadius: 3,
+                                    cursor: 'pointer',
+                                    background: active ? '#fff' : 'transparent',
+                                    color: active ? '#1d2129' : '#86909c',
+                                    fontWeight: active ? 600 : 400,
+                                    boxShadow: active ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+                                  }}
+                                >
+                                  {icons[style]} {labels[style]}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <input
+                            type="color"
+                            value={fieldColor}
+                            onChange={(e) => {
+                              const next = { ...currentColors, [field]: e.target.value }
+                              update({ options: { ...p.options, fieldColors: next } })
+                            }}
+                            title={`选择 ${field} 的颜色`}
+                            style={{ width: 28, height: 28, border: '1px solid var(--border-color)', borderRadius: 4, cursor: 'pointer', padding: 2, background: 'none' }}
+                          />
+                        </div>
+                        )
+                      })}
+                    </Section>
+                  )
+                })()}
+
+                {p.type === 'gauge' && (
+                  <Section title="仪表板选项" defaultOpen={true}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <div className="pe-field">
+                        <label className="pe-label-sm">最小值</label>
+                        <input
+                          type="number"
+                          value={(p.options?.min as number) ?? 0}
+                          onChange={(e) => update({ options: { ...p.options, min: Number(e.target.value) } })}
+                          className="pe-input-xs"
+                        />
+                      </div>
+                      <div className="pe-field">
+                        <label className="pe-label-sm">最大值</label>
+                        <input
+                          type="number"
+                          value={(p.options?.max as number) ?? 100}
+                          onChange={(e) => update({ options: { ...p.options, max: Number(e.target.value) } })}
+                          className="pe-input-xs"
+                        />
+                      </div>
+                    </div>
+                    <div className="pe-field" style={{ marginTop: 8 }}>
+                      <label className="pe-label-sm">单位</label>
+                      <input
+                        type="text"
+                        value={(p.options?.unit as string) ?? ''}
+                        onChange={(e) => update({ options: { ...p.options, unit: e.target.value } })}
+                        className="pe-input-xs"
+                        placeholder="如 %、ms、bytes"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div className="pe-field" style={{ marginTop: 8 }}>
+                      <label className="pe-label-sm">数值模式</label>
+                      <select
+                        value={(p.options?.valueMode as string) ?? 'absolute'}
+                        onChange={(e) => update({ options: { ...p.options, valueMode: e.target.value } })}
+                        className="pe-input-xs"
+                        style={{ width: '100%' }}
+                      >
+                        <option value="absolute">绝对值 (Absolute)</option>
+                        <option value="percentage">百分比 (Percentage 0-100)</option>
+                      </select>
+                    </div>
+
+                    <div style={{ marginTop: 12 }}>
+                      <label className="pe-label-sm" style={{ marginBottom: 4, display: 'block' }}>阈值</label>
+                      <div className="pe-hint-text" style={{ marginBottom: 6 }}>
+                        设置分界值和颜色，仪表带的颜色将根据阈值变化
+                      </div>
+                      {((p.options?.thresholds as Array<{ value: number; color: string }>) || [
+                        { value: (p.options?.min as number) ?? 0, color: '#1F7A3F' },
+                        { value: ((p.options?.max as number) ?? 100) * 0.5, color: '#1F7A3F' },
+                        { value: (p.options?.max as number) ?? 100, color: '#1F7A3F' },
+                      ]).map((t: { value: number; color: string }, i: number) => (
+                        <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                          <input
+                            type="number"
+                            value={t.value}
+                            onChange={(e) => {
+                              const thresholds = [...((p.options?.thresholds as Array<{ value: number; color: string }>) || [
+                                { value: (p.options?.min as number) ?? 0, color: '#1F7A3F' },
+                                { value: ((p.options?.max as number) ?? 100) * 0.5, color: '#1F7A3F' },
+                                { value: (p.options?.max as number) ?? 100, color: '#1F7A3F' },
+                              ])]
+                              thresholds[i] = { ...thresholds[i], value: Number(e.target.value) }
+                              update({ options: { ...p.options, thresholds } })
+                            }}
+                            className="pe-input-xs"
+                            style={{ flex: 1 }}
+                            placeholder="值"
+                          />
+                          <input
+                            type="color"
+                            value={t.color}
+                            onChange={(e) => {
+                              const thresholds = [...((p.options?.thresholds as Array<{ value: number; color: string }>) || [
+                                { value: (p.options?.min as number) ?? 0, color: '#1F7A3F' },
+                                { value: ((p.options?.max as number) ?? 100) * 0.5, color: '#1F7A3F' },
+                                { value: (p.options?.max as number) ?? 100, color: '#1F7A3F' },
+                              ])]
+                              thresholds[i] = { ...thresholds[i], color: e.target.value }
+                              update({ options: { ...p.options, thresholds } })
+                            }}
+                            style={{ width: 32, height: 32, border: 'none', cursor: 'pointer', background: 'none' }}
+                          />
+                          <button
+                            onClick={() => {
+                              const thresholds = ((p.options?.thresholds as Array<{ value: number; color: string }>) || [
+                                { value: (p.options?.min as number) ?? 0, color: '#1F7A3F' },
+                                { value: ((p.options?.max as number) ?? 100) * 0.5, color: '#1F7A3F' },
+                                { value: (p.options?.max as number) ?? 100, color: '#1F7A3F' },
+                              ]).filter((_: unknown, idx: number) => idx !== i)
+                              update({ options: { ...p.options, thresholds } })
+                            }}
+                            className="pe-btn-xs"
+                            style={{ color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, padding: '0 4px' }}
+                            title="删除阈值"
+                          >
+                            x
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => {
+                          const thresholds = [...((p.options?.thresholds as Array<{ value: number; color: string }>) || [
+                            { value: (p.options?.min as number) ?? 0, color: '#1F7A3F' },
+                            { value: ((p.options?.max as number) ?? 100) * 0.5, color: '#1F7A3F' },
+                            { value: (p.options?.max as number) ?? 100, color: '#1F7A3F' },
+                          ]), { value: 0, color: '#1F7A3F' }]
+                          update({ options: { ...p.options, thresholds } })
+                        }}
+                        className="pe-btn-xs"
+                        style={{ marginTop: 4 }}
+                      >
+                        + 添加阈值
+                      </button>
+                    </div>
+
+                    <div style={{ marginTop: 12 }}>
+                      <label className="pe-toggle">
+                        <input
+                          type="checkbox"
+                          checked={(p.options?.showThresholdMarkers as boolean) ?? true}
+                          onChange={(e) => update({ options: { ...p.options, showThresholdMarkers: e.target.checked } })}
+                        />
+                        <span className="pe-toggle-slider" />
+                        <span className="pe-toggle-label">显示阈值标记</span>
+                      </label>
                     </div>
                   </Section>
                 )}
@@ -1896,10 +2195,284 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                             <option value="percentage">百分比（该列最大值=100%）</option>
                           </select>
                         </div>
+
+                        {/* 规则列表 */}
+                        {((p.options?.cellAlerts as any[]) || []).map((rule: any, idx: number) => {
+                          const resolvedCol = (() => {
+                            const rc = rule.column || ''
+                            if (!rc || liveColumns.includes(rc)) return rc
+                            for (const t of p.targets) {
+                              if (!t.aliasMap) continue
+                              for (const [rawCol, alias] of Object.entries(t.aliasMap)) {
+                                if (rc === rawCol && alias && liveColumns.includes(alias)) return alias
+                                if (rc === alias && liveColumns.includes(rawCol)) return rawCol
+                              }
+                            }
+                            return rc
+                          })()
+                          return (
+                          <div key={idx} style={{
+                            display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6,
+                            padding: '6px 8px', background: '#f8f9fa', borderRadius: 4, flexWrap: 'wrap',
+                          }}>
+                            <select
+                              value={resolvedCol}
+                              onChange={(e) => {
+                                const alerts = [...((p.options?.cellAlerts as any[]) || [])]
+                                alerts[idx] = { ...alerts[idx], column: e.target.value }
+                                update({ options: { ...p.options, cellAlerts: alerts } })
+                              }}
+                              style={{ fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+                            >
+                              <option value="">选择列</option>
+                              {liveColumns.map((col) => (
+                                <option key={col} value={col}>{col}</option>
+                              ))}
+                            </select>
+                            <select
+                              value={rule.op || '>'}
+                              onChange={(e) => {
+                                const alerts = [...((p.options?.cellAlerts as any[]) || [])]
+                                alerts[idx] = { ...alerts[idx], op: e.target.value }
+                                update({ options: { ...p.options, cellAlerts: alerts } })
+                              }}
+                              style={{ fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+                            >
+                              <option value=">">&gt;</option>
+                              <option value=">=">&gt;=</option>
+                              <option value="<">&lt;</option>
+                              <option value="<=">&lt;=</option>
+                              <option value="=">=</option>
+                              <option value="!=">!=</option>
+                            </select>
+                            <input
+                              type="number"
+                              value={rule.value ?? ''}
+                              onChange={(e) => {
+                                const alerts = [...((p.options?.cellAlerts as any[]) || [])]
+                                alerts[idx] = { ...alerts[idx], value: e.target.value === '' ? '' : Number(e.target.value) }
+                                update({ options: { ...p.options, cellAlerts: alerts } })
+                              }}
+                              placeholder="阈值"
+                              style={{ width: 60, fontSize: 11, padding: '3px 6px', background: '#f8f9fa', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 3 }}
+                            />
+                            <input
+                              type="color"
+                              value={rule.color || '#5470c6'}
+                              onChange={(e) => {
+                                const alerts = [...((p.options?.cellAlerts as any[]) || [])]
+                                alerts[idx] = { ...alerts[idx], color: e.target.value }
+                                update({ options: { ...p.options, cellAlerts: alerts } })
+                              }}
+                              title="选择颜色"
+                              style={{ width: 24, height: 24, border: 'none', borderRadius: 3, cursor: 'pointer', padding: 0, background: 'transparent' }}
+                            />
+                            <button
+                              onClick={() => {
+                                const alerts = ((p.options?.cellAlerts as any[]) || []).filter((_: any, i: number) => i !== idx)
+                                update({ options: { ...p.options, cellAlerts: alerts } })
+                              }}
+                              title="删除规则"
+                              style={{ fontSize: 11, padding: '2px 6px', background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 3, cursor: 'pointer' }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          )})}
+
+                        <button
+                          onClick={() => {
+                            const alerts = [...((p.options?.cellAlerts as any[]) || []), { column: '', op: '>', value: 1, color: '#5470c6' }]
+                            update({ options: { ...p.options, cellAlerts: alerts } })
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = '#5470c6'
+                            e.currentTarget.style.color = '#5470c6'
+                            e.currentTarget.style.background = 'rgba(84,112,198,0.05)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--border-color)'
+                            e.currentTarget.style.color = 'var(--text-muted)'
+                            e.currentTarget.style.background = 'none'
+                          }}
+                          style={{
+                            fontSize: 11, padding: '4px 12px', marginTop: 4,
+                            background: 'none', color: 'var(--text-muted)',
+                            border: '1px dashed var(--border-color)', borderRadius: 4, cursor: 'pointer',
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          + 添加告警规则
+                        </button>
                       </div>
                     )}
                   </Section>
                 )}
+
+                {isMultiQuery && (p.targets || []).length > 1 && (
+                  <Section title="多查询提示" defaultOpen={false}>
+                    <div className="pe-hint-block">
+                      多个查询分别对应图表中的不同数据系列，请为每个查询设置图例名称。
+                    </div>
+                  </Section>
+                )}
+
+                {/* Data Links 配置 */}
+                <Section title="Data Links" defaultOpen={false}>
+                  <p className="pe-section-desc" style={{ marginBottom: 12 }}>
+                    配置字段链接，表格中该字段会显示为超链接，点击可跳转。
+                  </p>
+                  {/* 可用变量提示 */}
+                  <div className="pe-hint-block" style={{ marginBottom: 12 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 6 }}>可用变量：</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11, lineHeight: 1.6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}><code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>${"{__value}"}</code><span style={{ color: 'var(--text-muted)', fontSize: 11 }}>当前字段的值</span></div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}><code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>${"{__field.name}"}</code><span style={{ color: 'var(--text-muted)', fontSize: 11 }}>当前字段名</span></div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}><code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>${"{__row.field}"}</code><span style={{ color: 'var(--text-muted)', fontSize: 11 }}>当前行其他字段的值（如 ${"{__row.id}"})</span></div>
+                    </div>
+                  </div>
+                  {/* 链接列表 */}
+                  {((p.dataLinks || []) as DataLinkDef[]).map((link, idx) => (
+                    <div key={idx} style={{
+                      padding: '8px 10px',
+                      background: 'var(--bg-input)',
+                      borderRadius: 6,
+                      marginBottom: 8,
+                    }}>
+                      {/* 字段选择 */}
+                      <div style={{ marginBottom: 6 }}>
+                        <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>目标字段</label>
+                        <select
+                          value={link.field || ''}
+                          onChange={(e) => {
+                            const links = [...(p.dataLinks || [])]
+                            links[idx] = { ...links[idx], field: e.target.value }
+                            update({ dataLinks: links })
+                          }}
+                          style={{
+                            width: '100%',
+                            fontSize: 12,
+                            padding: '4px 8px',
+                            background: 'var(--bg-card)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 4,
+                          }}
+                        >
+                          <option value="">选择字段</option>
+                          {liveColumns.map((col) => (
+                            <option key={col} value={col}>{col}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {/* 标题和打开方式 */}
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                        <input
+                          value={link.title}
+                          onChange={(e) => {
+                            const links = [...(p.dataLinks || [])]
+                            links[idx] = { ...links[idx], title: e.target.value }
+                            update({ dataLinks: links })
+                          }}
+                          placeholder="链接标题（可选，默认显示字段值）"
+                          style={{
+                            flex: 1,
+                            fontSize: 12,
+                            padding: '4px 8px',
+                            background: 'var(--bg-card)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 4,
+                          }}
+                        />
+                        <select
+                          value={link.target || '_blank'}
+                          onChange={(e) => {
+                            const links = [...(p.dataLinks || [])]
+                            links[idx] = { ...links[idx], target: e.target.value as '_blank' | '_self' }
+                            update({ dataLinks: links })
+                          }}
+                          style={{
+                            fontSize: 11,
+                            padding: '4px 6px',
+                            background: 'var(--bg-card)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 4,
+                          }}
+                        >
+                          <option value="_blank">新标签页</option>
+                          <option value="_self">当前页</option>
+                        </select>
+                        <button
+                          onClick={() => {
+                            const links = (p.dataLinks || []).filter((_: any, i: number) => i !== idx)
+                            update({ dataLinks: links })
+                          }}
+                          title="删除链接"
+                          style={{
+                            fontSize: 11,
+                            padding: '4px 8px',
+                            background: 'transparent',
+                            color: 'var(--text-muted)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {/* URL */}
+                      <input
+                        value={link.url}
+                        onChange={(e) => {
+                          const links = [...(p.dataLinks || [])]
+                          links[idx] = { ...links[idx], url: e.target.value }
+                          update({ dataLinks: links })
+                        }}
+                        placeholder="URL（如 https://example.com?id=${__value}）"
+                        style={{
+                          width: '100%',
+                          fontSize: 11,
+                          padding: '4px 8px',
+                          background: 'var(--bg-card)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: 4,
+                        }}
+                      />
+                    </div>
+                  ))}
+                  {/* 添加链接按钮 */}
+                  <button
+                    onClick={() => {
+                      const links = [...(p.dataLinks || []), { field: '', title: '', url: '', target: '_blank' as '_blank' }]
+                      update({ dataLinks: links })
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = '#e53935'
+                      e.currentTarget.style.color = '#e53935'
+                      e.currentTarget.style.background = 'rgba(229, 57, 53, 0.05)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--border-color)'
+                      e.currentTarget.style.color = 'var(--text-muted)'
+                      e.currentTarget.style.background = 'none'
+                    }}
+                    style={{
+                      fontSize: 11,
+                      padding: '6px 12px',
+                      background: 'none',
+                      color: 'var(--text-muted)',
+                      border: '1px dashed var(--border-color)', borderRadius: 4, cursor: 'pointer',
+                      width: '100%',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    + 添加 Data Link
+                  </button>
+                </Section>
               </>
             )}
 
