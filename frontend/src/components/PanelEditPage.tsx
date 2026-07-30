@@ -5,7 +5,7 @@ import ChartPanel from './ChartPanel'
 import QueryInspector from './QueryInspector'
 import VariableSelector from './VariableSelector'
 import SqlEditor from './SqlEditor'
-import type { PanelDef, TargetDef, DatasourceRes, DashboardJSON, PanelDataRes, MetricRow, VariableRes, DataLinkDef } from '../api'
+import type { PanelDef, TargetDef, DatasourceRes, DashboardJSON, PanelDataRes, MetricRow, VariableRes } from '../api'
 import * as api from '../api'
 
 export interface PanelEditPageProps {
@@ -57,8 +57,8 @@ function Section({ title, defaultOpen = true, children, badge }: {
 }
 
 // 查询块组件
-function QueryBlock({ target, index, isMulti, onUpdate, onRemove, children }: {
-  target: any; index: number; isMulti: boolean; onUpdate: (field: string, value: string) => void; onRemove: () => void; children: ReactNode
+function QueryBlock({ target, index, onUpdate, onRemove, children }: {
+  target: any; index: number; onUpdate: (field: string, value: string) => void; onRemove: () => void; children: ReactNode
 }) {
   const [queryOpen, setQueryOpen] = useState(true)
   const [editingMetricName, setEditingMetricName] = useState(false)
@@ -215,9 +215,6 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
   const [showVariablesModal, setShowVariablesModal] = useState(false)
   const [variableReloadKey, setVariableReloadKey] = useState(0)
   const [manuallyTouchedVarIds, setManuallyTouchedVarIds] = useState<Set<string>>(new Set())
-  // 编辑标题
-  const [editingTitle, setEditingTitle] = useState(false)
-  const [tempTitle, setTempTitle] = useState('')
 
   // 防抖：批量处理多个变量自动全选触发的大量数据刷新
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -646,9 +643,6 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
   }
 
   const update = (patch: Partial<PanelDef>) => setP((prev) => ({ ...prev, ...patch }))
-  const updateGrid = (field: 'x' | 'y' | 'w' | 'h', value: number) => {
-    setP((prev) => ({ ...prev, gridPos: { ...prev.gridPos, [field]: value || 0 } }))
-  }
 
   const updateTarget = (ti: number, patch: Partial<TargetDef>) => {
     setP((prev) => ({
@@ -1054,7 +1048,6 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                   key={ti}
                   target={target}
                   index={ti}
-                  isMulti={isMultiQuery}
                   onUpdate={(field, value) => updateTarget(ti, { [field]: value })}
                   onRemove={() => removeTarget(ti)}
                 >
