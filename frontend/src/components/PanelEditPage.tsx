@@ -27,7 +27,7 @@ type SidebarTab = 'query' | 'options' | 'share'
 const CHART_TYPES: { value: PanelDef['type']; label: string; icon: string; hint: string }[] = [
   { value: 'table', label: '表格', icon: '⊞', hint: 'SQL 返回多行多列即展示为表格' },
   { value: 'bar', label: '柱状图', icon: '▐', hint: '第一列作为X轴(分类)，数值列作为Y轴(柱高)' },
-  { value: 'line', label: '折线图', icon: '⌇', hint: '第一列作为X轴，数值列作为Y轴(折线)' },
+  { value: 'timeseries', label: '时间序列', icon: '⌇', hint: '仿 Grafana Time Series，X轴时间，Y轴支持混合 Lines/Bars/Points' },
   { value: 'pie', label: '饼图', icon: '◉', hint: '第一列作为扇形名称，数值列作为扇形大小' },
   { value: 'gauge', label: '仪表板', icon: '◎', hint: '第一行第一列数值作为仪表值' },
 ]
@@ -538,7 +538,15 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
     const nextRef = refLabels[p.targets.length] || `Q${p.targets.length}`
     setP((prev) => ({
       ...prev,
-      targets: [...prev.targets, { refId: nextRef, rawSql: '', aliasMap: {}, category: '', metricName: '' }],
+      targets: [...prev.targets, { refId: nextRef, targetType: 'query', rawSql: '', aliasMap: {}, category: '', metricName: '' }],
+    }))
+  }
+
+  const addExpression = () => {
+    const nextRef = refLabels[p.targets.length] || `Q${p.targets.length}`
+    setP((prev) => ({
+      ...prev,
+      targets: [...prev.targets, { refId: nextRef, targetType: 'expression', expression: '', rawSql: '', aliasMap: {}, category: '', metricName: '' }],
     }))
   }
 
@@ -549,7 +557,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
     }))
   }
 
-  const isMultiQuery = p.type === 'line' || p.type === 'bar'
+  const isMultiQuery = p.type === 'line' || p.type === 'timeseries' || p.type === 'bar'
   const panelType = (liveData || []).length > 0 ? p.type : 'table'
   const currentChartInfo = CHART_TYPES.find((c) => c.value === p.type)
 
@@ -864,27 +872,51 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                 </Section>
 
                 <Section title="查询配置" defaultOpen={true} badge={p.targets.length > 1 ? `${p.targets.length}` : undefined}>
-                  {p.targets.map((target, ti) => (
+                  {p.targets.map((target, ti) => {
+                    const isExpr = target.targetType === 'expression'
+                    return (
                     <div key={ti} className="pe-query-block">
-                      {p.targets.length > 1 && (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '4px 8px' }}>
-                          <button className="pe-query-remove" onClick={() => removeTarget(ti)} title="移除查询">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', background: 'var(--bg-raised)' }}>
+                        <input
+                          value={target.refId || ''}
+                          onChange={(e) => updateTarget(ti, { refId: e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 2) })}
+                          style={{ width: 36, textAlign: 'center', fontWeight: 700, fontSize: 13, border: '1px solid var(--border-color)', borderRadius: 4, padding: '2px 0', background: 'var(--bg-input)', color: isExpr ? '#7c3aed' : 'var(--text-primary)' }}
+                          title="查询引用ID（如 $A）"
+                          maxLength={2}
+                        />
+                        <input
+                          value={target.metricName || ''}
+                          onChange={(e) => updateTarget(ti, { metricName: e.target.value })}
+                          placeholder="名称（可选）"
+                          className="pe-input-sm"
+                          style={{ flex: 1 }}
+                        />
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{isExpr ? '表达式' : '查询'}</span>
+                        {p.targets.length > 1 && (
+                          <button className="pe-query-remove" onClick={() => removeTarget(ti)} title="移除" style={{ margin: 0 }}>
                             <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M2 2l8 8m0-8l-8 8" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>
                           </button>
-                        </div>
-                      )}
+                        )}
+                      </div>
 
-                      {isMultiQuery && (
-                        <div className="pe-field" style={{ marginBottom: 8 }}>
-                          <label className="pe-label-sm">图例名称</label>
-                          <input
-                            value={target.metricName || ''}
-                            onChange={(e) => updateTarget(ti, { metricName: e.target.value })}
-                            placeholder="如：北京机房、上海机房"
-                            className="pe-input-sm"
-                          />
+                      {isExpr ? (
+                        <div style={{ padding: '12px', background: 'rgba(124,58,237,0.04)', borderRadius: '0 0 6px 6px' }}>
+                          <div className="pe-field" style={{ marginBottom: 4 }}>
+                            <label className="pe-label-sm">Math 表达式</label>
+                            <input
+                              value={target.expression || ''}
+                              onChange={(e) => updateTarget(ti, { expression: e.target.value })}
+                              placeholder="如：$A + $B 或 $A / $B * 100"
+                              className="pe-input-sm"
+                              style={{ fontFamily: 'monospace', fontSize: 13, width: '100%' }}
+                            />
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+                            可用引用：{p.targets.filter(t => t.targetType !== 'expression').map(t => '$' + t.refId).join('、') || '无'}
+                          </div>
                         </div>
-                      )}
+                      ) : (
+<>
 
                       {/* 根据数据源类型显示不同的查询配置 */}
                       {(() => {
@@ -1290,13 +1322,21 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                         from={getTimeRange()?.from}
                         to={getTimeRange()?.to}
                       />
-                    </div>
-                  ))}
+                    </>
+                  )}
+                  </div>
+                  )})}
 
+                  <div style={{ display: 'flex', gap: 8 }}>
                   <button className="pe-add-query-btn" onClick={addTarget}>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>
                     添加查询
                   </button>
+                  <button className="pe-add-query-btn" onClick={addExpression}>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M3 3h6M3 6h6M3 9h6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>
+                    添加表达式
+                  </button>
+                  </div>
                   {isMultiQuery && (
                     <div className="pe-hint-block">
                       折线图和柱状图支持多条查询，每条查询作为图表中的一个数据系列。
@@ -1356,6 +1396,217 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                     </div>
                     <div className="pe-hint-text" style={{ marginTop: 4, marginLeft: 0 }}>
                       纵向：分类在X轴，数值在Y轴。横向：分类在Y轴，数值在X轴。
+                    </div>
+                  </Section>
+                )}
+
+                {p.type === 'timeseries' && (() => {
+                  const previewRows = liveData?.[0] || []
+                  // 从预览数据中提取数值列名（排除时间/日期类列）
+                  const sampleKeys = previewRows.length > 0 ? Object.keys(previewRows[0] || {}) : []
+                  const valueFieldNames = sampleKeys.filter((k) => {
+                    const kl = k.toLowerCase()
+                    if (kl.includes('date') || kl.includes('time') || kl.includes('日期') || kl.includes('时间') || kl === 'day') return false
+                    // 检查是否为纯数值
+                    return previewRows.some((r: any) => {
+                      const v = r[k]
+                      return v !== undefined && v !== null && v !== '' && !isNaN(parseFloat(v))
+                    })
+                  })
+                  const currentStyles = (p.options?.fieldStyles || {}) as Record<string, string>
+                  const currentColors = (p.options?.fieldColors || {}) as Record<string, string>
+                  const defaultPalette = ['#5470c6', '#73c0de', '#91cc75', '#55bd6a', '#b877d9', '#9a60b4', '#3ba272', '#5b8ff9']
+
+                  return (
+                    <Section title="Graph styles" defaultOpen={true}>
+                      <div className="pe-hint-text" style={{ marginBottom: 8 }}>
+                        为每个数值字段选择展示样式和颜色：Lines(折线) / Bars(柱状) / Points(散点)
+                      </div>
+                      {valueFieldNames.length === 0 && (
+                        <div className="pe-hint-text">暂无预览数据，请先执行查询后再配置字段样式。</div>
+                      )}
+                      {valueFieldNames.map((field, fi) => {
+                        const fieldColor = currentColors[field] || defaultPalette[fi % defaultPalette.length]
+                        return (
+                        <div key={field} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                          <span style={{ fontSize: 12, minWidth: 80, color: '#4e5969', fontWeight: 500 }}>{field}</span>
+                          <div style={{ display: 'flex', gap: 0, background: '#f2f3f5', borderRadius: 4, padding: 2 }}>
+                            {(/* lines */ ['lines', 'bars', 'points'] as const).map((style) => {
+                              const active = (currentStyles[field] || 'lines') === style
+                              const labels = { lines: 'Lines', bars: 'Bars', points: 'Points' }
+                              const icons = { lines: '⌇', bars: '▐', points: '●' } as Record<string, string>
+                              return (
+                                <button
+                                  key={style}
+                                  onClick={() => {
+                                    const next = { ...currentStyles, [field]: style }
+                                    if (style === 'lines') delete next[field]
+                                    update({ options: { ...p.options, fieldStyles: next } })
+                                  }}
+                                  style={{
+                                    padding: '3px 12px',
+                                    fontSize: 12,
+                                    border: 'none',
+                                    borderRadius: 3,
+                                    cursor: 'pointer',
+                                    background: active ? '#fff' : 'transparent',
+                                    color: active ? '#1d2129' : '#86909c',
+                                    fontWeight: active ? 600 : 400,
+                                    boxShadow: active ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+                                  }}
+                                >
+                                  {icons[style]} {labels[style]}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <input
+                            type="color"
+                            value={fieldColor}
+                            onChange={(e) => {
+                              const next = { ...currentColors, [field]: e.target.value }
+                              update({ options: { ...p.options, fieldColors: next } })
+                            }}
+                            title={`选择 ${field} 的颜色`}
+                            style={{ width: 28, height: 28, border: '1px solid var(--border-color)', borderRadius: 4, cursor: 'pointer', padding: 2, background: 'none' }}
+                          />
+                        </div>
+                        )
+                      })}
+                    </Section>
+                  )
+                })()}
+
+                {p.type === 'gauge' && (
+                  <Section title="仪表板选项" defaultOpen={true}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <div className="pe-field">
+                        <label className="pe-label-sm">最小值</label>
+                        <input
+                          type="number"
+                          value={(p.options?.min as number) ?? 0}
+                          onChange={(e) => update({ options: { ...p.options, min: Number(e.target.value) } })}
+                          className="pe-input-xs"
+                        />
+                      </div>
+                      <div className="pe-field">
+                        <label className="pe-label-sm">最大值</label>
+                        <input
+                          type="number"
+                          value={(p.options?.max as number) ?? 100}
+                          onChange={(e) => update({ options: { ...p.options, max: Number(e.target.value) } })}
+                          className="pe-input-xs"
+                        />
+                      </div>
+                    </div>
+                    <div className="pe-field" style={{ marginTop: 8 }}>
+                      <label className="pe-label-sm">单位</label>
+                      <input
+                        type="text"
+                        value={(p.options?.unit as string) ?? ''}
+                        onChange={(e) => update({ options: { ...p.options, unit: e.target.value } })}
+                        className="pe-input-xs"
+                        placeholder="如 %、ms、bytes"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div className="pe-field" style={{ marginTop: 8 }}>
+                      <label className="pe-label-sm">数值模式</label>
+                      <select
+                        value={(p.options?.valueMode as string) ?? 'absolute'}
+                        onChange={(e) => update({ options: { ...p.options, valueMode: e.target.value } })}
+                        className="pe-input-xs"
+                        style={{ width: '100%' }}
+                      >
+                        <option value="absolute">绝对值 (Absolute)</option>
+                        <option value="percentage">百分比 (Percentage 0-100)</option>
+                      </select>
+                    </div>
+
+                    <div style={{ marginTop: 12 }}>
+                      <label className="pe-label-sm" style={{ marginBottom: 4, display: 'block' }}>阈值</label>
+                      <div className="pe-hint-text" style={{ marginBottom: 6 }}>
+                        设置分界值和颜色，仪表带的颜色将根据阈值变化
+                      </div>
+                      {((p.options?.thresholds as Array<{ value: number; color: string }>) || [
+                        { value: (p.options?.min as number) ?? 0, color: '#1F7A3F' },
+                        { value: ((p.options?.max as number) ?? 100) * 0.5, color: '#1F7A3F' },
+                        { value: (p.options?.max as number) ?? 100, color: '#1F7A3F' },
+                      ]).map((t: { value: number; color: string }, i: number) => (
+                        <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                          <input
+                            type="number"
+                            value={t.value}
+                            onChange={(e) => {
+                              const thresholds = [...((p.options?.thresholds as Array<{ value: number; color: string }>) || [
+                                { value: (p.options?.min as number) ?? 0, color: '#1F7A3F' },
+                                { value: ((p.options?.max as number) ?? 100) * 0.5, color: '#1F7A3F' },
+                                { value: (p.options?.max as number) ?? 100, color: '#1F7A3F' },
+                              ])]
+                              thresholds[i] = { ...thresholds[i], value: Number(e.target.value) }
+                              update({ options: { ...p.options, thresholds } })
+                            }}
+                            className="pe-input-xs"
+                            style={{ flex: 1 }}
+                            placeholder="值"
+                          />
+                          <input
+                            type="color"
+                            value={t.color}
+                            onChange={(e) => {
+                              const thresholds = [...((p.options?.thresholds as Array<{ value: number; color: string }>) || [
+                                { value: (p.options?.min as number) ?? 0, color: '#1F7A3F' },
+                                { value: ((p.options?.max as number) ?? 100) * 0.5, color: '#1F7A3F' },
+                                { value: (p.options?.max as number) ?? 100, color: '#1F7A3F' },
+                              ])]
+                              thresholds[i] = { ...thresholds[i], color: e.target.value }
+                              update({ options: { ...p.options, thresholds } })
+                            }}
+                            style={{ width: 32, height: 32, border: 'none', cursor: 'pointer', background: 'none' }}
+                          />
+                          <button
+                            onClick={() => {
+                              const thresholds = ((p.options?.thresholds as Array<{ value: number; color: string }>) || [
+                                { value: (p.options?.min as number) ?? 0, color: '#1F7A3F' },
+                                { value: ((p.options?.max as number) ?? 100) * 0.5, color: '#1F7A3F' },
+                                { value: (p.options?.max as number) ?? 100, color: '#1F7A3F' },
+                              ]).filter((_: unknown, idx: number) => idx !== i)
+                              update({ options: { ...p.options, thresholds } })
+                            }}
+                            className="pe-btn-xs"
+                            style={{ color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, padding: '0 4px' }}
+                            title="删除阈值"
+                          >
+                            x
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => {
+                          const thresholds = [...((p.options?.thresholds as Array<{ value: number; color: string }>) || [
+                            { value: (p.options?.min as number) ?? 0, color: '#1F7A3F' },
+                            { value: ((p.options?.max as number) ?? 100) * 0.5, color: '#1F7A3F' },
+                            { value: (p.options?.max as number) ?? 100, color: '#1F7A3F' },
+                          ]), { value: 0, color: '#1F7A3F' }]
+                          update({ options: { ...p.options, thresholds } })
+                        }}
+                        className="pe-btn-xs"
+                        style={{ marginTop: 4 }}
+                      >
+                        + 添加阈值
+                      </button>
+                    </div>
+
+                    <div style={{ marginTop: 12 }}>
+                      <label className="pe-toggle">
+                        <input
+                          type="checkbox"
+                          checked={(p.options?.showThresholdMarkers as boolean) ?? true}
+                          onChange={(e) => update({ options: { ...p.options, showThresholdMarkers: e.target.checked } })}
+                        />
+                        <span className="pe-toggle-slider" />
+                        <span className="pe-toggle-label">显示阈值标记</span>
+                      </label>
                     </div>
                   </Section>
                 )}
@@ -1638,7 +1889,7 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                   </Section>
                 )}
 
-                {(p.type === 'table' || p.type === 'bar' || p.type === 'line' || p.type === 'pie') && (
+                {(p.type === 'table' || p.type === 'bar' || p.type === 'line' || p.type === 'timeseries' || p.type === 'pie') && (
                   <Section title="条件告警" defaultOpen={false}>
                     <label className="pe-toggle">
                       <input
