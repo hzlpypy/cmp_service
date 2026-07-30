@@ -53,6 +53,7 @@ export default function DashboardEditor({ title, json, dashboardId, onSave, onCl
       }
       await onSave(final)
       message.success('保存成功')
+      onClose() // 保存成功后关闭对话框
     } catch (e: any) { message.error('保存失败: ' + e.message) }
     finally { setSaving(false) }
   }

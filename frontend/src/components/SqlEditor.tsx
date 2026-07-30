@@ -1,11 +1,11 @@
 import { useRef, useEffect } from 'react'
-import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view'
+import { EditorView, keymap, placeholder as cmPlaceholder, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { defaultKeymap, indentWithTab } from '@codemirror/commands'
 import { sql, MySQL, PostgreSQL, SQLite, MSSQL, PLSQL } from '@codemirror/lang-sql'
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter } from '@codemirror/language'
-import { lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
-import { autocompletion, closeBrackets } from '@codemirror/autocomplete'
+import { autocompletion, closeBrackets, CompletionContext } from '@codemirror/autocomplete'
+import type { CompletionResult } from '@codemirror/autocomplete'
 
 interface SqlEditorProps {
   value: string
@@ -15,6 +15,7 @@ interface SqlEditorProps {
   dialect?: 'mysql' | 'postgresql' | 'sqlite' | 'mssql' | 'plsql'
   readOnly?: boolean
   tables?: Record<string, string[]>
+  variables?: Array<{ name: string; label?: string }>  // 可用变量列表
 }
 
 const dialectMap = {
@@ -25,6 +26,44 @@ const dialectMap = {
   plsql: PLSQL,
 }
 
+// 变量自动完成函数
+function variableCompleter(variables: Array<{ name: string; label?: string }>) {
+  return (context: CompletionContext): CompletionResult | null => {
+    // 获取光标位置前的文本
+    const textBefore = context.state.doc.sliceString(0, context.pos)
+
+    // 查找最后一个$符号的位置
+    const lastDollarIndex = textBefore.lastIndexOf('$')
+
+    if (lastDollarIndex === -1) return null
+
+    // 检查$符号后是否有合法的变量名字符（字母、数字、下划线）
+    const afterDollar = textBefore.slice(lastDollarIndex + 1, context.pos)
+    if (!/^[a-zA-Z0-9_]*$/.test(afterDollar)) return null
+
+    // 确保$符号前面不是字母、数字、下划线或$（避免在变量中间触发）
+    if (lastDollarIndex > 0) {
+      const charBefore = textBefore[lastDollarIndex - 1]
+      if (/[a-zA-Z0-9_$]/.test(charBefore)) return null
+    }
+
+    // 构建变量选项
+    const options = variables.map(v => ({
+      label: `$${v.name}`,
+      type: 'variable' as const,
+      detail: v.label || v.name,
+      info: `变量: ${v.label || v.name}`,
+      apply: `$${v.name}`,
+    }))
+
+    return {
+      from: lastDollarIndex,
+      options,
+      validFor: /^\$[a-zA-Z0-9_]*$/,
+    }
+  }
+}
+
 export default function SqlEditor({
   value,
   onChange,
@@ -33,6 +72,7 @@ export default function SqlEditor({
   dialect = 'mysql',
   readOnly = false,
   tables = {},
+  variables = [],
 }: SqlEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -51,7 +91,9 @@ export default function SqlEditor({
         foldGutter(),
         bracketMatching(),
         closeBrackets(),
-        autocompletion(),
+        autocompletion({
+          override: variables.length > 0 ? [variableCompleter(variables)] : [],
+        }),
         sql({
           dialect: dialectSchema,
           schema: tables,

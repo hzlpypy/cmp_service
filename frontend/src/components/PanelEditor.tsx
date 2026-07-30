@@ -115,7 +115,7 @@ export default function PanelEditor({ panel, datasources, dashboardId, draftJson
     })
   }
 
-  const shareLink = `${window.location.origin}/snapshot/`
+  const shareLink = `${window.location.origin}/capacity_mgt_platform/snapshot/`
 
   const update = (patch: Partial<PanelDef>) => setP((prev) => ({ ...prev, ...patch }))
   const updateGrid = (field: 'x' | 'y' | 'w' | 'h', value: number) => {
