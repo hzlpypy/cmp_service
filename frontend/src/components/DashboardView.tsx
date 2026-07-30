@@ -93,6 +93,13 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   const [showJson, setShowJson] = useState(false)
   const [datasources, setDatasources] = useState<DatasourceRes[]>([])
   const [variables, setVariables] = useState<VariableRes[]>([])
+  const [variableReloadKey, setVariableReloadKey] = useState(0)
+  // 跟踪被用户手动选择过的变量ID（手动选择过的变量不会自动全选）
+  const [manuallyTouchedVarIds, setManuallyTouchedVarIds] = useState<Set<string>>(new Set())
+
+  // 防抖：批量处理多个变量自动全选触发的大量数据刷新
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingVarMapRef = useRef<Record<string, string | string[]> | null>(null)
 
   // ---- 本地草稿状态：所有编辑操作仅修改此状态，不调 API ----
   const [draftJson, setDraftJson] = useState<any>(null)
@@ -591,6 +598,8 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       setDataRes(dbData)
       setDatasources(dsList)
       setVariables(varList)
+      // 重置手动选择跟踪（仪表板重新加载时）
+      setManuallyTouchedVarIds(new Set())
       // 初始化本地草稿为当前 dashboard_json 的深拷贝
       const dj = JSON.parse(JSON.stringify(db.dashboard_json || {}))
       setDraftJson(dj)
@@ -836,10 +845,15 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   }
 
   // ---- 处理变量值变化 ----
-  const handleVariableChange = async (variableId: string, value: string | string[]) => {
+  const handleVariableChange = async (variableId: string, value: string | string[], isManual?: boolean) => {
     // 找到当前变量，更新 current 值
     const currentVar = variables.find((v) => v.id === variableId)
     if (!currentVar) return
+
+    // 追踪手动选择的变量
+    if (isManual) {
+      setManuallyTouchedVarIds((prev) => new Set(prev).add(variableId))
+    }
 
     const text = Array.isArray(value)
       ? value.map((val) => currentVar.options.find((o) => o.value === val)?.text || val)
@@ -853,6 +867,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     // 更新本地变量状态
     const updatedVars = variables.map((v) => v.id === variableId ? updatedVar : v)
     setVariables(updatedVars)
+    setVariableReloadKey((k) => k + 1)
 
     // 保存变量到后端（传递完整数据）
     try {
@@ -870,7 +885,10 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         multi: updatedVar.multi,
         include_all: updatedVar.include_all,
         all_value: updatedVar.all_value,
+        depends_on: updatedVar.depends_on,
+        auto_refresh: updatedVar.auto_refresh,
         sort_order: updatedVar.sort_order,
+        hide: updatedVar.hide,
       })
     } catch {}
 
@@ -895,15 +913,21 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     }
     updateUrlParams(undefined, undefined, undefined, urlVars)
 
-    // 用变量值重新加载数据（不调 loadData 以避免覆盖本地变量状态）
-    try {
-      const tr = getTimeRange()
-      if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
-      const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
-      setDataRes(dbData)
-    } catch (e: any) {
-      console.error('重新加载数据失败:', e)
-    }
+    // 防抖合并：多个变量短时间内变化时，只发一次数据请求
+    pendingVarMapRef.current = { ...(pendingVarMapRef.current || {}), ...varMap }
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current)
+    reloadTimerRef.current = setTimeout(async () => {
+      const mergedVars = pendingVarMapRef.current || {}
+      pendingVarMapRef.current = null
+      try {
+        const tr = getTimeRange()
+        if (tr) Object.assign(mergedVars, api.getSystemVars(tr.from, tr.to))
+        const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, mergedVars)
+        setDataRes(dbData)
+      } catch (e: any) {
+        console.error('重新加载数据失败:', e)
+      }
+    }, 200)
   }
 
   if (loading) {
@@ -1299,6 +1323,8 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         <VariableSelector
           variables={variables}
           onChange={handleVariableChange}
+          reloadKey={variableReloadKey}
+          manuallyTouchedVarIds={manuallyTouchedVarIds}
         />
       )}
 

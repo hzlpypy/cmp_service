@@ -298,12 +298,18 @@ type Variable struct {
 	Current JSONMap `gorm:"type:json" json:"current"`
 	// Multi 是否支持多选
 	Multi bool `gorm:"type:tinyint(1);default:0" json:"multi"`
-	// IncludeAll 是否包含"全部"选项
-	IncludeAll bool `gorm:"column:include_all;type:tinyint(1);default:0" json:"include_all"`
+	// IncludeAll 是否包含"全部"选项（默认为 true，所有变量都支持全选）
+	IncludeAll bool `gorm:"column:include_all;type:tinyint(1);default:1" json:"include_all"`
 	// AllValue "全部"选项的值（默认为 *）
 	AllValue string `gorm:"column:all_value;type:varchar(256);default:'*'" json:"all_value"`
+	// DependsOn 依赖的变量名（指定该变量依赖哪个变量，当上游变量变化时自动刷新选项）
+	DependsOn string `gorm:"column:depends_on;type:varchar(64);default:''" json:"depends_on"`
+	// AutoRefresh 当上游变量变化时是否自动刷新并全选（默认 true，用户手动选择后变为 false）
+	AutoRefresh bool `gorm:"column:auto_refresh;type:tinyint(1);default:1" json:"auto_refresh"`
 	// SortOrder 排序序号
 	SortOrder int `gorm:"column:sort_order;not null;default:0" json:"sort_order"`
+	// Hide 是否隐藏变量选择器（变量值仍然生效）
+	Hide bool `gorm:"type:tinyint(1);default:0" json:"hide"`
 }
 
 // TableName 指定变量表名。

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import * as api from '../api'
@@ -143,6 +143,16 @@ const DEFAULT_WS_URL = `ws://${window.location.host}/ws/cmp_llm`
 
 const ALLOWED_EXTENSIONS = ['.txt', '.md', '.pdf', '.docx', '.xlsx', '.jpg', '.jpeg', '.png']
 
+/** 生成随机 message_id */
+function generateMessageId(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  let result = ''
+  for (let i = 0; i < 16; i++) {
+    result += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return result
+}
+
 export default function AIChatDialog({
   dashboardId,
   dashboardTitle,
@@ -156,6 +166,9 @@ export default function AIChatDialog({
   const [input, setInput] = useState('')
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [streaming, setStreaming] = useState(false)
+  /** 每个仪表板生成唯一 message_id，整个对话期间不变 */
+  const messageId = useMemo(() => generateMessageId(), [dashboardId])
   const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -353,6 +366,7 @@ export default function AIChatDialog({
         finalizeSegment()
         setConnected(false)
         setLoading(false)
+        setStreaming(false)
         // 指数退避重连：1s → 2s → 4s → 8s → ... → max 30s
         const delay = reconnectDelayRef.current
         reconnectTimerRef.current = setTimeout(() => {
@@ -412,6 +426,20 @@ export default function AIChatDialog({
   const handleStreamChunk = (data: any) => {
     // 过滤心跳包及其他非流式消息
     if (data.type === 'heartbeat') return
+
+    // 处理结束和停止消息
+    if (data.type === 'end' || data.type === 'stopped') {
+      setLoading(false)
+      setStreaming(false)
+      finalizeSegment()
+      if (data.type === 'stopped' && data.message) {
+        setMessages((prev) => [...prev, {
+          role: 'system' as const,
+          content: data.message,
+        }])
+      }
+      return
+    }
 
     const tokenId: string = data.token_id || ''
     const chunk: string = data.message || ''
@@ -605,7 +633,7 @@ export default function AIChatDialog({
 
   const handleSend = () => {
     const text = input.trim()
-    if (!text || !connected || loading) return
+    if (!text || !connected || loading || streaming) return
 
     // 收集已上传完成的文件路径
     const uploadedPaths = attachments.filter((a) => !a.uploading && a.path).map((a) => a.path)
@@ -618,11 +646,15 @@ export default function AIChatDialog({
     }])
     setInput('')
     setLoading(true)
+    setStreaming(true)
 
     const contextMsg = buildContextMessage(text)
     const payload: any = {
-      type: 'chat',
+      base_agent_id: 6,
       message: contextMsg,
+      message_id: messageId,
+      type: 'chat',
+      username: 'default',
     }
     if (uploadedPaths.length > 0) {
       payload.files = uploadedPaths
@@ -632,6 +664,18 @@ export default function AIChatDialog({
     // 发送后强制滚动到底部并清空附件
     scrollToBottom(true)
     setAttachments([])
+  }
+
+  /** 停止 AI 输出 */
+  const handleStop = () => {
+    const ws = wsRef.current
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'stop' }))
+    }
+    // 立即停止 loading 状态，前端不再等待
+    setLoading(false)
+    setStreaming(false)
+    finalizeSegment()
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -935,7 +979,7 @@ export default function AIChatDialog({
           {/* 上传附件按钮 */}
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={!connected || loading}
+            disabled={!connected || loading || streaming}
             title="上传附件"
             style={{
               padding: '6px 8px', fontSize: 16,
@@ -1085,7 +1129,7 @@ export default function AIChatDialog({
               onCompositionStart={handleCompositionStart}
               onCompositionEnd={handleCompositionEnd}
               placeholder={connected ? '描述你想做的修改...（输入 @ 选数据源，# 选面板）' : '正在连接...'}
-            disabled={!connected || loading}
+            disabled={!connected || loading || streaming}
             rows={2}
             style={{
               flex: 1, resize: 'none',
@@ -1099,19 +1143,19 @@ export default function AIChatDialog({
           />
           </div>
           <button
-            onClick={handleSend}
-            disabled={!connected || loading || !input.trim()}
+            onClick={streaming ? handleStop : handleSend}
+            disabled={streaming ? false : (!connected || !input.trim())}
             style={{
               alignSelf: 'flex-end',
               padding: '6px 14px', fontSize: 13, fontWeight: 500,
-              background: connected && input.trim() ? 'var(--primary)' : 'var(--bg-input)',
-              color: connected && input.trim() ? '#fff' : 'var(--text-muted)',
+              background: streaming ? '#ff4d4f' : (connected && input.trim() ? 'var(--primary)' : 'var(--bg-input)'),
+              color: streaming ? '#fff' : (connected && input.trim() ? '#fff' : 'var(--text-muted)'),
               border: '1px solid var(--border-color)',
               borderRadius: 4,
-              cursor: connected && input.trim() ? 'pointer' : 'default',
+              cursor: connected || streaming ? 'pointer' : 'default',
             }}
           >
-            发送
+            {streaming ? '停止' : '发送'}
           </button>
         </div>
       </div>

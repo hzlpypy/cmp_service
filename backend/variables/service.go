@@ -11,7 +11,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
-	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -104,12 +103,10 @@ func (s *Server) CreateVariable(ctx *gin.Context, req *VariableReq) (*VariableRe
 		Multi:        req.Multi,
 		IncludeAll:   req.IncludeAll,
 		AllValue:     req.AllValue,
+		DependsOn:    req.DependsOn,
+		AutoRefresh:  req.AutoRefresh,
 		SortOrder:    req.SortOrder,
-	}
-
-	// 设置默认 AllValue
-	if record.AllValue == "" {
-		record.AllValue = "*"
+		Hide:         req.Hide,
 	}
 
 	// 生成唯一ID
@@ -146,7 +143,10 @@ func (s *Server) UpdateVariable(ctx *gin.Context, req *VariableReq) (*VariableRe
 		"multi":         req.Multi,
 		"include_all":   req.IncludeAll,
 		"all_value":     req.AllValue,
+		"depends_on":    req.DependsOn,
+		"auto_refresh":  req.AutoRefresh,
 		"sort_order":    req.SortOrder,
+		"hide":          req.Hide,
 	}
 
 	if err := s.db.Model(&model.Variable{}).
@@ -212,6 +212,11 @@ func (s *Server) GetVariableValues(ctx *gin.Context, req *VariableValuesReq) (*V
 		return &VariableValuesRes{Values: []VariableOption{}}, nil
 	}
 
+	// 解析查询中的变量引用（如 $query0、${query0}），替换为当前值
+	if variable != nil && variable.DashboardID != "" {
+		query = s.resolveVariableReferences(variable.DashboardID, variable.ID, query, req.Variables)
+	}
+
 	// 执行查询
 	values, err := s.executeQuery(query, datasourceID)
 	if err != nil {
@@ -222,8 +227,97 @@ func (s *Server) GetVariableValues(ctx *gin.Context, req *VariableValuesReq) (*V
 	return &VariableValuesRes{Values: values}, nil
 }
 
+// resolveVariableReferences 替换查询语句中的变量引用（$varname / ${varname}）。
+// 加载仪表板下所有其他变量的当前值，进行替换。
+// excludeID 是需要排除的变量ID（即正在查询的变量自身）。
+// extVars 是前端传入的变量值（优先使用，避免 DB 读写竞态）。
+func (s *Server) resolveVariableReferences(dashboardID, excludeID, query string, extVars map[string]interface{}) string {
+	// 加载该仪表板下所有其他变量
+	var others []*model.Variable
+	if err := s.db.Where("dashboard_id = ? AND id != ? AND deleted_at IS NULL",
+		dashboardID, excludeID).Find(&others).Error; err != nil {
+		return query
+	}
+
+	// 构建 VariableValue 列表
+	varValues := make([]VariableValue, 0, len(others))
+	for _, v := range others {
+		vv := VariableValue{
+			Name:  v.Name,
+			Multi: v.Multi,
+		}
+
+		// 优先使用前端传入的变量值（避免 DB 读写竞态条件）
+		if extVal, ok := extVars[v.Name]; ok {
+			s.log.Infof("[resolveVarRef] name=%s using extVar value=%v type=%T", v.Name, extVal, extVal)
+			switch val := extVal.(type) {
+			case string:
+				vv.Value = val
+			case []interface{}:
+				vv.Values = make([]string, 0, len(val))
+				for _, item := range val {
+					if s, ok := item.(string); ok {
+						vv.Values = append(vv.Values, s)
+					}
+				}
+			case []string:
+				vv.Values = val
+			}
+		} else if v.Current != nil {
+			s.log.Infof("[resolveVarRef] name=%s raw_current=%v type=%T", v.Name, v.Current, v.Current["value"])
+			if val, ok := v.Current["value"]; ok && val != nil {
+				switch val := val.(type) {
+				case string:
+					vv.Value = val
+					s.log.Infof("[resolveVarRef] name=%s parsed as string: %s", v.Name, val)
+				case []interface{}:
+					vv.Values = make([]string, 0, len(val))
+					for _, item := range val {
+						if s, ok := item.(string); ok {
+							vv.Values = append(vv.Values, s)
+						}
+					}
+					s.log.Infof("[resolveVarRef] name=%s parsed as []interface{}: count=%d values=%v", v.Name, len(vv.Values), vv.Values)
+				case []string:
+					vv.Values = val
+					s.log.Infof("[resolveVarRef] name=%s parsed as []string: count=%d values=%v", v.Name, len(val), val)
+				default:
+					s.log.Warnf("[resolveVarRef] name=%s unexpected type %T for current value: %v", v.Name, val, val)
+					vv.Value = fmt.Sprintf("%v", val)
+				}
+			}
+		}
+
+		// 如果没有 current 值，使用 default
+		if vv.Value == "" && len(vv.Values) == 0 && v.Default != "" {
+			vv.Value = v.Default
+			s.log.Infof("[resolveVarRef] name=%s using default: %s", v.Name, v.Default)
+		}
+
+		// 如果解析出了多个值，强制设为多选模式（单选+include_all 会传数组）
+		if len(vv.Values) > 0 {
+			vv.Multi = true
+			if vv.Value == "" && len(vv.Values) > 0 {
+				vv.Value = vv.Values[0]
+			}
+		}
+
+		s.log.Infof("[resolveVarRef] name=%s multi=%v value=%v values=%v (count=%d)", v.Name, vv.Multi, vv.Value, vv.Values, len(vv.Values))
+		varValues = append(varValues, vv)
+	}
+
+	result := ReplaceVariables(query, varValues)
+	s.log.Infof("[resolveVarRef] input=%s output=%s", query, result)
+	return result
+}
+
 // executeQuery 执行查询语句获取变量值列表。
 func (s *Server) executeQuery(query string, datasourceID string) ([]VariableOption, error) {
+	return ExecuteQuery(s.db, query, datasourceID)
+}
+
+// ExecuteQuery 包级函数：执行查询语句获取变量值列表。
+func ExecuteQuery(db *gorm.DB, query string, datasourceID string) ([]VariableOption, error) {
 	// 安全检查：只允许 SELECT 开头的语句
 	trimmed := strings.TrimSpace(query)
 	upper := strings.ToUpper(trimmed)
@@ -234,83 +328,72 @@ func (s *Server) executeQuery(query string, datasourceID string) ([]VariableOpti
 	// 如果指定了数据源，使用该数据源连接执行查询
 	if datasourceID != "" {
 		var ds model.Datasource
-		if err := s.db.Where("id = ? AND enabled = 1 AND deleted_at IS NULL", datasourceID).First(&ds).Error; err != nil {
+		if err := db.Where("id = ? AND enabled = 1 AND deleted_at IS NULL", datasourceID).First(&ds).Error; err != nil {
 			return nil, fmt.Errorf("数据源不可用: %v", err)
 		}
 
 		// 目前仅支持 MySQL 类型数据源
 		if ds.Type == "mysql" {
-			return s.executeMySQLQuery(trimmed, &ds)
+			return executeMySQLQuery(db, trimmed, &ds)
 		}
 	}
 
 	// 默认使用当前数据库连接执行查询
-	return s.executeLocalQuery(trimmed)
+	return executeLocalQuery(db, trimmed)
 }
 
 // executeLocalQuery 使用当前数据库连接执行查询。
+// 注意：此方法绑定在 *Server 上，委托给 package 级函数。
 func (s *Server) executeLocalQuery(query string) ([]VariableOption, error) {
-	rows, err := s.db.Raw(query).Rows()
+	opts, err := executeLocalQuery(s.db, query)
 	if err != nil {
-		return nil, fmt.Errorf("查询执行失败: %w", err)
+		s.log.Warnf("[executeLocalQuery] 查询错误: query=%s err=%v", query, err)
+		return nil, err
 	}
-	defer rows.Close()
-
-	columns, _ := rows.Columns()
-	values := make([]VariableOption, 0)
-
-	for rows.Next() {
-		scanValues := make([]interface{}, len(columns))
-		scanPtrs := make([]interface{}, len(columns))
-		for i := range scanValues {
-			scanPtrs[i] = &scanValues[i]
-		}
-
-		if err := rows.Scan(scanPtrs...); err != nil {
-			continue
-		}
-
-		// 取第一列作为值，如果有第二列则作为显示文本
-		var text, value string
-		if len(scanValues) > 0 {
-			value = formatValue(scanValues[0])
-			text = value
-		}
-		if len(scanValues) > 1 {
-			text = formatValue(scanValues[1])
-		}
-
-		values = append(values, VariableOption{
-			Text:  text,
-			Value: value,
-		})
-	}
-
-	return values, nil
+	s.log.Infof("[executeLocalQuery] query=%s count=%d", query, len(opts))
+	return opts, nil
 }
 
 // executeMySQLQuery 使用指定数据源连接执行查询。
 func (s *Server) executeMySQLQuery(query string, ds *model.Datasource) ([]VariableOption, error) {
-	// 构建 DSN
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		ds.Username, ds.Password, ds.URL, ds.DatabaseName)
-
-	// 打开新连接
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		return nil, fmt.Errorf("连接数据源失败: %w", err)
-	}
-	defer func() {
-		sqlDB, _ := db.DB()
-		sqlDB.Close()
-	}()
-
-	// 执行查询
-	return s.executeQueryWithDB(db, query)
+	return executeMySQLQuery(s.db, query, ds)
 }
 
 // executeQueryWithDB 使用指定数据库连接执行查询。
 func (s *Server) executeQueryWithDB(db *gorm.DB, query string) ([]VariableOption, error) {
+	return queryRows(db, query)
+}
+
+// formatValue 将数据库值格式化为字符串。
+// time.Time 转换为毫秒时间戳字符串。
+func formatValue(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case []byte:
+		return string(val)
+	case string:
+		return val
+	case time.Time:
+		return fmt.Sprintf("%d", val.UnixMilli())
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+// executeLocalQuery 包级函数：使用指定数据库连接执行查询。
+func executeLocalQuery(db *gorm.DB, query string) ([]VariableOption, error) {
+	return queryRows(db, query)
+}
+
+// executeMySQLQuery 使用已有连接执行查询，不新建连接。
+func executeMySQLQuery(db *gorm.DB, query string, _ *model.Datasource) ([]VariableOption, error) {
+	return queryRows(db, query)
+}
+
+// queryRows 执行查询并将结果转换为 VariableOption 列表。
+func queryRows(db *gorm.DB, query string) ([]VariableOption, error) {
 	rows, err := db.Raw(query).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("查询执行失败: %w", err)
@@ -349,24 +432,6 @@ func (s *Server) executeQueryWithDB(db *gorm.DB, query string) ([]VariableOption
 	return values, nil
 }
 
-// formatValue 将数据库值格式化为字符串。
-// time.Time 转换为毫秒时间戳字符串。
-func formatValue(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	switch val := v.(type) {
-	case []byte:
-		return string(val)
-	case string:
-		return val
-	case time.Time:
-		return fmt.Sprintf("%d", val.UnixMilli())
-	default:
-		return fmt.Sprintf("%v", val)
-	}
-}
-
 // generateVariableID 生成变量的唯一ID。
 func generateVariableID() string {
 	return fmt.Sprintf("var-%d", time.Now().UnixMilli())
@@ -386,12 +451,12 @@ type VariableValue struct {
 
 // SystemVariableValue 系统内置变量值（时间范围等）
 type SystemVariableValue struct {
-	From      string // 开始时间（ISO格式）
-	To        string // 结束时间（ISO格式）
-	FromUnix  int64  // 开始时间（Unix秒）
-	ToUnix    int64  // 结束时间（Unix秒）
-	FromMs    int64  // 开始时间（毫秒）
-	ToMs      int64  // 结束时间（毫秒）
+	From     string // 开始时间（ISO格式）
+	To       string // 结束时间（ISO格式）
+	FromUnix int64  // 开始时间（Unix秒）
+	ToUnix   int64  // 结束时间（Unix秒）
+	FromMs   int64  // 开始时间（毫秒）
+	ToMs     int64  // 结束时间（毫秒）
 }
 
 // ReplaceVariables 替换 SQL 中的变量引用。
@@ -402,15 +467,28 @@ func ReplaceVariables(sql string, variables []VariableValue) string {
 	result := sql
 
 	for _, v := range variables {
+		// 去除变量名可能带有的 $ 前缀（某些用户在创建变量时可能误写了 $query0 而非 query0）
+		name := strings.TrimPrefix(v.Name, "$")
 		replacement := formatVariableValue(v)
 
+		// 如果 replacement 已自带引号（多选值），优先替换被引号包裹的 '$varname' / '$ {varname}'
+		// 避免用户 SQL 中外层引号与内层引号叠加产生 ''val1','val2'' 双引号错误。
+		hasQuotes := strings.HasPrefix(replacement, "'")
+		if hasQuotes {
+			// 替换 '${varname}'
+			quotedBracePattern := fmt.Sprintf(`'\$\{%s\}'`, regexp.QuoteMeta(name))
+			result = regexp.MustCompile(quotedBracePattern).ReplaceAllString(result, replacement)
+			// 替换 '$varname'
+			quotedDollarPattern := fmt.Sprintf(`'\$%s\b'`, regexp.QuoteMeta(name))
+			result = regexp.MustCompile(quotedDollarPattern).ReplaceAllString(result, replacement)
+		}
+
 		// 替换 ${varname} 语法
-		bracePattern := fmt.Sprintf("\\$\\{%s\\}", regexp.QuoteMeta(v.Name))
+		bracePattern := fmt.Sprintf(`\$\{%s\}`, regexp.QuoteMeta(name))
 		result = regexp.MustCompile(bracePattern).ReplaceAllString(result, replacement)
 
-		// 替换 $varname 语法（使用单词边界，确保不匹配 $varnameX 或 $varname_ 等情况）
-		// Go RE2 不支持 (?!...) 负向先行断言，使用 \b 单词边界代替
-		dollarPattern := fmt.Sprintf("\\$%s\\b", regexp.QuoteMeta(v.Name))
+		// 替换 $varname 语法（使用单词边界，确保不匹配 $varnameX 等情况）
+		dollarPattern := fmt.Sprintf(`\$%s\b`, regexp.QuoteMeta(name))
 		result = regexp.MustCompile(dollarPattern).ReplaceAllString(result, replacement)
 	}
 
@@ -534,23 +612,34 @@ func GetVariableValuesFromDB(db *gorm.DB, dashboardID string) ([]VariableValue, 
 
 		// 从 Current 字段获取当前值
 		if v.Current != nil {
-			if value, ok := v.Current["value"].(string); ok {
-				vv.Value = value
-			}
-			// 处理多选值
-			if values, ok := v.Current["value"].([]interface{}); ok {
-				vv.Values = make([]string, 0, len(values))
-				for _, val := range values {
-					if s, ok := val.(string); ok {
-						vv.Values = append(vv.Values, s)
+			if val, ok := v.Current["value"]; ok && val != nil {
+				switch val := val.(type) {
+				case string:
+					vv.Value = val
+				case []interface{}:
+					vv.Values = make([]string, 0, len(val))
+					for _, item := range val {
+						if s, ok := item.(string); ok {
+							vv.Values = append(vv.Values, s)
+						}
 					}
+				case []string:
+					vv.Values = val
 				}
 			}
 		}
 
 		// 如果没有当前值，使用默认值
-		if vv.Value == "" && v.Default != "" {
+		if vv.Value == "" && len(vv.Values) == 0 && v.Default != "" {
 			vv.Value = v.Default
+		}
+
+		// 如果解析出了多个值，强制设为多选模式（单选+include_all 会传数组）
+		if len(vv.Values) > 0 {
+			vv.Multi = true
+			if vv.Value == "" {
+				vv.Value = vv.Values[0]
+			}
 		}
 
 		result = append(result, vv)
