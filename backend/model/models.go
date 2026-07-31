@@ -240,13 +240,13 @@ func (Panel) TableName() string { return "panels" }
 // Snapshot 快照表，存储仪表板或面板的即时快照，用于共享链接。
 type Snapshot struct {
 	Base
-	DashboardID   string    `gorm:"column:dashboard_id;type:varchar(64);not null" json:"dashboard_id"`
-	PanelID       string    `gorm:"column:panel_id;type:varchar(64);default:''" json:"panel_id"`
-	Key           string    `gorm:"column:snapshot_key;type:varchar(64);uniqueIndex;not null" json:"snapshot_key"`
-	Name          string    `gorm:"type:varchar(256);default:''" json:"name"`
-	DashboardJSON JSONMap   `gorm:"column:dashboard_json;type:json" json:"dashboard_json"`
+	DashboardID   string     `gorm:"column:dashboard_id;type:varchar(64);not null" json:"dashboard_id"`
+	PanelID       string     `gorm:"column:panel_id;type:varchar(64);default:''" json:"panel_id"`
+	Key           string     `gorm:"column:snapshot_key;type:varchar(64);uniqueIndex;not null" json:"snapshot_key"`
+	Name          string     `gorm:"type:varchar(256);default:''" json:"name"`
+	DashboardJSON JSONMap    `gorm:"column:dashboard_json;type:json" json:"dashboard_json"`
 	PanelsData    JSONArray  `gorm:"column:panels_data;type:json" json:"panels_data"`
-	AIInsights    JSONMap   `gorm:"column:ai_insights;type:json" json:"ai_insights"` // AI 洞察内容：score, conclusion, risks, evaluation, plan
+	AIInsights    JSONMap    `gorm:"column:ai_insights;type:json" json:"ai_insights"` // AI 洞察内容：score, conclusion, risks, evaluation, plan
 	ExpiresAt     *time.Time `gorm:"column:expires_at" json:"expires_at,omitempty"`
 }
 
