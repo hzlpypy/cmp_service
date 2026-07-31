@@ -66,11 +66,17 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
   const [variables, setVariables] = useState<VariableRes[]>(initialVariables || [])
   const [variableReloadKey, setVariableReloadKey] = useState(0)
   const [manuallyTouchedVarIds, setManuallyTouchedVarIds] = useState<Set<string>>(new Set())
+  const [showVariablesModal, setShowVariablesModal] = useState(false)
 
   // 左侧上下区域高度比例（上部占比，范围0.3-0.7）
   const [leftSplitRatio, setLeftSplitRatio] = useState(0.55)
   const [isDragging, setIsDragging] = useState(false)
   const leftPanelRef = useRef<HTMLDivElement>(null)
+
+  // 左右区域宽度比例（左侧占比，范围0.4-0.75）
+  const [leftRightRatio, setLeftRightRatio] = useState(0.6)
+  const [isVerticalDragging, setIsVerticalDragging] = useState(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
 
   // 防抖：批量处理多个变量自动全选触发的大量数据刷新
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -595,6 +601,35 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
     }
   }, [isDragging])
 
+  // 垂直拖动分隔条处理函数（左右宽度调整）
+  const handleVerticalMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsVerticalDragging(true)
+  }
+
+  useEffect(() => {
+    if (!isVerticalDragging) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!bodyRef.current) return
+      const rect = bodyRef.current.getBoundingClientRect()
+      const newRatio = (e.clientX - rect.left) / rect.width
+      setLeftRightRatio(Math.min(0.75, Math.max(0.4, newRatio)))
+    }
+
+    const handleMouseUp = () => {
+      setIsVerticalDragging(false)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isVerticalDragging])
+
   return (
     <div className="pe-root">
       {/* ── 顶部工具栏 ── */}
@@ -793,9 +828,9 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
       )}
 
       {/* ── 主体区域：左侧（上下分割） + 右侧边栏 ── */}
-      <div className="pe-body">
+      <div className="pe-body" ref={bodyRef}>
         {/* 左侧：上部预览 + 下部查询配置 */}
-        <div className="pe-left-panel" ref={leftPanelRef}>
+        <div className="pe-left-panel" ref={leftPanelRef} style={{ width: `${leftRightRatio * 100}%` }}>
           {/* 上部：可视化预览 */}
           <div className="pe-preview" style={{ height: `${leftSplitRatio * 100}%` }}>
             <div className="pe-preview-header">
@@ -834,71 +869,62 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
 
           {/* 下部：查询配置 */}
           <div className="pe-query-panel" style={{ height: `${(1 - leftSplitRatio) * 100}%` }}>
-            <div className="pe-query-panel-header">
-              <span className="pe-query-panel-title">查询配置</span>
-            </div>
             <div className="pe-query-panel-content">
-              <Section title="数据源" defaultOpen={true}>
-                <div className="pe-field">
-                  <select value={p.datasource_id || ''} onChange={(e) => update({ datasource_id: e.target.value || undefined, datasource: undefined } as any)} className="pe-select">
-                    <option value="">选择数据源...</option>
-                    {datasources.map((ds) => (
-                      <option key={ds.id} value={ds.id}>{ds.name} ({ds.type === 'mysql' ? 'MySQL' : 'HTTP'})</option>
-                    ))}
-                  </select>
-                </div>
-              </Section>
+              {/* 数据源和可用变量一行显示 */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 16px',
+                background: 'var(--bg-primary)',
+                borderBottom: '1px solid var(--border-color)'
+              }}>
+                <label  style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>数据源</label>
+                <select
+                  value={p.datasource_id || ''}
+                  onChange={(e) => update({ datasource_id: e.target.value || undefined, datasource: undefined } as any)}
+                  className="pe-select"
+                  style={{ minWidth:100}}
+                >
+                  <option value="">选择数据源...</option>
+                  {datasources.map((ds) => (
+                    <option key={ds.id} value={ds.id}>{ds.name} ({ds.type === 'mysql' ? 'MySQL' : 'HTTP'})</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => setShowVariablesModal(true)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#1890ff',
+                    fontSize: 13,
+                    cursor: 'pointer',
+                    padding: '2px 8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    transition: 'color 0.2s',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = '#40a9ff'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = '#1890ff'}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                  </svg>
+                  可用变量
+                </button>
+              </div>
 
-              <Section title="可用变量" defaultOpen={false}>
-                {/* 系统内置变量 */}
-                <div style={{ marginBottom: 12 }}>
-                  <div className="pe-label-sm">系统内置变量（时间范围）</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
-                    {[
-                      { name: '$__from', desc: '开始时间（ISO格式，自动加引号）' },
-                      { name: '$__to', desc: '结束时间（ISO格式，自动加引号）' },
-                      { name: '$__fromUnix', desc: '开始时间（Unix秒，数字）' },
-                      { name: '$__toUnix', desc: '结束时间（Unix秒，数字）' },
-                      { name: '$__fromMs', desc: '开始时间（毫秒，数字）' },
-                      { name: '$__toMs', desc: '结束时间（毫秒，数字）' },
-                      { name: '$__timeFilter(column)', desc: '时间过滤宏' },
-                    ].map((item) => (
-                      <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
-                        <code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>{item.name}</code>
-                        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{item.desc}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="pe-hint-text">
-                    示例：WHERE date &gt; $__from（自动替换为 WHERE date &gt; '2026-06-21T10:00:00Z'）
-                  </div>
-                </div>
-                {/* 用户自定义变量 */}
-                {variables.length > 0 && (
-                  <div>
-                    <div className="pe-label-sm">仪表板变量</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
-                      {variables.map((v) => (
-                        <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
-                          <code style={{ background: '#fef2f2', padding: '3px 8px', borderRadius: 4, color: '#e53935', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>${v.name}</code>
-                          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{v.label || v.name}</span>
-                          {v.multi && <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-input)', padding: '1px 6px', borderRadius: 3 }}>(多选)</span>}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {variables.length === 0 && (
-                  <div className="pe-hint-text" style={{ background: 'transparent', borderLeft: 'none', padding: '4px 0' }}>暂无自定义变量，可在仪表板设置中添加</div>
-                )}
-              </Section>
-
-              <Section title="查询配置" defaultOpen={true} badge={p.targets.length > 1 ? `${p.targets.length}` : undefined}>
+              <div style={{ padding: '8px 16px 16px' }}>
                 {p.targets.map((target, ti) => {
                   const isExpr = target.targetType === 'expression'
                   return (
                   <div key={ti} className="pe-query-block">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', background: 'var(--bg-raised)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', background: 'var(--bg-raised)' }}>
                       <input
                         value={target.refId || ''}
                         onChange={(e) => updateTarget(ti, { refId: e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 2) })}
@@ -1364,13 +1390,22 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
                     折线图和柱状图支持多条查询，每条查询作为图表中的一个数据系列。
                   </div>
                 )}
-              </Section>
+              </div>
             </div>
           </div>
         </div>
 
+        {/* 垂直分隔条 */}
+        <div
+          className="pe-vertical-resizer"
+          onMouseDown={handleVerticalMouseDown}
+          style={{ cursor: isVerticalDragging ? 'ew-resize' : 'col-resize' }}
+        >
+          <div className="pe-vertical-resizer-line" />
+        </div>
+
         {/* 右侧：侧边栏 */}
-        <div className="pe-sidebar">
+        <div className="pe-sidebar" style={{ width: `${(1 - leftRightRatio) * 100}%` }}>
           {/* 侧边栏 Tab 切换 */}
           <div className="pe-sidebar-tabs">
             {(['options', 'share'] as SidebarTab[]).map((t) => (
@@ -2309,6 +2344,75 @@ export default function PanelEditPage({ panel, datasources, dashboardId, draftJs
           </div>
         </div>
       </div>
+
+      {/* 变量弹框 */}
+      <Modal
+        open={showVariablesModal}
+        onCancel={() => setShowVariablesModal(false)}
+        footer={null}
+        width={560}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1890ff" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            可用变量
+          </div>
+        }
+      >
+        <div style={{ maxHeight: 500, overflow: 'auto' }}>
+          {/* 系统内置变量 */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 4, height: 16, background: '#1890ff', borderRadius: 2 }} />
+              系统内置变量（时间范围）
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[
+                { name: '$__from', desc: '开始时间（ISO格式，自动加引号）' },
+                { name: '$__to', desc: '结束时间（ISO格式，自动加引号）' },
+                { name: '$__fromUnix', desc: '开始时间（Unix秒，数字）' },
+                { name: '$__toUnix', desc: '结束时间（Unix秒，数字）' },
+                { name: '$__fromMs', desc: '开始时间（毫秒，数字）' },
+                { name: '$__toMs', desc: '结束时间（毫秒，数字）' },
+                { name: '$__timeFilter(column)', desc: '时间过滤宏' },
+              ].map((item) => (
+                <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', background: 'var(--bg-input)', borderRadius: 6, border: '1px solid var(--border-color)' }}>
+                  <code style={{ background: '#fef2f2', padding: '4px 10px', borderRadius: 4, color: '#e53935', fontSize: 12, fontWeight: 500, fontFamily: 'monospace' }}>{item.name}</code>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{item.desc}</span>
+                </div>
+              ))}
+            </div>
+            <div className="pe-hint-text" style={{ marginTop: 8, padding: '6px 10px', background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4 }}>
+              示例：WHERE date &gt; $__from（自动替换为 WHERE date &gt; '2026-06-21T10:00:00Z'）
+            </div>
+          </div>
+          {/* 用户自定义变量 */}
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 4, height: 16, background: '#52c41a', borderRadius: 2 }} />
+              仪表板变量
+            </div>
+            {variables.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {variables.map((v) => (
+                  <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', background: 'var(--bg-input)', borderRadius: 6, border: '1px solid var(--border-color)' }}>
+                    <code style={{ background: '#fef2f2', padding: '4px 10px', borderRadius: 4, color: '#e53935', fontSize: 12, fontWeight: 500, fontFamily: 'monospace' }}>${v.name}</code>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: 12, flex: 1 }}>{v.label || v.name}</span>
+                    {v.multi && <span style={{ fontSize: 11, color: '#52c41a', background: '#f6ffed', padding: '2px 8px', borderRadius: 3, border: '1px solid #b7eb8f' }}>(多选)</span>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="pe-hint-text" style={{ background: 'var(--bg-input)', borderLeft: 'none', padding: '10px', borderRadius: 4, textAlign: 'center' }}>
+                暂无自定义变量，可在仪表板设置中添加
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
