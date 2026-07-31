@@ -13,7 +13,7 @@ interface ReportModalProps {
 }
 
 /** AI Agent WebSocket 地址 */
-const WS_URL = `ws://${window.location.host}/ws/cmp_llm`
+const WS_URL = 'ws://127.0.0.1:8765'
 
 export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary, onClose }: ReportModalProps) {
   const [loading, setLoading] = useState(true)
@@ -130,7 +130,7 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
 
       ws.onerror = () => {
         if (!reportRef.current) {
-          setError('WebSocket 连接异常，请确认 AI Agent 已启动 (ws://127.0.0.1:8764)')
+          setError('WebSocket 连接异常，请确认 AI Agent 已启动 (ws://127.0.0.1:8765)')
         }
         setLoading(false)
       }

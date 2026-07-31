@@ -510,14 +510,14 @@ func (s *Server) QueryInspect(ctx *gin.Context, req *QueryInspectReq) (*QueryIns
 		// HTTP数据源查询
 		// 从请求中提取HTTP查询参数
 		queryConfig := &datasources.HTTPQueryConfig{
-			Method:      req.HTTPMethod,
-			Path:        req.HTTPPath,
-			BodyType:    req.HTTPBodyType,
-			Body:        req.HTTPBody,
-			FormData:    req.HTTPFormData,
-			Headers:     req.HTTPHeaders,
-			DataFormat:  req.HTTPDataFormat,
-			DataPath:    req.HTTPDataPath,
+			Method:     req.HTTPMethod,
+			Path:       req.HTTPPath,
+			BodyType:   req.HTTPBodyType,
+			Body:       req.HTTPBody,
+			FormData:   req.HTTPFormData,
+			Headers:    req.HTTPHeaders,
+			DataFormat: req.HTTPDataFormat,
+			DataPath:   req.HTTPDataPath,
 		}
 		if queryConfig.Method == "" {
 			queryConfig.Method = "GET"
@@ -825,12 +825,12 @@ func (s *Server) queryTargetWithVars(db *gorm.DB, tMap map[string]interface{}, f
 func (s *Server) queryHTTPTarget(ds *model.Datasource, tMap map[string]interface{}, varValues []variables.VariableValue, from, to string) ([]string, []map[string]interface{}, error) {
 	// 从target配置中提取HTTP查询参数
 	queryConfig := &datasources.HTTPQueryConfig{
-		Method:      getStringField(tMap, "http_method"),
-		Path:        getStringField(tMap, "http_path"),
-		BodyType:    getStringField(tMap, "http_body_type"),
-		Body:        getStringField(tMap, "http_body"),
-		DataFormat:  getStringField(tMap, "http_data_format"),
-		DataPath:    getStringField(tMap, "http_data_path"),
+		Method:     getStringField(tMap, "http_method"),
+		Path:       getStringField(tMap, "http_path"),
+		BodyType:   getStringField(tMap, "http_body_type"),
+		Body:       getStringField(tMap, "http_body"),
+		DataFormat: getStringField(tMap, "http_data_format"),
+		DataPath:   getStringField(tMap, "http_data_path"),
 	}
 
 	// 解析http_headers（可选）
