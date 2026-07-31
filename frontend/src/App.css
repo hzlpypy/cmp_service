@@ -1679,7 +1679,7 @@ body {
 
 /* ── Left Panel (上下分割) ── */
 .pe-left-panel {
-  flex: 1;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -1738,32 +1738,58 @@ body {
 
 /* ── Horizontal Resizer ── */
 .pe-horizontal-resizer {
-  flex: 0 0 6px;
-  background: var(--bg-secondary);
+  flex: 0 0 12px;
+  background: transparent;
   cursor: row-resize;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background 0.15s;
-  border-top: 1px solid var(--border-color);
-  border-bottom: 1px solid var(--border-color);
   user-select: none;
 }
 
 .pe-horizontal-resizer:hover {
-  background: #e8e8e8;
+  background: transparent;
 }
 
 .pe-resizer-line {
-  width: 40px;
-  height: 3px;
-  background: #bfbfbf;
+  width: 50px;
+  height: 4px;
+  background: #d9d9d9;
   border-radius: 2px;
   transition: background 0.15s;
 }
 
 .pe-horizontal-resizer:hover .pe-resizer-line {
-  background: #8c8c8c;
+  background: #1890ff;
+}
+
+/* ── Vertical Resizer ── */
+.pe-vertical-resizer {
+  flex: 0 0 12px;
+  background: transparent;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  user-select: none;
+}
+
+.pe-vertical-resizer:hover {
+  background: transparent;
+}
+
+.pe-vertical-resizer-line {
+  width: 4px;
+  height: 50px;
+  background: #d9d9d9;
+  border-radius: 2px;
+  transition: background 0.15s;
+}
+
+.pe-vertical-resizer:hover .pe-vertical-resizer-line {
+  background: #1890ff;
 }
 
 /* ── Query Panel ── */
@@ -1798,13 +1824,11 @@ body {
 
 /* ── Sidebar ── */
 .pe-sidebar {
-  width: 420px;
-  min-width: 320px;
-  max-width: 520px;
+  flex: 0 0 auto;
+  min-width: 280px;
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);
-  flex-shrink: 0;
   overflow: hidden;
 }
 
