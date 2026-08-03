@@ -593,9 +593,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       // 合并系统内置变量（$__from, $__to 等）
       if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
 
-      const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
       setDashboard(db)
-      setDataRes(dbData)
       setDatasources(dsList)
       setVariables(varList)
       // 重置手动选择跟踪（仪表板重新加载时）
@@ -603,6 +601,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       // 初始化本地草稿为当前 dashboard_json 的深拷贝
       const dj = JSON.parse(JSON.stringify(db.dashboard_json || {}))
       setDraftJson(dj)
+      setSavedJson(dj)
 
       // 更新 URL slug（如果当前 URL 没有 slug 或 slug 不匹配）
       const title = db.title || '仪表板'
@@ -610,7 +609,30 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       if (!slug || slug !== expectedSlug) {
         navigate(`/capacity_mgt_platform/d/${dashboardId}/${expectedSlug}${window.location.search}`, { replace: true })
       }
-      setSavedJson(dj)
+
+      // 并行获取每个面板的数据
+      const panels = (dj.panels || []) as any[]
+      if (panels.length > 0) {
+        const panelDataPromises = panels.map(async (panel) => {
+          try {
+            const panelData = await api.getPanelData(dashboardId, panel.id, tr?.from, tr?.to, varMap)
+            return panelData
+          } catch (err) {
+            console.error(`Failed to load panel ${panel.id}:`, err)
+            return null
+          }
+        })
+
+        const panelDataResults = await Promise.all(panelDataPromises)
+
+        // 合并所有面板数据
+        const dbData: api.DashboardDataRes = {
+          dashboard_id: dashboardId,
+          dashboard_json: dj,
+          panels_data: panelDataResults.filter((data): data is api.PanelDataRes => data !== null)
+        }
+        setDataRes(dbData)
+      }
     } catch (e: any) {
       setError(e.message || '加载失败')
     } finally {
@@ -644,8 +666,30 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         }
       })
       if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
-      const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, draft as DashboardJSON, varMap)
-      setDataRes(dbData)
+
+      // 并行获取每个面板的数据
+      const panels = (draft.panels || []) as any[]
+      if (panels.length > 0) {
+        const panelDataPromises = panels.map(async (panel) => {
+          try {
+            const panelData = await api.getPanelData(dashboardId, panel.id, tr?.from, tr?.to, varMap)
+            return panelData
+          } catch (err) {
+            console.error(`Failed to load panel ${panel.id}:`, err)
+            return null
+          }
+        })
+
+        const panelDataResults = await Promise.all(panelDataPromises)
+
+        // 合并所有面板数据
+        const dbData: api.DashboardDataRes = {
+          dashboard_id: dashboardId,
+          dashboard_json: draft,
+          panels_data: panelDataResults.filter((data): data is api.PanelDataRes => data !== null)
+        }
+        setDataRes(dbData)
+      }
     } catch (e: any) {
       console.error('reloadDataWithDraft failed:', e)
       // 静默失败，不影响草稿编辑
