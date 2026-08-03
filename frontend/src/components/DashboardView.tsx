@@ -752,20 +752,6 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       if (title !== dashboard.title) {
         setDashboard({ ...dashboard, title, dashboard_json: saved })
       }
-      // 不重新加载变量，保留用户当前选择的变量值
-      // 只重新加载仪表板数据（使用当前变量和时间范围）
-      const tr = getTimeRange()
-      const varMap: Record<string, string | string[]> = {}
-      variables.forEach((v) => {
-        if (v.current && (v.current as any).value) {
-          varMap[v.name] = (v.current as any).value
-        } else if (v.default) {
-          varMap[v.name] = v.default
-        }
-      })
-      if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
-      const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
-      setDataRes(dbData)
       // 保存成功提示
       message.success('仪表板保存成功')
     } catch (e: any) {
