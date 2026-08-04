@@ -419,11 +419,14 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
         }
       }
 
+      // 排序后重新获取第一行数据（data[0] 可能已被排序替换）
+      const sortedFirstRows = data[0] || []
+
       // ---- 时间序列检测（共用） ----
-      const isTimeSeries = nameCol && firstRows.length > 0 && isMillisecondTimestamp(firstRows[0][nameCol!])
+      const isTimeSeries = nameCol && sortedFirstRows.length > 0 && isMillisecondTimestamp(sortedFirstRows[0][nameCol!])
       let timeFormat = ''
-      if (isTimeSeries && firstRows.length > 1) {
-        const timestamps = firstRows.map((m) => m[nameCol!] as number).filter((t) => isMillisecondTimestamp(t))
+      if (isTimeSeries && sortedFirstRows.length > 1) {
+        const timestamps = sortedFirstRows.map((m) => m[nameCol!] as number).filter((t) => isMillisecondTimestamp(t))
         if (timestamps.length >= 2) {
           const minTs = Math.min(...timestamps)
           const maxTs = Math.max(...timestamps)
@@ -432,7 +435,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
         }
       }
 
-      const names = nameCol ? firstRows.map((m) => {
+      const names = nameCol ? sortedFirstRows.map((m) => {
         const v = m[nameCol!]
         if (isMillisecondTimestamp(v)) return formatTimestamp(v as number, timeFormat)
         const str = String(v || '')
@@ -463,6 +466,16 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
             const series: echarts.SeriesOption[] = []
             const hasBars = isTimeseries && Object.values(fieldStyles).some((s) => s === 'bars')
 
+            // 收集所有数值列，用于判断是否启用双Y轴
+            const allValueColsSet: string[] = []
+            data.forEach((targetRows) => {
+              const { valueCols: tv } = detectColumns(targetRows, type)
+              tv.forEach((c) => { if (!allValueColsSet.includes(c)) allValueColsSet.push(c) })
+            })
+            const useDualAxis = isTimeseries && allValueColsSet.length >= 2
+            const firstValCol = allValueColsSet[0] || ''
+            const secondValCol = allValueColsSet[1] || ''
+
             data.forEach((targetRows, ti) => {
               const tdef = targets[ti]
               const { valueCols: tValCols } = detectColumns(targetRows, type)
@@ -479,6 +492,9 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
                 const isPointsStyle = fieldStyle === 'points'
                 const isHorizontal = type === 'bar' && ((options?.barOrientation as string) || 'vertical') === 'horizontal'
 
+                // 双Y轴：第一个数值列用左轴(0)，其余用右轴(1)
+                const yAxisIdx = useDualAxis ? (col === firstValCol ? 0 : 1) : 0
+
                 const seriesData = targetRows.map((m) => {
                   const val = parseFloat(m[col]) || 0
                   const alertColor = getCellAlertColor(col, String(val))
@@ -492,6 +508,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
                     name: tValCols.length > 1 ? `${seriesBaseName}-${col}` : seriesBaseName,
                     type: 'bar',
                     data: seriesData,
+                    yAxisIndex: yAxisIdx,
                     barMaxWidth: 36,
                     itemStyle: { color, borderRadius: isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0] },
                     emphasis: { itemStyle: { shadowBlur: 8, shadowOffsetY: 2, shadowColor: 'rgba(0,0,0,0.12)' } },
@@ -501,6 +518,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
                     name: tValCols.length > 1 ? `${seriesBaseName}-${col}` : seriesBaseName,
                     type: 'line',
                     data: seriesData,
+                    yAxisIndex: yAxisIdx,
                     symbol: 'circle',
                     symbolSize: 7,
                     lineStyle: { width: 0 },
@@ -511,6 +529,7 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
                     name: tValCols.length > 1 ? `${seriesBaseName}-${col}` : seriesBaseName,
                     type: 'line',
                     data: seriesData,
+                    yAxisIndex: yAxisIdx,
                     lineStyle: { color, width: 2.5 },
                     itemStyle: { color },
                     symbol: 'circle',
@@ -602,7 +621,12 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
                     axisLine: { lineStyle: { color: '#e5e6eb' } },
                     axisTick: { show: false },
                   },
-              yAxis: isHorizontal
+              yAxis: useDualAxis
+                ? [
+                    { type: 'value', name: firstValCol, position: 'left', nameTextStyle: { color: '#86909c', fontSize: 11 }, axisLabel: { color: '#86909c', fontSize: 10 }, axisLine: { show: false }, axisTick: { show: false }, splitLine: { lineStyle: { color: '#f2f3f5', type: 'dashed' } } },
+                    { type: 'value', name: secondValCol, position: 'right', nameTextStyle: { color: '#86909c', fontSize: 11 }, axisLabel: { color: '#86909c', fontSize: 10, formatter: (val: number) => val + '%' }, axisLine: { show: false }, axisTick: { show: false }, splitLine: { show: false } },
+                  ]
+                : isHorizontal
                 ? { type: 'category', data: names, axisLabel: { fontSize: 10, color: '#86909c' }, axisLine: { lineStyle: { color: '#e5e6eb' } }, axisTick: { show: false } }
                 : {
                     type: 'value',

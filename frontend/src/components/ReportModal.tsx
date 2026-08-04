@@ -130,7 +130,7 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
 
       ws.onerror = () => {
         if (!reportRef.current) {
-          setError('WebSocket 连接异常，请确认 AI Agent 已启动 (ws://127.0.0.1:8764)')
+          setError('WebSocket 连接异常，请确认 AI Agent 已启动 (ws://${window.location.host}/ws/cmp_llm)')
         }
         setLoading(false)
       }
