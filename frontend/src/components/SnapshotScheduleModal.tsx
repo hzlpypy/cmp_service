@@ -192,6 +192,13 @@ export default function SnapshotScheduleModal({ open, dashboardId, dashboardTitl
       render: (name: string) => name || <Text type="secondary">未命名</Text>,
     },
     {
+      title: '创建人',
+      dataIndex: 'owner_name',
+      key: 'owner_name',
+      width: 100,
+      render: (name: string) => name || <Text type="secondary">-</Text>,
+    },
+    {
       title: '执行时间',
       dataIndex: 'cron_expr',
       key: 'cron_expr',
@@ -221,10 +228,10 @@ export default function SnapshotScheduleModal({ open, dashboardId, dashboardTitl
       title: '上次执行',
       dataIndex: 'last_run_at',
       key: 'last_run_at',
-      width: 160,
+      width: 120,
       render: (time: string) => time ? (
         <Text style={{ fontSize: 12, color: '#86909c' }}>
-          {new Date(time).toLocaleString('zh-CN')}
+          {dayjs(time).format('MM/DD HH:mm')}
         </Text>
       ) : <Text type="secondary">-</Text>,
     },
@@ -232,10 +239,10 @@ export default function SnapshotScheduleModal({ open, dashboardId, dashboardTitl
       title: '下次执行',
       dataIndex: 'next_run_at',
       key: 'next_run_at',
-      width: 160,
+      width: 120,
       render: (time: string) => time ? (
         <Text style={{ fontSize: 12, color: '#86909c' }}>
-          {new Date(time).toLocaleString('zh-CN')}
+          {dayjs(time).format('MM/DD HH:mm')}
         </Text>
       ) : <Text type="secondary">-</Text>,
     },
@@ -278,7 +285,7 @@ export default function SnapshotScheduleModal({ open, dashboardId, dashboardTitl
       open={open}
       onCancel={onClose}
       footer={null}
-      width={720}
+      width={920}
     >
       <div style={{ marginBottom: 16 }}>
         <Button

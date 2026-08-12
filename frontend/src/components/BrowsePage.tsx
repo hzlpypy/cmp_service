@@ -5,6 +5,7 @@ import { Modal, message, Input, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import * as api from '../api'
 import type { FolderRes } from '../api'
+import ShareModal from './ShareModal'
 import { sampleDashboards } from '../mock/dashboardSamples'
 
 function titleToSlug(title: string): string {
@@ -22,6 +23,14 @@ const SVG_ICONS: Record<string, ReactNode> = {
       <rect x="1" y="1" width="5" height="14" rx="1" />
       <rect x="8" y="6" width="7" height="9" rx="1" />
       <rect x="8" y="2" width="3" height="3" rx="0.5" />
+    </svg>
+  ),
+  team: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7048e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
   ),
   chevronDown: (
@@ -54,6 +63,8 @@ export default function BrowsePage() {
   const [loading, setLoading] = useState(true)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['mine']))
+  // 团队仪表板分组内，按团队名二级展开（部长视角）
+  const [expandedTeams, setExpandedTeams] = useState<Set<string>>(new Set())
   const [searchText, setSearchText] = useState('')
   const [currentFolder, setCurrentFolder] = useState<FolderRes | null>(null) // 当前浏览的文件夹
 
@@ -77,6 +88,9 @@ export default function BrowsePage() {
   const [showMoveModal, setShowMoveModal] = useState(false)
   const [targetFolderId, setTargetFolderId] = useState('')
   const [moving, setMoving] = useState(false)
+
+  // 分享弹窗（支持单个或多个仪表板：选中文件夹/多选时批量分享其下仪表板）
+  const [shareTarget, setShareTarget] = useState<{ resourceType: 'dashboard' | 'snapshot'; resourceIds: string[]; resourceNames?: string[] } | null>(null)
 
   const loadFolders = async (searchKeyword?: string, expandFolderId?: string) => {
     try {
@@ -110,11 +124,79 @@ export default function BrowsePage() {
     return () => { document.removeEventListener('mousedown', handleClickOutside) }
   }, [newMenuOpen])
 
+  // 按 source 字段将仪表板分到 我的/分享给我的/团队 三个分组。
+  // 后端 ListFolders 已返回每个仪表板的 source（mine/shared/team），
+  // 兼容旧数据：source 缺失时归入 mine。
+  const groupFolders = (source: 'mine' | 'shared' | 'team'): FolderRes[] => {
+    return folders
+      .map((f) => ({
+        ...f,
+        dashboards: (f.dashboards || []).filter((d) => (d.source || 'mine') === source),
+      }))
+      .filter((f) => f.dashboards.length > 0)
+  }
+
   const groups: GroupData[] = [
-    { id: 'mine', title: '我的仪表板', folders },
-    { id: 'shared', title: '分享给我的仪表板', folders: [] },
-    { id: 'team', title: '团队仪表板', folders: [] },
+    { id: 'mine', title: '我的仪表板', folders: groupFolders('mine') },
+    { id: 'shared', title: '分享给我的仪表板', folders: groupFolders('shared') },
+    { id: 'team', title: '团队仪表板', folders: groupFolders('team') },
   ]
+
+  // 仪表板行渲染（三个分组共用）
+  const renderDashboardRow = (db: DashboardBriefRes) => (
+    <div key={db.id} className="list-item dashboard-item sub-item">
+      <input
+        type="checkbox"
+        checked={selectedDashboards.has(db.id)}
+        onChange={(e) => handleSelectDashboard(db.id, e.target.checked, db.folder_id)}
+        onClick={(e) => e.stopPropagation()}
+      />
+      <Link
+        to={`/capacity_mgt_platform/d/${db.id}/${titleToSlug(db.title)}`}
+        className="item-title-link"
+      >
+        {db.title}
+      </Link>
+      <div className="dashboard-item-actions">
+        {db.can_edit !== false && (
+          <>
+            <button className="btn-sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleEditDashboardJson(db.id) }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
+              编辑JSON
+            </button>
+            <button
+              className="btn-sm"
+              onClick={(e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                setShareTarget({ resourceType: 'dashboard', resourceIds: [db.id], resourceNames: [db.title] })
+              }}
+              title="分享仪表板"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+              </svg>
+              分享
+            </button>
+            <button className="btn-sm btn-danger-text" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleDeleteDashboard(db.id) }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+              删除
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
 
   const toggleGroup = (id: string) => {
     setExpandedGroups((prev) => {
@@ -128,6 +210,14 @@ export default function BrowsePage() {
     setExpandedFolders((prev) => {
       const next = new Set(prev)
       next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const toggleTeam = (name: string) => {
+    setExpandedTeams((prev) => {
+      const next = new Set(prev)
+      next.has(name) ? next.delete(name) : next.add(name)
       return next
     })
   }
@@ -276,6 +366,30 @@ export default function BrowsePage() {
     setShowMoveModal(true)
   }
 
+  // 打开分享弹窗：将选中的文件夹展开为其下所有仪表板，与选中的仪表板一起去重合并
+  const handleOpenShareModal = () => {
+    if (totalSelected === 0) return
+    const ids: string[] = []
+    const names: string[] = []
+    const seen = new Set<string>()
+    const add = (id: string, title: string) => {
+      if (seen.has(id)) return
+      seen.add(id)
+      ids.push(id)
+      names.push(title)
+    }
+    folders.forEach((f) => {
+      if (selectedFolders.has(f.id)) {
+        f.dashboards?.forEach((d) => add(d.id, d.title))
+      }
+    })
+    selectedDashboards.forEach((id) => {
+      const d = allDashboards.find((x) => x.id === id)
+      if (d) add(d.id, d.title)
+    })
+    setShareTarget({ resourceType: 'dashboard', resourceIds: ids, resourceNames: names })
+  }
+
   const handleBatchMove = async () => {
     if (!targetFolderId || selectedDashboards.size === 0) return
     setMoving(true)
@@ -409,26 +523,31 @@ export default function BrowsePage() {
       width: 150,
       render: (_: any, record: any) => {
         if (record.itemType === 'dashboard') {
+          const canEdit = record.data?.can_edit !== false
           return (
             <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                className="btn-sm"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleEditDashboardJson(record.id)
-                }}
-              >
-                编辑
-              </button>
-              <button
-                className="btn-sm btn-danger-text"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleDeleteDashboard(record.id)
-                }}
-              >
-                删除
-              </button>
+              {canEdit && (
+                <button
+                  className="btn-sm"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleEditDashboardJson(record.id)
+                  }}
+                >
+                  编辑
+                </button>
+              )}
+              {canEdit && (
+                <button
+                  className="btn-sm btn-danger-text"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleDeleteDashboard(record.id)
+                  }}
+                >
+                  删除
+                </button>
+              )}
             </div>
           )
         }
@@ -494,7 +613,11 @@ export default function BrowsePage() {
             </svg>
             删除
           </button>
-          <button className="btn-sm btn-toolbar" disabled={totalSelected === 0}>
+          <button
+            className="btn-sm btn-toolbar"
+            disabled={totalSelected === 0}
+            onClick={handleOpenShareModal}
+          >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="18" cy="5" r="3" />
               <circle cx="6" cy="12" r="3" />
@@ -712,20 +835,24 @@ export default function BrowsePage() {
                 key: 'actions',
                 render: (_: any, record: any) => (
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button className="btn-sm" onClick={(e) => { e.stopPropagation(); handleEditDashboardJson(record.id) }}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="16 18 22 12 16 6" />
-                        <polyline points="8 6 2 12 8 18" />
-                      </svg>
-                      编辑JSON
-                    </button>
-                    <button className="btn-sm btn-danger-text" onClick={(e) => { e.stopPropagation(); handleDeleteDashboard(record.id) }}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                      </svg>
-                      删除
-                    </button>
+                    {record.can_edit !== false && (
+                      <>
+                        <button className="btn-sm" onClick={(e) => { e.stopPropagation(); handleEditDashboardJson(record.id) }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="16 18 22 12 16 6" />
+                            <polyline points="8 6 2 12 8 18" />
+                          </svg>
+                          编辑JSON
+                        </button>
+                        <button className="btn-sm btn-danger-text" onClick={(e) => { e.stopPropagation(); handleDeleteDashboard(record.id) }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
+                          删除
+                        </button>
+                      </>
+                    )}
                   </div>
                 ),
               },
@@ -757,6 +884,70 @@ export default function BrowsePage() {
               <div className="list-group-content">
                 {group.folders.length === 0 ? (
                   <div className="empty-group-tip">暂无内容</div>
+                ) : group.id === 'team' ? (
+                  (() => {
+                    // 团队分组：先按团队名聚合，团队内保留文件夹层级（团队 > 文件夹 > 仪表板）
+                    const teamMap = new Map<string, FolderRes[]>()
+                    group.folders.forEach((f) => {
+                      ;(f.dashboards || []).forEach((d) => {
+                        const t = d.team_name || '其他'
+                        if (!teamMap.has(t)) teamMap.set(t, [])
+                        const teamFolders = teamMap.get(t)!
+                        let folder = teamFolders.find((x) => x.id === f.id)
+                        if (!folder) {
+                          folder = { ...f, dashboards: [] }
+                          teamFolders.push(folder)
+                        }
+                        folder.dashboards!.push(d)
+                      })
+                    })
+                    const teams = Array.from(teamMap.entries())
+                    return teams.length === 0 ? (
+                      <div className="empty-group-tip">暂无内容</div>
+                    ) : (
+                      teams.map(([teamName, teamFolders]) => {
+                        const isTeamExpanded = expandedTeams.has(teamName)
+                        return (
+                          <div key={teamName} className="folder-list-item">
+                            <div className="list-item folder-item" onClick={() => toggleTeam(teamName)}>
+                              <span className="folder-toggle">
+                                {isTeamExpanded ? SVG_ICONS.chevronDown : SVG_ICONS.chevronRight}
+                              </span>
+                              <span className="item-icon">{SVG_ICONS.team}</span>
+                              <span className="item-title">{teamName}</span>
+                              <span className="group-count">
+                                {teamFolders.reduce((sum, x) => sum + (x.dashboards?.length || 0), 0)} 个仪表板
+                              </span>
+                            </div>
+                            {isTeamExpanded && (
+                              <div>
+                                {teamFolders.map((folder) => {
+                                  const isFolderExpanded = expandedFolders.has(folder.id)
+                                  const dashboards = folder.dashboards || []
+                                  return (
+                                    <div key={folder.id} className="folder-list-item">
+                                      <div className="list-item folder-item" onClick={() => toggleFolder(folder.id)}>
+                                        <span className="folder-toggle">
+                                          {isFolderExpanded ? SVG_ICONS.chevronDown : SVG_ICONS.chevronRight}
+                                        </span>
+                                        <span className="item-icon">{SVG_ICONS.folder}</span>
+                                        <span className="item-title">{folder.title}</span>
+                                      </div>
+                                      {isFolderExpanded && dashboards.length > 0 && (
+                                        <div className="dashboard-sublist">
+                                          {dashboards.map((db) => renderDashboardRow(db))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })
+                    )
+                  })()
                 ) : (
                   group.folders.map((folder) => {
                     const isFolderExpanded = expandedFolders.has(folder.id)
@@ -781,38 +972,7 @@ export default function BrowsePage() {
                         </div>
                         {isFolderExpanded && dashboards.length > 0 && (
                           <div className="dashboard-sublist">
-                            {dashboards.map((db) => (
-                              <div key={db.id} className="list-item dashboard-item sub-item">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedDashboards.has(db.id)}
-                                  onChange={(e) => handleSelectDashboard(db.id, e.target.checked, folder.id)}
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                                <Link
-                                  to={`/capacity_mgt_platform/d/${db.id}/${titleToSlug(db.title)}`}
-                                  className="item-title-link"
-                                >
-                                  {db.title}
-                                </Link>
-                                <div className="dashboard-item-actions">
-                                  <button className="btn-sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleEditDashboardJson(db.id) }}>
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                      <polyline points="16 18 22 12 16 6" />
-                                      <polyline points="8 6 2 12 8 18" />
-                                    </svg>
-                                    编辑JSON
-                                  </button>
-                                  <button className="btn-sm btn-danger-text" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleDeleteDashboard(db.id) }}>
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                      <polyline points="3 6 5 6 21 6" />
-                                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                    </svg>
-                                    删除
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
+                            {dashboards.map((db) => renderDashboardRow(db))}
                           </div>
                         )}
                       </div>
@@ -824,6 +984,17 @@ export default function BrowsePage() {
           </div>
         )
       })}
+
+      {/* 分享弹窗 */}
+      {shareTarget && (
+        <ShareModal
+          open={!!shareTarget}
+          resourceType={shareTarget.resourceType}
+          resourceIds={shareTarget.resourceIds}
+          resourceNames={shareTarget.resourceNames}
+          onClose={() => setShareTarget(null)}
+        />
+      )}
     </div>
   )
 }

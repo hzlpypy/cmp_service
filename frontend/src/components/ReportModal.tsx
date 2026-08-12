@@ -13,7 +13,7 @@ interface ReportModalProps {
 }
 
 /** AI Agent WebSocket 地址 */
-const WS_URL = `ws://${window.location.host}/ws/cmp_llm`
+const WS_URL = 'ws://127.0.0.1:8764'
 
 export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary, onClose }: ReportModalProps) {
   const [loading, setLoading] = useState(true)

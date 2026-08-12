@@ -139,7 +139,7 @@ function mergePanels(draftJson: any, newPanels: any[]) {
   return dj
 }
 
-const DEFAULT_WS_URL = `ws://${window.location.host}/ws/cmp_llm`
+const DEFAULT_WS_URL = 'ws://127.0.0.1:8764'
 
 const ALLOWED_EXTENSIONS = ['.txt', '.md', '.pdf', '.docx', '.xlsx', '.jpg', '.jpeg', '.png']
 
@@ -176,6 +176,7 @@ export default function AIChatDialog({
   const scrollRAF = useRef<number | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectDelayRef = useRef(1000) // 重连延迟：1s → 2s → 4s → 8s → max 30s
+  const streamEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // 附件上传状态
@@ -363,6 +364,7 @@ export default function AIChatDialog({
       }
 
       ws.onclose = () => {
+        if (streamEndTimerRef.current) { clearTimeout(streamEndTimerRef.current); streamEndTimerRef.current = null }
         finalizeSegment()
         setConnected(false)
         setLoading(false)
@@ -422,13 +424,21 @@ export default function AIChatDialog({
    * 协议：{ token_id, type, message, msg_category, time, client_id }
    * msg_category: model=模型输出, reasoning=思考过程, toolcallchunk=tool
    * token_id 或 msg_category 变化时创建新消息。
+   * 每次收到 chunk 重置超时计时器，5 秒无新消息自动结束 streaming。
    */
   const handleStreamChunk = (data: any) => {
+    // 每次收到消息都重置流结束超时
+    if (streamEndTimerRef.current) clearTimeout(streamEndTimerRef.current)
+    streamEndTimerRef.current = setTimeout(() => {
+      setStreaming(false)
+      setLoading(false)
+    }, 5000)
     // 过滤心跳包及其他非流式消息
     if (data.type === 'heartbeat') return
 
     // 处理结束和停止消息
     if (data.type === 'end' || data.type === 'stopped') {
+      if (streamEndTimerRef.current) { clearTimeout(streamEndTimerRef.current); streamEndTimerRef.current = null }
       setLoading(false)
       setStreaming(false)
       finalizeSegment()
@@ -513,6 +523,7 @@ export default function AIChatDialog({
     return () => {
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
       if (scrollRAF.current) cancelAnimationFrame(scrollRAF.current)
+      if (streamEndTimerRef.current) { clearTimeout(streamEndTimerRef.current); streamEndTimerRef.current = null }
       wsRef.current?.close()
     }
   }, [connect, visible])
@@ -668,6 +679,7 @@ export default function AIChatDialog({
 
   /** 停止 AI 输出 */
   const handleStop = () => {
+    if (streamEndTimerRef.current) { clearTimeout(streamEndTimerRef.current); streamEndTimerRef.current = null }
     const ws = wsRef.current
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'stop' }))

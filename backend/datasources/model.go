@@ -36,6 +36,8 @@ type DatasourceReq struct {
 type DatasourceRes struct {
 	// ID 数据源主键ID
 	ID string `json:"id"`
+	// OwnerID 创建者用户ID
+	OwnerID string `json:"owner_id"`
 	// Name 数据源名称
 	Name string `json:"name"`
 	// Type 数据源类型
@@ -69,6 +71,7 @@ func ToDatasourceRes(m *model.Datasource) *DatasourceRes {
 	}
 	return &DatasourceRes{
 		ID:           m.ID,
+		OwnerID:      m.OwnerID,
 		Name:         m.Name,
 		Type:         m.Type,
 		URL:          m.URL,

@@ -25,6 +25,12 @@ type DashboardReq struct {
 type DashboardRes struct {
 	// ID 仪表板主键ID
 	ID string `json:"id"`
+	// OwnerID 创建者用户ID
+	OwnerID string `json:"owner_id"`
+	// CanEdit 当前用户是否有编辑权限（用于前端只读模式）
+	CanEdit bool `json:"can_edit"`
+	// Source 来源分组：mine(我的) / shared(分享给我的) / team(团队/部门可见)
+	Source string `json:"source"`
 	// Title 仪表板标题
 	Title string `json:"title"`
 	// FolderID 所属文件夹ID
@@ -228,6 +234,7 @@ func ToDashboardRes(m *model.Dashboard) *DashboardRes {
 	}
 	return &DashboardRes{
 		ID:            m.ID,
+		OwnerID:       m.OwnerID,
 		Title:         m.Title,
 		FolderID:      m.FolderID,
 		FolderName:    folderName,

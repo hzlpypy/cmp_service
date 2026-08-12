@@ -3,6 +3,7 @@
 package folders
 
 import (
+	"cmp_service_backend/identity"
 	"cmp_service_backend/model"
 	"fmt"
 	"strings"
@@ -15,8 +16,9 @@ import (
 
 // Server 文件夹业务服务，持有数据库连接和日志记录器。
 type Server struct {
-	db  *gorm.DB
-	log *logrus.Logger
+	db       *gorm.DB
+	log      *logrus.Logger
+	identity *identity.Provider
 }
 
 // Interface 定义文件夹业务操作的接口。
@@ -35,12 +37,48 @@ type Interface interface {
 }
 
 // NewServer 创建文件夹业务服务实例。
-func NewServer(db *gorm.DB, log *logrus.Logger) Interface {
-	return &Server{db: db, log: log}
+func NewServer(db *gorm.DB, log *logrus.Logger, identityProvider *identity.Provider) Interface {
+	return &Server{db: db, log: log, identity: identityProvider}
+}
+
+// fillDashboardAccess 填充仪表板简要信息的 can_edit / source 权限字段。
+// 与 dashboards 模块的 ListDashboards 逻辑保持一致。
+func (s *Server) fillDashboardAccess(ctx *gin.Context, res *FolderRes) {
+	uc := identity.FromContext(ctx)
+	me := ""
+	if uc != nil {
+		me = uc.UserID
+	}
+	editableShared := s.identity.EditableShareIDs(ctx, "dashboard")
+	sharedToMe := s.identity.SharedResourceIDs(ctx, "dashboard")
+	for i := range res.Dashboards {
+		d := &res.Dashboards[i]
+		d.CanEdit = uc != nil && (uc.IsAdmin() || d.OwnerID == me || editableShared[d.ID])
+		// source 分组：mine(我的) / shared(分享给我的) / team(团队/部门可见)
+		switch {
+		case uc != nil && uc.IsAdmin():
+			d.Source = "mine"
+		case d.OwnerID == me:
+			d.Source = "mine"
+		case sharedToMe[d.ID]:
+			d.Source = "shared"
+		default:
+			d.Source = "team"
+		}
+		// 归属信息：创建人姓名 + 所属团队名（部长按团队二级分组用）
+		if owner := s.identity.LookupUser(d.OwnerID); owner != nil {
+			d.OwnerName = owner.DisplayName
+			if len(owner.TeamIDs) > 0 {
+				if teamName, ok := s.identity.LookupTeam(owner.TeamIDs[0]); ok {
+					d.TeamName = teamName
+				}
+			}
+		}
+	}
 }
 
 // ListFolders 获取所有未删除的文件夹，按创建时间升序排列。
-// 每个文件夹会附带其下所有未删除的仪表板列表。
+// 每个文件夹会附带其下当前用户可见的仪表板列表（按可见性过滤）。
 // 如果提供了 title 参数，则返回匹配的文件夹和仪表板作为搜索结果。
 func (s *Server) ListFolders(ctx *gin.Context, req *FolderListReq) (*FolderListRes, error) {
 	// 搜索模式：返回匹配的文件夹和仪表板
@@ -54,8 +92,9 @@ func (s *Server) ListFolders(ctx *gin.Context, req *FolderListReq) (*FolderListR
 		resList := make([]*FolderRes, 0, len(folders))
 		for _, f := range folders {
 			var dashboards []model.Dashboard
-			// 搜索文件夹下的仪表板（模糊匹配标题）
-			s.db.Where("folder_id = ? AND deleted_at IS NULL AND title LIKE ?", f.ID, "%"+req.Title+"%").
+			// 搜索文件夹下当前用户可见的仪表板（模糊匹配标题）
+			s.db.Scopes(s.identity.VisibleScope(ctx, "dashboard")).
+				Where("folder_id = ? AND deleted_at IS NULL AND title LIKE ?", f.ID, "%"+req.Title+"%").
 				Order("created_at ASC").Find(&dashboards)
 
 			// 如果文件夹标题匹配或包含仪表板匹配，则添加到结果
@@ -63,10 +102,13 @@ func (s *Server) ListFolders(ctx *gin.Context, req *FolderListReq) (*FolderListR
 				resList = append(resList, ToFolderRes(f, dashboards))
 			}
 		}
+		for _, r := range resList {
+			s.fillDashboardAccess(ctx, r)
+		}
 		return &FolderListRes{List: resList, Total: len(resList)}, nil
 	}
 
-	// 默认模式：返回所有文件夹及其仪表板
+	// 默认模式：返回所有文件夹及其可见仪表板
 	var folders []*model.Folder
 	if err := s.db.Where("deleted_at IS NULL").Order("created_at ASC").Find(&folders).Error; err != nil {
 		return nil, err
@@ -74,23 +116,30 @@ func (s *Server) ListFolders(ctx *gin.Context, req *FolderListReq) (*FolderListR
 	resList := make([]*FolderRes, 0, len(folders))
 	for _, f := range folders {
 		var dashboards []model.Dashboard
-		s.db.Where("folder_id = ? AND deleted_at IS NULL", f.ID).Order("created_at ASC").Find(&dashboards)
+		s.db.Scopes(s.identity.VisibleScope(ctx, "dashboard")).
+			Where("folder_id = ? AND deleted_at IS NULL", f.ID).Order("created_at ASC").Find(&dashboards)
 		resList = append(resList, ToFolderRes(f, dashboards))
+	}
+	for _, r := range resList {
+		s.fillDashboardAccess(ctx, r)
 	}
 	return &FolderListRes{List: resList, Total: len(resList)}, nil
 }
 
-// GetFolder 根据 ID 获取单个文件夹，包含其下的仪表板列表。
+// GetFolder 根据 ID 获取单个文件夹，包含其下当前用户可见的仪表板列表。
 func (s *Server) GetFolder(ctx *gin.Context, req *FolderReq) (*FolderRes, error) {
 	var record model.Folder
 	// 查询指定文件夹（仅未删除的）
 	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&record).Error; err != nil {
 		return nil, err
 	}
-	// 查询该文件夹下的仪表板
+	// 查询该文件夹下当前用户可见的仪表板
 	var dashboards []model.Dashboard
-	s.db.Where("folder_id = ? AND deleted_at IS NULL", record.ID).Find(&dashboards)
-	return ToFolderRes(&record, dashboards), nil
+	s.db.Scopes(s.identity.VisibleScope(ctx, "dashboard")).
+		Where("folder_id = ? AND deleted_at IS NULL", record.ID).Find(&dashboards)
+	res := ToFolderRes(&record, dashboards)
+	s.fillDashboardAccess(ctx, res)
+	return res, nil
 }
 
 // CreateFolder 创建新文件夹。
@@ -127,8 +176,11 @@ func (s *Server) UpdateFolder(ctx *gin.Context, req *FolderReq) (*FolderRes, err
 	var record model.Folder
 	s.db.Where("id = ?", req.ID).First(&record)
 	var dashboards []model.Dashboard
-	s.db.Where("folder_id = ? AND deleted_at IS NULL", record.ID).Find(&dashboards)
-	return ToFolderRes(&record, dashboards), nil
+	s.db.Scopes(s.identity.VisibleScope(ctx, "dashboard")).
+		Where("folder_id = ? AND deleted_at IS NULL", record.ID).Find(&dashboards)
+	res := ToFolderRes(&record, dashboards)
+	s.fillDashboardAccess(ctx, res)
+	return res, nil
 }
 
 // DeleteFolder 软删除文件夹。

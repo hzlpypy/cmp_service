@@ -3,6 +3,7 @@
 package datasources
 
 import (
+	"cmp_service_backend/identity"
 	"cmp_service_backend/model"
 	"database/sql"
 	"fmt"
@@ -18,8 +19,9 @@ import (
 
 // Server 数据源业务服务，持有数据库连接和日志记录器。
 type Server struct {
-	db  *gorm.DB
-	log *logrus.Logger
+	db       *gorm.DB
+	log      *logrus.Logger
+	identity *identity.Provider
 }
 
 // Interface 定义数据源业务操作的接口。
@@ -40,15 +42,33 @@ type Interface interface {
 }
 
 // NewServer 创建数据源业务服务实例。
-func NewServer(db *gorm.DB, log *logrus.Logger) Interface {
-	return &Server{db: db, log: log}
+func NewServer(db *gorm.DB, log *logrus.Logger, identityProvider *identity.Provider) Interface {
+	return &Server{db: db, log: log, identity: identityProvider}
 }
 
-// ListDatasources 获取所有未删除的数据源，按创建时间降序排列。
+// canAccessDatasource 判断当前用户是否能访问该数据源（查看/修改/删除）。
+// 规则：admin 全量；其他用户仅能访问自己创建的数据源。
+func (s *Server) canAccessDatasource(ctx *gin.Context, record *model.Datasource) bool {
+	uc := identity.FromContext(ctx)
+	if uc == nil {
+		return false
+	}
+	if uc.IsAdmin() {
+		return true
+	}
+	return record.OwnerID == uc.UserID
+}
+
+// ListDatasources 获取当前用户可见的数据源，按创建时间降序排列。
+// 权限：admin 可查看全部；其他用户仅查看自己创建的数据源。
 // 返回时不包含密码字段。
 func (s *Server) ListDatasources(ctx *gin.Context) ([]*DatasourceRes, error) {
+	query := s.db.Where("deleted_at IS NULL")
+	if uc := identity.FromContext(ctx); uc != nil && !uc.IsAdmin() {
+		query = query.Where("owner_id = ?", uc.UserID)
+	}
 	var records []*model.Datasource
-	if err := s.db.Where("deleted_at IS NULL").Order("created_at DESC").Find(&records).Error; err != nil {
+	if err := query.Order("created_at DESC").Find(&records).Error; err != nil {
 		return nil, err
 	}
 	// 转换为响应结构（不含密码）
@@ -60,10 +80,14 @@ func (s *Server) ListDatasources(ctx *gin.Context) ([]*DatasourceRes, error) {
 }
 
 // GetDatasource 根据 ID 获取单个数据源详情。
+// 权限：仅创建者本人或 admin 可查看。
 func (s *Server) GetDatasource(ctx *gin.Context, req *DatasourceReq) (*DatasourceRes, error) {
 	var record model.Datasource
 	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&record).Error; err != nil {
 		return nil, err
+	}
+	if !s.canAccessDatasource(ctx, &record) {
+		return nil, fmt.Errorf("数据源不存在或无权限访问")
 	}
 	return ToDatasourceRes(&record), nil
 }
@@ -73,7 +97,13 @@ func (s *Server) GetDatasource(ctx *gin.Context, req *DatasourceReq) (*Datasourc
 // MySQL 类型需提供 database_name 和 username。
 // ID 格式：ds-{纳秒时间戳}
 func (s *Server) CreateDatasource(ctx *gin.Context, req *DatasourceReq) (*DatasourceRes, error) {
+	// 记录创建者
+	ownerID := ""
+	if uc := identity.FromContext(ctx); uc != nil {
+		ownerID = uc.UserID
+	}
 	record := &model.Datasource{
+		OwnerID:      ownerID,
 		Name:         req.Name,
 		Type:         req.Type,
 		URL:          req.URL,
@@ -103,7 +133,15 @@ func (s *Server) CreateDatasource(ctx *gin.Context, req *DatasourceReq) (*Dataso
 // UpdateDatasource 更新数据源配置。
 // 仅更新提供的字段和未软删除的记录。
 // 如果 Headers 或 Config 为 nil 则不更新该字段。
+// 权限：仅创建者本人或 admin 可修改。
 func (s *Server) UpdateDatasource(ctx *gin.Context, req *DatasourceReq) (*DatasourceRes, error) {
+	var current model.Datasource
+	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&current).Error; err != nil {
+		return nil, err
+	}
+	if !s.canAccessDatasource(ctx, &current) {
+		return nil, fmt.Errorf("无权限修改该数据源")
+	}
 	updates := map[string]interface{}{
 		"name":          req.Name,
 		"type":          req.Type,
@@ -132,7 +170,15 @@ func (s *Server) UpdateDatasource(ctx *gin.Context, req *DatasourceReq) (*Dataso
 
 // DeleteDatasource 软删除数据源。
 // GORM 会自动设置 deleted_at 时间戳。
+// 权限：仅创建者本人或 admin 可删除。
 func (s *Server) DeleteDatasource(ctx *gin.Context, req *DatasourceReq) error {
+	var current model.Datasource
+	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&current).Error; err != nil {
+		return err
+	}
+	if !s.canAccessDatasource(ctx, &current) {
+		return fmt.Errorf("无权限删除该数据源")
+	}
 	return s.db.Where("id = ?", req.ID).Delete(&model.Datasource{}).Error
 }
 
@@ -147,6 +193,9 @@ func (s *Server) TestDatasource(ctx *gin.Context, req *DatasourceReq) (string, e
 		var record model.Datasource
 		if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&record).Error; err != nil {
 			return "", fmt.Errorf("数据源不存在: %v", err)
+		}
+		if !s.canAccessDatasource(ctx, &record) {
+			return "", fmt.Errorf("数据源不存在或无权限访问")
 		}
 		name = record.Name
 		dsType = record.Type

@@ -23,6 +23,7 @@ import (
 	"cmp_service_backend/datasources"
 	"cmp_service_backend/file"
 	"cmp_service_backend/folders"
+	"cmp_service_backend/identity"
 	"cmp_service_backend/model"
 	"cmp_service_backend/network_metrics"
 	"cmp_service_backend/panels"
@@ -90,14 +91,23 @@ func main() {
 	defer dsConnMgr.Close()
 
 	// ============================================================
+	// 初始化身份提供者（身份解析 + 实例级权限判断）
+	// 当前使用 Mock 外部权限服务；生产环境替换为外部权限服务 API 即可
+	// ============================================================
+	idp := identity.NewProvider(db, l)
+
+	// ============================================================
 	// 全局中间件
 	// ============================================================
+
+	// 身份中间件：解析 X-User-Id 注入 UserContext
+	e.Use(idp.Middleware())
 
 	// CORS 中间件：允许跨域请求（开发阶段开放所有来源）
 	e.Use(func(ctx *gin.Context) {
 		ctx.Header("Access-Control-Allow-Origin", "*")
 		ctx.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		ctx.Header("Access-Control-Allow-Headers", "Content-Type,Authorization")
+		ctx.Header("Access-Control-Allow-Headers", "Content-Type,Authorization,X-User-Id")
 		// 预检请求直接返回 204
 		if ctx.Request.Method == "OPTIONS" {
 			ctx.AbortWithStatus(204)
@@ -140,17 +150,17 @@ func main() {
 	// ============================================================
 
 	// 文件夹管理：/api/v1/folders/*
-	folderSvc := folders.NewServer(db, l)
+	folderSvc := folders.NewServer(db, l, idp)
 	folderCtrl := folders.NewController(folderSvc)
 	folders.RegisterFoldersRouter(e, folderCtrl)
 
 	// 数据源管理：/api/v1/datasources/*
-	dsSvc := datasources.NewServer(db, l)
+	dsSvc := datasources.NewServer(db, l, idp)
 	dsCtrl := datasources.NewController(dsSvc)
 	datasources.RegisterDatasourcesRouter(e, dsCtrl)
 
 	// 仪表板管理：/api/v1/dashboards/*
-	dbSvc := dashboards.NewServer(db, l, dsConnMgr)
+	dbSvc := dashboards.NewServer(db, l, dsConnMgr, idp)
 	dbCtrl := dashboards.NewController(dbSvc)
 	dashboards.RegisterDashboardsRouter(e, dbCtrl)
 
@@ -160,12 +170,12 @@ func main() {
 	panels.RegisterPanelsRouter(e, panelCtrl)
 
 	// 快照管理：/api/v1/snapshots/*
-	snapSvc := snapshots.NewServer(db, l)
+	snapSvc := snapshots.NewServer(db, l, idp)
 	snapCtrl := snapshots.NewController(snapSvc)
 	snapshots.RegisterSnapshotsRouter(e, snapCtrl)
 
 	// 定时快照管理：/api/v1/snapshot-schedules/*
-	schedSvc := snapshotschedules.NewServer(db, l, dbSvc, snapSvc)
+	schedSvc := snapshotschedules.NewServer(db, l, idp, dbSvc, snapSvc)
 	schedCtrl := snapshotschedules.NewController(schedSvc)
 	snapshotschedules.RegisterSnapshotSchedulesRouter(e, schedCtrl)
 	schedSvc.StartScheduler()
@@ -180,8 +190,15 @@ func main() {
 	fnc := file.NewController(fi)
 	file.RegisterFileRouter(e, fnc)
 
+	// 注册身份相关路由（用户搜索 / 团队列表，分享弹窗用）
+	identity.RegisterIdentityRouter(e, idp)
+	// 注册用户组管理路由（平台内部维护的分享目标）
+	identity.RegisterGroupRouter(e, idp)
+
 	// Auto-migrate new tables
-	db.AutoMigrate(&model.Snapshot{}, &model.Variable{}, &model.DashboardVersion{}, &model.Datasource{}, &model.SnapshotSchedule{})
+	// 注意：UserGroup/UserGroupMember 须放在最前——dashboards 表存在历史外键约束错误，
+	// AutoMigrate 遇到该错误会中断后续迁移，排在其后的表将无法创建。
+	db.AutoMigrate(&model.UserGroup{}, &model.UserGroupMember{}, &model.Snapshot{}, &model.Variable{}, &model.DashboardVersion{}, &model.Datasource{}, &model.SnapshotSchedule{}, &model.ResourceShare{}, &model.Dashboard{})
 
 	// 启动 HTTP 服务器
 	l.Infof("Server starting on port %d", cfg.Server.Port)

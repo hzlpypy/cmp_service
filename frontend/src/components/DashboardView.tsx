@@ -140,6 +140,10 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   const { slug } = useParams<{ uid: string; slug?: string }>()
 
   const [dashboard, setDashboard] = useState<DashboardRes | null>(null)
+  // 是否有编辑权限（分享只读时禁止编辑/保存）
+  const [canEdit, setCanEdit] = useState(true)
+  // 编辑模式：仅开启后面板支持拖拽/调整大小（"更多 > 编辑"进入）
+  const [editMode, setEditMode] = useState(false)
   const [dataRes, setDataRes] = useState<DashboardDataRes | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false) // 刷新按钮的加载状态
@@ -686,6 +690,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
 
       setDashboard(db)
+      setCanEdit(db.can_edit !== false)
       setDatasources(dsList)
       setVariables(varList)
       // 重置手动选择跟踪（仪表板重新加载时）
@@ -905,6 +910,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         columns={columnMap.get(panel.id)}
         dataLinks={panel.dataLinks}
         menuOpen={openMenuId === panel.id}
+        showMenu={canEdit}
         onToggleMenu={() => toggleMenu(panel.id)}
         onEdit={() => handleEditPanel(panel.id)}
         onRemove={() => handleRemovePanel(panel.id)}
@@ -941,6 +947,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
   // ---- 单面板编辑：导航到全屏编辑页面 ----
   const handleEditPanel = (panelId: string) => {
+    if (!canEdit) return // 只读：禁止编辑面板
     setOpenMenuId(null)
     const panels: any[] = draftJson?.panels || []
     const panel = panels.find((p: any) => p.id === panelId)
@@ -981,6 +988,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
   // ---- 添加面板（仅修改本地草稿） ----
   const handleAddPanel = () => {
+    if (!canEdit) return // 只读：禁止添加面板
     setShowNewPanel(false)
     const panels: any[] = [...(draftJson?.panels || [])]
     const ds = datasources[0]
@@ -1003,6 +1011,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
   // ---- 删除面板（仅修改本地草稿） ----
   const handleRemovePanel = (panelId: string) => {
+    if (!canEdit) return // 只读：禁止删除面板
     const newPanels = (draftJson?.panels || []).filter((p: any) => p.id !== panelId)
     setDraftJson({ ...draftJson, panels: newPanels })
     setOpenMenuId(null)
@@ -1010,6 +1019,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
   // ---- 处理布局变化（拖拽/调整大小） ----
   const handleLayoutChange = (updatedPanels: any[]) => {
+    if (!canEdit || !editMode) return // 未开启编辑模式：禁止拖拽/调整面板布局
     setDraftJson({ ...draftJson, panels: updatedPanels })
   }
 
@@ -1346,14 +1356,16 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
             )}
           </div>
 
-          {/* 常用按钮 */}
-          <button className="btn-sm add-panel" onClick={() => setShowNewPanel(true)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '-3px' }}>
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            添加面板
-          </button>
+          {/* 常用按钮（只读时隐藏添加面板） */}
+          {canEdit && (
+            <button className="btn-sm add-panel" onClick={() => setShowNewPanel(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '-3px' }}>
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              添加面板
+            </button>
+          )}
           <button
             className="btn-sm"
             onClick={handleRefresh}
@@ -1409,17 +1421,36 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                   gap: 4,
                 }}
               >
-                <button
-                  className="btn-sm"
-                  onClick={() => { setShowEditor(true); setMoreMenuOpen(false) }}
-                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </svg>
-                  编辑仪表板
-                </button>
+                {canEdit && (
+                  <button
+                    className="btn-sm"
+                    onClick={() => { setEditMode(!editMode); setMoreMenuOpen(false) }}
+                    style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="5 9 2 12 5 15" />
+                      <polyline points="9 5 12 2 15 5" />
+                      <polyline points="15 19 12 22 9 19" />
+                      <polyline points="19 9 22 12 19 15" />
+                      <line x1="2" y1="12" x2="22" y2="12" />
+                      <line x1="12" y1="2" x2="12" y2="22" />
+                    </svg>
+                    {editMode ? '完成编辑' : '编辑'}
+                  </button>
+                )}
+                {canEdit && (
+                  <button
+                    className="btn-sm"
+                    onClick={() => { setShowEditor(true); setMoreMenuOpen(false) }}
+                    style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                    设置
+                  </button>
+                )}
                 <button
                   className="btn-sm"
                   onClick={() => { setShowJson(true); setMoreMenuOpen(false) }}
@@ -1455,6 +1486,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                   </svg>
                   创建快照
                 </button>
+                {/* 定时快照：所有可见用户（含只读分享）均可创建自己的定时快照 */}
                 <button
                   className="btn-sm"
                   onClick={() => { setShowSchedule(true); setMoreMenuOpen(false) }}
@@ -1468,17 +1500,20 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                   </svg>
                   定时快照
                 </button>
-                <button
-                  className="btn-sm"
-                  onClick={() => { setShowVersionHistory(true); setMoreMenuOpen(false) }}
-                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <polyline points="12 6 12 12 16 14" />
-                  </svg>
-                  版本历史
-                </button>
+                {/* 版本历史：只读分享下不可见 */}
+                {canEdit && (
+                  <button
+                    className="btn-sm"
+                    onClick={() => { setShowVersionHistory(true); setMoreMenuOpen(false) }}
+                    style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                    版本历史
+                  </button>
+                )}
                 <button
                   className="btn-sm"
                   onClick={() => { setShowReport(true); setMoreMenuOpen(false) }}
@@ -1495,32 +1530,36 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
             )}
           </div>
 
-          {/* 保存按钮：有未保存变更时高亮 */}
-          <button
-            className="btn-sm save-btn"
-            onClick={handleSaveDashboard}
-            disabled={saving}
-            title="保存仪表板（将所有面板变更持久化）"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-              <polyline points="17 21 17 13 7 13 7 21" />
-              <polyline points="7 3 7 8 15 8" />
-            </svg>
-            {saving ? '保存中...' : '保存仪表板'}
-          </button>
+          {/* 保存按钮：有未保存变更时高亮（只读时隐藏） */}
+          {canEdit && (
+            <button
+              className="btn-sm save-btn"
+              onClick={handleSaveDashboard}
+              disabled={saving}
+              title="保存仪表板（将所有面板变更持久化）"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                <polyline points="17 21 17 13 7 13 7 21" />
+                <polyline points="7 3 7 8 15 8" />
+              </svg>
+              {saving ? '保存中...' : '保存仪表板'}
+            </button>
+          )}
 
-          {/* AI 助手按钮 */}
-          <button
-            className={`btn-sm ${chatOpen ? 'primary' : ''}`}
-            onClick={() => setChatOpen(!chatOpen)}
-            title={chatOpen ? '关闭AI助手' : '打开AI助手'}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            {chatOpen ? '关闭AI' : 'AI 助手'}
-          </button>
+          {/* AI 助手按钮：只读分享下不可见 */}
+          {canEdit && (
+            <button
+              className={`btn-sm ${chatOpen ? 'primary' : ''}`}
+              onClick={() => setChatOpen(!chatOpen)}
+              title={chatOpen ? '关闭AI助手' : '打开AI助手'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              {chatOpen ? '关闭AI' : 'AI 助手'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1602,11 +1641,13 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                           style={{ fontSize: 11, whiteSpace: 'nowrap', padding: '4px 10px' }}>
                           {copiedKey === snap.snapshot_key ? '已复制' : '复制链接'}
                         </button>
-                        <button className="btn-sm"
-                          onClick={() => handleDeleteSnapshot(snap.snapshot_key)}
-                          style={{ fontSize: 11, color: 'var(--red)', borderColor: 'transparent', padding: '4px 8px' }}>
-                          删除
-                        </button>
+                        {snap.can_edit && (
+                          <button className="btn-sm"
+                            onClick={() => handleDeleteSnapshot(snap.snapshot_key)}
+                            style={{ fontSize: 11, color: 'var(--red)', borderColor: 'transparent', padding: '4px 8px' }}>
+                            删除
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1754,14 +1795,16 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                 rowHeight={30}
                 cols={24}
                 gap={8}
-                editable={true}
+                editable={canEdit && editMode}
               >
                 {renderPanelContent}
               </GridLayout>
             )
           ) : (
             <div className="add-panel-zone">
-              <span style={{ color: 'var(--text-muted)' }}>此仪表板暂无面板，点击"+ 添加面板"开始创建</span>
+              <span style={{ color: 'var(--text-muted)' }}>
+                {canEdit ? '此仪表板暂无面板，点击"+ 添加面板"开始创建' : '此仪表板暂无面板'}
+              </span>
             </div>
           )}
         </div>

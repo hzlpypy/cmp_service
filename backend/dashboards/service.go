@@ -4,6 +4,7 @@ package dashboards
 
 import (
 	"cmp_service_backend/datasources"
+	"cmp_service_backend/identity"
 	"cmp_service_backend/model"
 	"cmp_service_backend/variables"
 	"encoding/json"
@@ -95,6 +96,7 @@ type Server struct {
 	log           *logrus.Logger
 	httpQueryExec *datasources.HTTPQueryExecutor
 	dsConnMgr     *datasources.DSConnectionManager
+	identity      *identity.Provider
 }
 
 // Interface 定义仪表板业务操作的接口。
@@ -126,15 +128,22 @@ type Interface interface {
 	CompareVersions(ctx *gin.Context, req *VersionCompareReq) (*VersionDiffRes, error)
 	// DeleteVersion 删除指定版本
 	DeleteVersion(ctx *gin.Context, req *VersionReq) error
+	// ShareResource 添加/更新分享（仪表板/快照）
+	ShareResource(ctx *gin.Context, req *ShareReq) error
+	// UnshareResource 取消分享
+	UnshareResource(ctx *gin.Context, req *ShareReq) error
+	// ListShares 获取资源的分享列表
+	ListShares(ctx *gin.Context, req *ShareListReq) ([]ShareRes, error)
 }
 
 // NewServer 创建仪表板业务服务实例。
-func NewServer(db *gorm.DB, log *logrus.Logger, dsConnMgr *datasources.DSConnectionManager) Interface {
+func NewServer(db *gorm.DB, log *logrus.Logger, dsConnMgr *datasources.DSConnectionManager, identityProvider *identity.Provider) Interface {
 	return &Server{
 		db:            db,
 		log:           log,
 		httpQueryExec: datasources.NewHTTPQueryExecutor(log),
 		dsConnMgr:     dsConnMgr,
+		identity:      identityProvider,
 	}
 }
 
@@ -167,24 +176,53 @@ func (s *Server) getDatasourceDB(datasourceID string) (*gorm.DB, *model.Datasour
 	}
 }
 
-// ListDashboards 获取所有未删除的仪表板，可选按文件夹ID过滤。
+// ListDashboards 获取当前用户可见的所有未删除仪表板，可选按文件夹ID过滤。
+// 可见范围：自己的 + 分享给我的/我团队的 + 团队/部门成员的（按角色）。
+// 响应中附带 owner_id / can_edit / source，供前端分组展示。
 func (s *Server) ListDashboards(ctx *gin.Context, folderID string) ([]*DashboardRes, error) {
 	var records []*model.Dashboard
-	query := s.db.Where("deleted_at IS NULL")
+	query := s.db.Scopes(s.identity.VisibleScope(ctx, "dashboard")).Where("deleted_at IS NULL")
 	if folderID != "" {
 		query = query.Where("folder_id = ?", folderID)
 	}
 	if err := query.Preload("Folder").Preload("Panels", "deleted_at IS NULL").Order("created_at ASC").Find(&records).Error; err != nil {
 		return nil, err
 	}
+
+	uc := identity.FromContext(ctx)
+	me := ""
+	if uc != nil {
+		me = uc.UserID
+	}
+	editableShared := s.identity.EditableShareIDs(ctx, "dashboard")
+	sharedToMe := s.identity.SharedResourceIDs(ctx, "dashboard")
+
 	result := make([]*DashboardRes, 0, len(records))
 	for _, r := range records {
-		result = append(result, ToDashboardRes(r))
+		res := ToDashboardRes(r)
+		res.CanEdit = uc != nil && (uc.IsAdmin() || r.OwnerID == me || editableShared[r.ID])
+		res.Source = computeSource(uc, me, r.OwnerID, sharedToMe[r.ID])
+		result = append(result, res)
 	}
 	return result, nil
 }
 
+// computeSource 计算仪表板的来源分组。
+func computeSource(uc *identity.UserContext, me, ownerID string, isShared bool) string {
+	if uc != nil && uc.IsAdmin() {
+		return "mine"
+	}
+	if ownerID == me {
+		return "mine"
+	}
+	if isShared {
+		return "shared"
+	}
+	return "team"
+}
+
 // GetDashboard 根据 ID 获取单个仪表板详情。
+// 仅返回当前用户可见的仪表板，不可见时返回错误。
 func (s *Server) GetDashboard(ctx *gin.Context, req *DashboardReq) (*DashboardRes, error) {
 	var record model.Dashboard
 	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).
@@ -193,7 +231,19 @@ func (s *Server) GetDashboard(ctx *gin.Context, req *DashboardReq) (*DashboardRe
 		First(&record).Error; err != nil {
 		return nil, err
 	}
-	return ToDashboardRes(&record), nil
+	// 可见性校验
+	if !s.identity.CanViewResource(ctx, "dashboard", record.ID, record.OwnerID) {
+		return nil, fmt.Errorf("仪表板不存在或无权限访问")
+	}
+	uc := identity.FromContext(ctx)
+	me := ""
+	if uc != nil {
+		me = uc.UserID
+	}
+	res := ToDashboardRes(&record)
+	res.CanEdit = s.identity.CanManageResource(ctx, "dashboard", record.ID, record.OwnerID)
+	res.Source = computeSource(uc, me, record.OwnerID, s.identity.IsSharedToMe(ctx, "dashboard", record.ID))
+	return res, nil
 }
 
 // CreateDashboard 创建新仪表板，同时存储 dashboard_json 完整定义。
@@ -205,7 +255,14 @@ func (s *Server) CreateDashboard(ctx *gin.Context, req *DashboardReq) (*Dashboar
 	}
 	req.DashboardJSON["title"] = req.Title
 
+	// 记录创建者
+	ownerID := ""
+	if uc := identity.FromContext(ctx); uc != nil {
+		ownerID = uc.UserID
+	}
+
 	record := &model.Dashboard{
+		OwnerID:       ownerID,
 		Title:         req.Title,
 		FolderID:      req.FolderID,
 		DashboardJSON: req.DashboardJSON,
@@ -231,6 +288,10 @@ func (s *Server) UpdateDashboard(ctx *gin.Context, req *DashboardReq) (*Dashboar
 	var current model.Dashboard
 	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&current).Error; err != nil {
 		return nil, err
+	}
+	// 权限校验：仅拥有者、admin、分享可编辑者
+	if !s.identity.CanManageResource(ctx, "dashboard", current.ID, current.OwnerID) {
+		return nil, fmt.Errorf("无权限编辑该仪表板")
 	}
 
 	updates := map[string]interface{}{
@@ -267,8 +328,15 @@ func (s *Server) UpdateDashboard(ctx *gin.Context, req *DashboardReq) (*Dashboar
 	return ToDashboardRes(&record), nil
 }
 
-// DeleteDashboard 软删除仪表板。
+// DeleteDashboard 软删除仪表板（仅拥有者或管理员可删除）。
 func (s *Server) DeleteDashboard(ctx *gin.Context, req *DashboardReq) error {
+	var current model.Dashboard
+	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&current).Error; err != nil {
+		return err
+	}
+	if !s.identity.CanManageResource(ctx, "dashboard", current.ID, current.OwnerID) {
+		return fmt.Errorf("无权限删除该仪表板")
+	}
 	return s.db.Where("id = ?", req.ID).Delete(&model.Dashboard{}).Error
 }
 
@@ -1512,4 +1580,121 @@ func (s *Server) DeleteVersion(ctx *gin.Context, req *VersionReq) error {
 		return fmt.Errorf("请指定要删除的版本号")
 	}
 	return s.db.Where("dashboard_id = ? AND version = ?", req.DashboardID, req.Version).Delete(&model.DashboardVersion{}).Error
+}
+
+// ============================================================
+// 分享管理（仪表板/快照通用）
+// ============================================================
+
+// ShareReq 分享请求。
+type ShareReq struct {
+	ResourceType string `json:"resource_type" binding:"required"` // dashboard / snapshot
+	ResourceID   string `json:"resource_id" binding:"required"`
+	ShareToType  string `json:"share_to_type" binding:"required"` // user / team
+	ShareToID    string `json:"share_to_id" binding:"required"`
+	CanEdit      bool   `json:"can_edit"`
+}
+
+// ShareListReq 分享列表请求。
+type ShareListReq struct {
+	ResourceType string `json:"resource_type" binding:"required"`
+	ResourceID   string `json:"resource_id" binding:"required"`
+}
+
+// ShareRes 分享记录响应。
+type ShareRes struct {
+	ID           uint   `json:"id"`
+	ResourceType string `json:"resource_type"`
+	ResourceID   string `json:"resource_id"`
+	ShareToType  string `json:"share_to_type"`
+	ShareToID    string `json:"share_to_id"`
+	CanEdit      bool   `json:"can_edit"`
+	SharedBy     string `json:"shared_by"`
+	CreatedAt    string `json:"created_at"`
+}
+
+// ShareResource 添加/更新分享。仅资源拥有者或管理员可分享。
+func (s *Server) ShareResource(ctx *gin.Context, req *ShareReq) error {
+	ownerID := s.getResourceOwner(ctx, req.ResourceType, req.ResourceID)
+	if ownerID == "" {
+		return fmt.Errorf("资源不存在")
+	}
+	if !s.identity.CanManageResource(ctx, req.ResourceType, req.ResourceID, ownerID) {
+		return fmt.Errorf("无权限分享该资源")
+	}
+	sharedBy := ""
+	if uc := identity.FromContext(ctx); uc != nil {
+		sharedBy = uc.UserID
+	}
+
+	// upsert：已存在则更新 can_edit，否则创建
+	var existing model.ResourceShare
+	err := s.db.Where("resource_type = ? AND resource_id = ? AND share_to_type = ? AND share_to_id = ? AND deleted_at IS NULL",
+		req.ResourceType, req.ResourceID, req.ShareToType, req.ShareToID).First(&existing).Error
+	if err == nil {
+		return s.db.Model(&model.ResourceShare{}).Where("id = ?", existing.ID).Update("can_edit", req.CanEdit).Error
+	}
+	share := model.ResourceShare{
+		ResourceType: req.ResourceType,
+		ResourceID:   req.ResourceID,
+		ShareToType:  req.ShareToType,
+		ShareToID:    req.ShareToID,
+		CanEdit:      req.CanEdit,
+		SharedBy:     sharedBy,
+	}
+	return s.db.Create(&share).Error
+}
+
+// UnshareResource 取消分享。仅资源拥有者或管理员可取消。
+func (s *Server) UnshareResource(ctx *gin.Context, req *ShareReq) error {
+	ownerID := s.getResourceOwner(ctx, req.ResourceType, req.ResourceID)
+	if ownerID == "" {
+		return fmt.Errorf("资源不存在")
+	}
+	if !s.identity.CanManageResource(ctx, req.ResourceType, req.ResourceID, ownerID) {
+		return fmt.Errorf("无权限取消分享")
+	}
+	return s.db.Where("resource_type = ? AND resource_id = ? AND share_to_type = ? AND share_to_id = ?",
+		req.ResourceType, req.ResourceID, req.ShareToType, req.ShareToID).
+		Delete(&model.ResourceShare{}).Error
+}
+
+// ListShares 获取资源的分享列表。
+func (s *Server) ListShares(ctx *gin.Context, req *ShareListReq) ([]ShareRes, error) {
+	var shares []model.ResourceShare
+	if err := s.db.Where("resource_type = ? AND resource_id = ? AND deleted_at IS NULL",
+		req.ResourceType, req.ResourceID).Order("created_at ASC").Find(&shares).Error; err != nil {
+		return nil, err
+	}
+	res := make([]ShareRes, 0, len(shares))
+	for _, sh := range shares {
+		res = append(res, ShareRes{
+			ID:           sh.ID,
+			ResourceType: sh.ResourceType,
+			ResourceID:   sh.ResourceID,
+			ShareToType:  sh.ShareToType,
+			ShareToID:    sh.ShareToID,
+			CanEdit:      sh.CanEdit,
+			SharedBy:     sh.SharedBy,
+			CreatedAt:    sh.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
+		})
+	}
+	return res, nil
+}
+
+// getResourceOwner 获取资源的拥有者用户ID。
+func (s *Server) getResourceOwner(ctx *gin.Context, resType, resID string) string {
+	switch resType {
+	case "dashboard":
+		var d model.Dashboard
+		if err := s.db.Where("id = ? AND deleted_at IS NULL", resID).First(&d).Error; err == nil {
+			return d.OwnerID
+		}
+	case "snapshot":
+		var snap model.Snapshot
+		if err := s.db.Where("id = ? AND deleted_at IS NULL", resID).First(&snap).Error; err == nil {
+			return snap.OwnerID
+		}
+	}
+	return ""
 }

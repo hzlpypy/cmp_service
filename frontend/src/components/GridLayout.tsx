@@ -33,8 +33,8 @@ export default function GridLayout({
   } | null>(null)
   // 拖拽过程中的临时位置（用于预览）
   const [tempPos, setTempPos] = useState<GridPos | null>(null)
-  // 拖拽过程中碰撞的面板ID（用于交换）
-  const [swapTargetId, setSwapTargetId] = useState<string | null>(null)
+  // 拖拽过程中被推挤面板的临时位置（resize 时 Grafana 风格推挤预览）
+  const [pushedPositions, setPushedPositions] = useState<Record<string, GridPos> | null>(null)
 
   // 计算容器宽度
   useEffect(() => {
@@ -80,23 +80,65 @@ export default function GridLayout({
     }
   }, [cellWidth, rowHeight, gap])
 
-  // 碰撞检测：检查新位置是否与其他面板冲突，返回碰撞的面板
-  const findCollisionPanel = useCallback((panelId: string, newPos: GridPos, currentPanels: PanelItem[]): PanelItem | null => {
-    for (const p of currentPanels) {
-      if (p.id === panelId) continue
-      const pPos = p.gridPos
-      // 检查是否重叠
-      if (
-        newPos.x < pPos.x + pPos.w &&
-        newPos.x + newPos.w > pPos.x &&
-        newPos.y < pPos.y + pPos.h &&
-        newPos.y + newPos.h > pPos.y
-      ) {
-        return p
+  // 碰撞检测：两矩形是否重叠
+  const overlaps = useCallback((a: GridPos, b: GridPos): boolean => {
+    return (
+      a.x < b.x + b.w &&
+      a.x + a.w > b.x &&
+      a.y < b.y + b.h &&
+      a.y + a.h > b.y
+    )
+  }, [])
+
+  // Grafana 风格推挤：把 movingId 面板放到 newPos 后，其余面板被往下推挤直到无碰撞。
+  // 返回除 movingId 外所有面板的推挤后位置（不修改原 panels）。
+  const computePushedLayout = useCallback((movingId: string, newPos: GridPos, allPanels: PanelItem[]): Record<string, GridPos> => {
+    const others = allPanels
+      .filter(p => p.id !== movingId)
+      .map(p => ({ id: p.id, pos: { ...p.gridPos } }))
+
+    let changed = true
+    while (changed) {
+      changed = false
+      // 1. 被 moving 面板占位，压住的面板往下推
+      for (const o of others) {
+        if (overlaps(newPos, o.pos)) {
+          const pushY = newPos.y + newPos.h
+          if (o.pos.y < pushY) { o.pos.y = pushY; changed = true }
+        }
+      }
+      // 2. 面板之间连锁推挤（按 y 从小到大依次处理）
+      others.sort((a, b) => a.pos.y - b.pos.y || a.pos.x - b.pos.x)
+      for (let i = 1; i < others.length; i++) {
+        for (let j = 0; j < i; j++) {
+          if (overlaps(others[j].pos, others[i].pos)) {
+            const pushY = others[j].pos.y + others[j].pos.h
+            if (others[i].pos.y < pushY) { others[i].pos.y = pushY; changed = true }
+          }
+        }
       }
     }
-    return null
-  }, [])
+
+    const map: Record<string, GridPos> = {}
+    others.forEach(o => { map[o.id] = o.pos })
+    return map
+  }, [overlaps])
+
+  // 计算与 pos 重叠面积最大的面板（交换目标）
+  const findSwapTarget = useCallback((pos: GridPos, allPanels: PanelItem[], movingId: string): string | null => {
+    let target: string | null = null
+    let maxOverlap = 0
+    for (const p of allPanels) {
+      if (p.id === movingId) continue
+      if (overlaps(pos, p.gridPos)) {
+        const ox = Math.min(pos.x + pos.w, p.gridPos.x + p.gridPos.w) - Math.max(pos.x, p.gridPos.x)
+        const oy = Math.min(pos.y + pos.h, p.gridPos.y + p.gridPos.h) - Math.max(pos.y, p.gridPos.y)
+        const area = ox * oy
+        if (area > maxOverlap) { maxOverlap = area; target = p.id }
+      }
+    }
+    return target
+  }, [overlaps])
 
   // 开始拖拽
   const handleDragStart = (panelId: string, e: React.MouseEvent) => {
@@ -111,7 +153,7 @@ export default function GridLayout({
       type: 'move',
     })
     setTempPos(null)
-    setSwapTargetId(null)
+    setPushedPositions(null)
     e.preventDefault()
   }
 
@@ -128,37 +170,30 @@ export default function GridLayout({
       type: 'resize',
     })
     setTempPos(null)
+    setPushedPositions(null)
     e.preventDefault()
     e.stopPropagation()
   }
 
-  // 拖拽移动（只预览，不实际更新 panels）
+  // 拖拽移动（只预览，不实际更新 panels，Grafana 风格实时推挤）
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!dragging || !containerRef.current) return
 
     const panel = panels.find(p => p.id === dragging.panelId)
     if (!panel) return
 
+    let newPos: GridPos
+
     if (dragging.type === 'move') {
+      // 拖动：像素级平滑跟随鼠标（浮点网格位置，不做吸附），交换目标仅用于预览占位
       const deltaX = e.clientX - dragging.startX
       const deltaY = e.clientY - dragging.startY
-      const gridDeltaX = Math.round(deltaX / (cellWidth + gap))
-      const gridDeltaY = Math.round(deltaY / (rowHeight + gap))
-      let newX = dragging.startPos.x + gridDeltaX
-      let newY = dragging.startPos.y + gridDeltaY
+      let newX = dragging.startPos.x + deltaX / (cellWidth + gap)
+      let newY = dragging.startPos.y + deltaY / (rowHeight + gap)
       newX = Math.max(0, Math.min(cols - panel.gridPos.w, newX))
       newY = Math.max(0, newY)
-
-      const newPos = { ...panel.gridPos, x: newX, y: newY }
-      const collisionPanel = findCollisionPanel(dragging.panelId, newPos, panels)
-      if (collisionPanel) {
-        setSwapTargetId(collisionPanel.id)
-        setTempPos(newPos)
-      } else {
-        setSwapTargetId(null)
-        setTempPos(newPos)
-      }
-    } else if (dragging.type === 'resize') {
+      newPos = { ...panel.gridPos, x: newX, y: newY }
+    } else {
       const deltaX = e.clientX - dragging.startX
       const deltaY = e.clientY - dragging.startY
       const gridDeltaW = Math.round(deltaX / (cellWidth + gap))
@@ -167,95 +202,55 @@ export default function GridLayout({
       let newH = dragging.startPos.h + gridDeltaH
       newW = Math.max(2, Math.min(cols - panel.gridPos.x, newW))
       newH = Math.max(2, newH)
-      setTempPos({ ...panel.gridPos, w: newW, h: newH })
+      newPos = { ...panel.gridPos, w: newW, h: newH }
     }
-  }, [dragging, panels, cellWidth, rowHeight, gap, cols, findCollisionPanel])
 
-  // 拖拽结束（执行实际的位置更新或交换）
+    setTempPos(newPos)
+    if (dragging.type === 'move') {
+      // 拖动：面板始终跟随鼠标，不预览交换；松手时才计算交换位置
+      setPushedPositions(null)
+    } else {
+      // 拉伸：保持 Grafana 风格推挤
+      setPushedPositions(computePushedLayout(dragging.panelId, newPos, panels))
+    }
+  }, [dragging, panels, cellWidth, rowHeight, gap, cols, computePushedLayout])
+
+  // 拖拽结束（应用推挤后的最终布局）
   const handleMouseUp = useCallback(() => {
     if (!dragging) return
-    
+
     const panel = panels.find(p => p.id === dragging.panelId)
-    if (!panel) {
+    if (!panel || !tempPos) {
       setDragging(null)
       setTempPos(null)
-      setSwapTargetId(null)
+      setPushedPositions(null)
       return
     }
-    
-    if (dragging.type === 'move' && tempPos) {
-      if (swapTargetId) {
-        // 有碰撞，检查交换是否安全
-        const originalPos = dragging.startPos
-        const swapTargetPanel = panels.find(p => p.id === swapTargetId)
-        
-        if (swapTargetPanel) {
-          // 模拟交换后的状态
-          const simulatedPanels = panels.map(p => {
-            if (p.id === dragging.panelId) {
-              return { ...p, gridPos: tempPos }
-            }
-            if (p.id === swapTargetId) {
-              return { ...p, gridPos: originalPos }
-            }
-            return p
-          })
-          
-          // 检查交换后的整体布局是否有任何碰撞
-          let hasCollision = false
-          for (let i = 0; i < simulatedPanels.length; i++) {
-            for (let j = i + 1; j < simulatedPanels.length; j++) {
-              const a = simulatedPanels[i].gridPos
-              const b = simulatedPanels[j].gridPos
-              if (
-                a.x < b.x + b.w &&
-                a.x + a.w > b.x &&
-                a.y < b.y + b.h &&
-                a.y + a.h > b.y
-              ) {
-                hasCollision = true
-                break
-              }
-            }
-            if (hasCollision) break
-          }
-          
-          if (hasCollision) {
-            // 交换后会产生新的碰撞，不允许交换，保持原位置
-            console.log('交换会产生新碰撞，不允许')
-          } else {
-            // 安全交换
-            const newPanels = panels.map(p => {
-              if (p.id === dragging.panelId) {
-                return { ...p, gridPos: tempPos }
-              }
-              if (p.id === swapTargetId) {
-                return { ...p, gridPos: originalPos }
-              }
-              return p
-            })
-            onChange(newPanels)
-          }
-        }
-      } else {
-        // 没有碰撞，直接移动
-        const newPanels = panels.map(p =>
-          p.id === dragging.panelId ? { ...p, gridPos: tempPos } : p
-        )
-        onChange(newPanels)
+
+    // 拖动结束时吸附到网格
+    const snappedPos: GridPos = dragging.type === 'move'
+      ? { ...tempPos, x: Math.round(tempPos.x), y: Math.round(tempPos.y) }
+      : tempPos
+
+    // 被拖拽面板放置：move 有交换目标时完全占住目标原位置（避免部分重叠）；否则放吸附后的位置
+    // move：交换目标面板回到被拖拽面板的原位置；resize：其余面板应用推挤后的位置
+    const targetPanel = dragging.type === 'move'
+      ? panels.find(p => p.id === findSwapTarget(snappedPos, panels, dragging.panelId))
+      : null
+    const newPanels = panels.map(p => {
+      if (p.id === dragging.panelId) return { ...p, gridPos: targetPanel ? targetPanel.gridPos : snappedPos }
+      if (dragging.type === 'move') {
+        return targetPanel && targetPanel.id === p.id ? { ...p, gridPos: dragging.startPos } : p
       }
-    } else if (dragging.type === 'resize' && tempPos) {
-      // 更新面板大小
-      const newPanels = panels.map(p =>
-        p.id === dragging.panelId ? { ...p, gridPos: tempPos } : p
-      )
-      onChange(newPanels)
-    }
-    
+      const pushed = pushedPositions?.[p.id]
+      return pushed ? { ...p, gridPos: pushed } : p
+    })
+    onChange(newPanels)
+
     setDragging(null)
     setTempPos(null)
-    setSwapTargetId(null)
-  }, [dragging, tempPos, swapTargetId, panels, onChange])
+    setPushedPositions(null)
+  }, [dragging, tempPos, pushedPositions, panels, onChange, findSwapTarget])
 
   // 绑定全局事件
   useEffect(() => {
@@ -286,14 +281,13 @@ export default function GridLayout({
       }}
     >
       {panels.map(panel => {
-        // 如果正在拖拽此面板，使用临时位置
+        // 正在拖拽的面板始终跟随鼠标（tempPos）；resize 时被推挤面板使用推挤位置预览
         const isDraggingThis = dragging?.panelId === panel.id
-        const displayPos = isDraggingThis && tempPos ? tempPos : panel.gridPos
+        const displayPos = isDraggingThis
+          ? (tempPos ?? panel.gridPos)
+          : (pushedPositions?.[panel.id] ?? panel.gridPos)
         const style = calcStyle(displayPos)
-        
-        // 如果是碰撞目标面板，显示原始位置（将被交换）
-        const isSwapTarget = swapTargetId === panel.id
-        
+
         return (
           <div
             key={panel.id}
@@ -301,9 +295,9 @@ export default function GridLayout({
             style={{
               ...style,
               cursor: editable ? 'move' : 'default',
-              zIndex: isDraggingThis ? 100 : (isSwapTarget ? 50 : 1),
-              transition: dragging ? 'none' : 'left 0.1s, top 0.1s, width 0.1s, height 0.1s',
-              opacity: isSwapTarget ? 0.5 : 1,
+              zIndex: isDraggingThis ? 100 : 1,
+              boxShadow: isDraggingThis ? '0 8px 24px rgba(0,0,0,0.18)' : undefined,
+              transition: isDraggingThis ? 'none' : 'left 0.3s, top 0.3s, width 0.3s, height 0.3s',
             }}
             onMouseDown={(e) => handleDragStart(panel.id, e)}
           >
