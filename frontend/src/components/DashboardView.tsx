@@ -1366,6 +1366,23 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
               添加面板
             </button>
           )}
+          {/* 编辑模式按钮（常用，放外面） */}
+          {canEdit && (
+            <button
+              className="btn-sm"
+              onClick={() => setEditMode(!editMode)}
+              style={editMode ? { borderColor: 'var(--accent)', color: 'var(--accent)', background: 'rgba(64,158,255,0.1)' } : undefined}
+              title="开启后面板支持拖拽和调整大小"
+            >
+              {!editMode && (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              )}
+              {editMode ? '退出编辑' : '编辑'}
+            </button>
+          )}
           <button
             className="btn-sm"
             onClick={handleRefresh}
@@ -1424,29 +1441,12 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                 {canEdit && (
                   <button
                     className="btn-sm"
-                    onClick={() => { setEditMode(!editMode); setMoreMenuOpen(false) }}
-                    style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="5 9 2 12 5 15" />
-                      <polyline points="9 5 12 2 15 5" />
-                      <polyline points="15 19 12 22 9 19" />
-                      <polyline points="19 9 22 12 19 15" />
-                      <line x1="2" y1="12" x2="22" y2="12" />
-                      <line x1="12" y1="2" x2="12" y2="22" />
-                    </svg>
-                    {editMode ? '完成编辑' : '编辑'}
-                  </button>
-                )}
-                {canEdit && (
-                  <button
-                    className="btn-sm"
                     onClick={() => { setShowEditor(true); setMoreMenuOpen(false) }}
                     style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      <circle cx="12" cy="12" r="3" />
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
                     </svg>
                     设置
                   </button>
