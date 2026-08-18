@@ -352,7 +352,6 @@ export default function AIChatDialog({
       }
 
       ws.onmessage = (event) => {
-        setLoading(false)
         try {
           const data = JSON.parse(event.data)
           handleStreamChunk(data)
@@ -461,6 +460,9 @@ export default function AIChatDialog({
 
     // 无内容的不处理
     if (!tokenId || !chunk) return
+
+    // 收到首个实际文字内容 → 清除"AI 正在思考..."（心跳等无内容消息不清除）
+    setLoading(false)
     const s = streamRef.current
 
     // token_id 变化 → 前一段完成
