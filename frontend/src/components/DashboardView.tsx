@@ -13,6 +13,7 @@ import ReportModal from './ReportModal'
 import SnapshotScheduleModal from './SnapshotScheduleModal'
 import * as api from '../api'
 import type { DashboardRes, DashboardDataRes, DashboardJSON, MetricRow, PanelDef, PanelDataRes, DatasourceRes, VariableRes } from '../api'
+import { recordRecentDashboard } from '../recentDashboards'
 
 // BeforeUnloadEvent 类型定义
 type BeforeEvent = BeforeUnloadEvent & {
@@ -304,6 +305,18 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       if (viewRoot) viewRoot.style.overflow = origRootOverflow
       setExporting(false)
     }
+  }
+
+  /** 导出仪表板 JSON 文件（参照 Grafana 导出，下载 .json） */
+  const handleExportJson = () => {
+    const json = savedJson || draftJson || dashboard?.dashboard_json
+    if (!json) {
+      message.warning('暂无可导出的仪表板数据')
+      return
+    }
+    const title = (json.title || displayTitle || 'dashboard') as string
+    api.downloadJson(json, `${title}.json`)
+    message.success('已导出 JSON 文件')
   }
 
   /** AI 通过 onDraftUpdate 回调传入修改后的 dashboard_json，立即生效 */
@@ -693,6 +706,8 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       setCanEdit(db.can_edit !== false)
       setDatasources(dsList)
       setVariables(varList)
+      // 记录最近访问（首页展示）
+      recordRecentDashboard(dashboardId, db.title || '仪表板')
       // 重置手动选择跟踪（仪表板重新加载时）
       setManuallyTouchedVarIds(new Set())
       // 初始化本地草稿为当前 dashboard_json 的深拷贝
@@ -714,8 +729,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
           try {
             const panelData = await api.getPanelData(dashboardId, panel.id, tr?.from, tr?.to, varMap)
             return panelData
-          } catch (err) {
-            console.error(`Failed to load panel ${panel.id}:`, err)
+          } catch {
             return null
           }
         })
@@ -763,10 +777,9 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         if (panels.length > 0) {
           const panelDataPromises = panels.map(async (panel) => {
             try {
-              const panelData = await api.getPanelData(dashboardId, panel.id, tr?.from, tr?.to, varMap)
+              const panelData = await api.getPanelData(dashboardId, panel.id, tr?.from, tr?.to, varMap, panel)
               return panelData
-            } catch (err) {
-              console.error(`Failed to load panel ${panel.id}:`, err)
+            } catch {
               return null
             }
           })
@@ -783,7 +796,6 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         }
       }
     } catch (e: any) {
-      console.error('刷新数据失败:', e)
       message.error('刷新失败: ' + (e.message || '未知错误'))
     } finally {
       setRefreshing(false)
@@ -811,10 +823,9 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       if (panels.length > 0) {
         const panelDataPromises = panels.map(async (panel) => {
           try {
-            const panelData = await api.getPanelData(dashboardId, panel.id, tr?.from, tr?.to, varMap)
+            const panelData = await api.getPanelData(dashboardId, panel.id, tr?.from, tr?.to, varMap, panel)
             return panelData
-          } catch (err) {
-            console.error(`Failed to load panel ${panel.id}:`, err)
+          } catch {
             return null
           }
         })
@@ -830,7 +841,6 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         setDataRes(dbData)
       }
     } catch (e: any) {
-      console.error('reloadDataWithDraft failed:', e)
       // 静默失败，不影响草稿编辑
     }
   }
@@ -1104,7 +1114,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, mergedVars)
         setDataRes(dbData)
       } catch (e: any) {
-        console.error('重新加载数据失败:', e)
+        // 静默失败
       }
     }, 200)
   }
@@ -1453,6 +1463,18 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                 )}
                 <button
                   className="btn-sm"
+                  onClick={() => { handleExportJson(); setMoreMenuOpen(false) }}
+                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  导出 JSON
+                </button>
+                <button
+                  className="btn-sm"
                   onClick={() => { setShowJson(true); setMoreMenuOpen(false) }}
                   style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
                 >
@@ -1727,7 +1749,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
             <div className="modal-header">
               <h2>仪表板JSON定义（当前草稿）</h2>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn-sm primary" onClick={() => navigator.clipboard.writeText(JSON.stringify(dj, null, 2))}>复制</button>
+                <button className="btn-sm primary" onClick={() => { navigator.clipboard.writeText(JSON.stringify(dj, null, 2)); message.success('已复制到剪贴板') }}>复制</button>
                 <button className="modal-close" onClick={() => setShowJson(false)}>&times;</button>
               </div>
             </div>

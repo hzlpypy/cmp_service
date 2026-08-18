@@ -139,8 +139,6 @@ function mergePanels(draftJson: any, newPanels: any[]) {
   return dj
 }
 
-const DEFAULT_WS_URL = 'ws://127.0.0.1:8764'
-
 const ALLOWED_EXTENSIONS = ['.txt', '.md', '.pdf', '.docx', '.xlsx', '.jpg', '.jpeg', '.png']
 
 /** 生成随机 message_id */
@@ -159,7 +157,7 @@ export default function AIChatDialog({
   panelsSummary,
   draftJson,
   onDraftUpdate,
-  wsUrl = DEFAULT_WS_URL,
+  wsUrl = api.WS_URL,
   visible = true,
 }: AIChatDialogProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -249,8 +247,8 @@ export default function AIChatDialog({
         }))
         setDatasourceList(list)
         datasourcesRef.current = list
-      } catch (e) {
-        console.error('Failed to fetch datasources:', e)
+      } catch {
+        // 数据源加载失败，静默处理
       }
     }
     fetchDatasources()

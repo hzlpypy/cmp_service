@@ -41,6 +41,8 @@ type DashboardBriefRes struct {
 	OwnerID string `json:"owner_id"`
 	// CanEdit 当前用户是否有编辑权限（用于前端只读模式）
 	CanEdit bool `json:"can_edit"`
+	// CanDelete 当前用户是否有删除权限（仅拥有者/admin，分享编辑者不可删除）
+	CanDelete bool `json:"can_delete"`
 	// Source 来源分组：mine(我的) / shared(分享给我的) / team(团队/部门可见)
 	Source string `json:"source"`
 	// OwnerName 创建人姓名（用于团队仪表板分组展示归属）

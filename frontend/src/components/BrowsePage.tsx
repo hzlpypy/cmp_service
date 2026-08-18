@@ -6,6 +6,8 @@ import type { ColumnsType } from 'antd/es/table'
 import * as api from '../api'
 import type { FolderRes } from '../api'
 import ShareModal from './ShareModal'
+import ImportDashboardModal from './ImportDashboardModal'
+import Icon from './Icon'
 import { sampleDashboards } from '../mock/dashboardSamples'
 
 function titleToSlug(title: string): string {
@@ -13,42 +15,12 @@ function titleToSlug(title: string): string {
 }
 
 const SVG_ICONS: Record<string, ReactNode> = {
-  folder: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e53935" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-    </svg>
-  ),
-  dash: (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" opacity="0.7">
-      <rect x="1" y="1" width="5" height="14" rx="1" />
-      <rect x="8" y="6" width="7" height="9" rx="1" />
-      <rect x="8" y="2" width="3" height="3" rx="0.5" />
-    </svg>
-  ),
-  team: (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7048e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  ),
-  chevronDown: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="6 9 12 15 18 9" />
-    </svg>
-  ),
-  chevronRight: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
-  ),
-  plus: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  ),
+  folder: <Icon name="folder" size={16} color="#e53935" />,
+  dash: <Icon name="dash" size={14} style={{ opacity: 0.7 }} />,
+  team: <Icon name="team" size={15} color="#7048e8" />,
+  chevronDown: <Icon name="chevronDown" size={14} />,
+  chevronRight: <Icon name="chevronRight" size={14} />,
+  plus: <Icon name="plus" size={14} />,
 }
 
 interface GroupData {
@@ -91,6 +63,7 @@ export default function BrowsePage() {
 
   // 分享弹窗（支持单个或多个仪表板：选中文件夹/多选时批量分享其下仪表板）
   const [shareTarget, setShareTarget] = useState<{ resourceType: 'dashboard' | 'snapshot'; resourceIds: string[]; resourceNames?: string[] } | null>(null)
+  const [showImportModal, setShowImportModal] = useState(false)
 
   const loadFolders = async (searchKeyword?: string, expandFolderId?: string) => {
     try {
@@ -104,7 +77,7 @@ export default function BrowsePage() {
         setExpandedFolders(new Set([res.list[0].id]))
       }
     } catch (e: any) {
-      console.error('加载文件夹失败:', e)
+      // 加载文件夹失败（静默处理，页面显示空列表）
     } finally {
       setLoading(false)
     }
@@ -161,10 +134,7 @@ export default function BrowsePage() {
         {db.can_edit !== false && (
           <>
             <button className="btn-sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleEditDashboardJson(db.id) }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="16 18 22 12 16 6" />
-                <polyline points="8 6 2 12 8 18" />
-              </svg>
+              <Icon name="json" size={12} />
               编辑JSON
             </button>
             <button
@@ -176,23 +146,16 @@ export default function BrowsePage() {
               }}
               title="分享仪表板"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="18" cy="5" r="3" />
-                <circle cx="6" cy="12" r="3" />
-                <circle cx="18" cy="19" r="3" />
-                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-              </svg>
+              <Icon name="share" size={12} />
               分享
             </button>
-            <button className="btn-sm btn-danger-text" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleDeleteDashboard(db.id) }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              </svg>
-              删除
-            </button>
           </>
+        )}
+        {db.can_delete === true && (
+          <button className="btn-sm btn-danger-text" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleDeleteDashboard(db.id) }}>
+            <Icon name="trash" size={12} />
+            删除
+          </button>
         )}
       </div>
     </div>
@@ -482,10 +445,8 @@ export default function BrowsePage() {
                 setSearchText('')
                 // 调用 getFolder 接口获取文件夹的完整内容
                 api.getFolder(record.id).then((folderRes) => {
-                  console.log('getFolder 返回数据:', folderRes) // 调试日志
                   setCurrentFolder(folderRes)
                 }).catch((err) => {
-                  console.error('获取文件夹内容失败:', err)
                   message.error('获取文件夹内容失败')
                 })
               }}
@@ -524,6 +485,7 @@ export default function BrowsePage() {
       render: (_: any, record: any) => {
         if (record.itemType === 'dashboard') {
           const canEdit = record.data?.can_edit !== false
+          const canDelete = record.data?.can_delete === true
           return (
             <div style={{ display: 'flex', gap: 8 }}>
               {canEdit && (
@@ -537,7 +499,7 @@ export default function BrowsePage() {
                   编辑
                 </button>
               )}
-              {canEdit && (
+              {canDelete && (
                 <button
                   className="btn-sm btn-danger-text"
                   onClick={(e) => {
@@ -598,19 +560,11 @@ export default function BrowsePage() {
             style={{ width: 280, marginRight: 16 }}
           />
           <button className="btn-sm btn-toolbar" disabled={totalSelected === 0} onClick={handleOpenMoveModal}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M5 9l4-4 4 4" />
-              <path d="M9 5v14" />
-              <path d="M19 15l-4 4-4-4" />
-              <path d="M15 19V5" />
-            </svg>
+            <Icon name="move" size={11} />
             移动
           </button>
           <button className="btn-sm btn-toolbar" disabled={totalSelected === 0} onClick={handleBatchDelete}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            </svg>
+            <Icon name="trash" size={11} />
             删除
           </button>
           <button
@@ -618,18 +572,20 @@ export default function BrowsePage() {
             disabled={totalSelected === 0}
             onClick={handleOpenShareModal}
           >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="18" cy="5" r="3" />
-              <circle cx="6" cy="12" r="3" />
-              <circle cx="18" cy="19" r="3" />
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-            </svg>
+            <Icon name="share" size={11} />
             分享
           </button>
           <span className="selected-count">已选择 {totalSelected} 项</span>
         </div>
         <div className="toolbar-right" ref={newMenuRef}>
+          <button
+            className="btn-sm"
+            onClick={() => setShowImportModal(true)}
+            title="从 JSON 文件或粘贴内容导入仪表板"
+          >
+            <Icon name="import" size={13} />
+            导入
+          </button>
           <div style={{ position: 'relative' }}>
             <button
               className="btn-sm btn-primary-new"
@@ -637,9 +593,7 @@ export default function BrowsePage() {
             >
               <span style={{ position: 'relative', top: '1px' }}>+</span>
               新建
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
+              <Icon name="chevronDown" size={12} />
             </button>
             {newMenuOpen && (
               <div className="new-dropdown-menu">
@@ -836,22 +790,16 @@ export default function BrowsePage() {
                 render: (_: any, record: any) => (
                   <div style={{ display: 'flex', gap: 8 }}>
                     {record.can_edit !== false && (
-                      <>
-                        <button className="btn-sm" onClick={(e) => { e.stopPropagation(); handleEditDashboardJson(record.id) }}>
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="16 18 22 12 16 6" />
-                            <polyline points="8 6 2 12 8 18" />
-                          </svg>
-                          编辑JSON
-                        </button>
-                        <button className="btn-sm btn-danger-text" onClick={(e) => { e.stopPropagation(); handleDeleteDashboard(record.id) }}>
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                          </svg>
-                          删除
-                        </button>
-                      </>
+                      <button className="btn-sm" onClick={(e) => { e.stopPropagation(); handleEditDashboardJson(record.id) }}>
+                        <Icon name="json" size={12} />
+                        编辑JSON
+                      </button>
+                    )}
+                    {record.can_delete === true && (
+                      <button className="btn-sm btn-danger-text" onClick={(e) => { e.stopPropagation(); handleDeleteDashboard(record.id) }}>
+                        <Icon name="trash" size={12} />
+                        删除
+                      </button>
                     )}
                   </div>
                 ),
@@ -995,6 +943,18 @@ export default function BrowsePage() {
           onClose={() => setShareTarget(null)}
         />
       )}
+
+      {/* 导入仪表板弹窗 */}
+      <ImportDashboardModal
+        open={showImportModal}
+        folders={folders}
+        onClose={() => setShowImportModal(false)}
+        onImported={(id, title) => {
+          setShowImportModal(false)
+          loadFolders()
+          navigate(`/capacity_mgt_platform/d/${id}/${titleToSlug(title)}`)
+        }}
+      />
     </div>
   )
 }

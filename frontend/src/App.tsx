@@ -8,6 +8,7 @@ import SnapshotView from './components/SnapshotView'
 import SnapshotList from './components/SnapshotList'
 import PanelEditPage from './components/PanelEditPage'
 import UserGroupManager from './components/UserGroupManager'
+import HomePage from './components/HomePage'
 
 import * as api from './api'
 import type { PanelDef, DatasourceRes, PanelDataRes, VariableRes } from './api'
@@ -15,7 +16,7 @@ import { initTheme } from './themes'
 import './App.css'
 import logo from './assets/logo.png'
 
-type Page = 'browse' | 'snapshots' | 'datasources' | 'settings'
+type Page = 'home' | 'browse' | 'snapshots' | 'datasources' | 'settings'
 
 // 可切换的演示身份（与后端 identity 模块的 mock 用户一致）
 const MOCK_USERS: Array<{ id: string; name: string; role: string }> = [
@@ -103,11 +104,12 @@ function SnapshotPageWrapper() {
 }
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('browse')
+  const [currentPage, setCurrentPage] = useState<Page>('home')
   const [snapshotListKey, setSnapshotListKey] = useState(0)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showGroups, setShowGroups] = useState(false)
   const location = useLocation()
+  const navigate = useNavigate()
 
   // 当前身份（与 api 层保持同步）
   const [currentUser, setCurrentUser] = useState(() => {
@@ -136,7 +138,7 @@ function App() {
       <header className="top-header">
         <div
           className="top-header-logo"
-          onClick={() => { setCurrentPage('browse') }}
+          onClick={() => { setCurrentPage('home'); navigate('/capacity_mgt_platform/') }}
         >
           <img src={logo} alt="Logo" className="top-header-logo-img" />
           <span className="top-header-title">容量管理平台</span>
@@ -205,8 +207,18 @@ function App() {
           </button>
         <nav className="sidebar-nav">
           <div
+            className={`nav-item ${currentPage === 'home' ? 'active' : ''}`}
+            onClick={() => { setCurrentPage('home'); navigate('/capacity_mgt_platform/') }}
+            title="首页"
+          >
+            <span className="nav-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M9 22V12h6v10" /></svg>
+            </span>
+            <span className="nav-label">首页</span>
+          </div>
+          <div
             className={`nav-item ${currentPage === 'browse' ? 'active' : ''}`}
-            onClick={() => setCurrentPage('browse')}
+            onClick={() => { setCurrentPage('browse'); navigate('/capacity_mgt_platform/') }}
             title="仪表板"
           >
             <span className="nav-icon">
@@ -242,6 +254,13 @@ function App() {
         <main className="main-content" style={{ padding: isInSnapshot ? 0 : undefined }}>
           <Routes>
             <Route path="/capacity_mgt_platform/" element={
+              currentPage === 'home' ? (
+                <HomePage
+                  currentUserName={currentUser.name}
+                  currentUserRole={currentUser.role}
+                  onNavigate={(p) => setCurrentPage(p)}
+                />
+              ) :
               currentPage === 'browse' ? <BrowsePage /> :
               currentPage === 'snapshots' ? <SnapshotList key={snapshotListKey} /> :
               <DataSourcesPage />

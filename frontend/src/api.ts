@@ -2,6 +2,9 @@
 
 const BASE = ''
 
+// AI Agent WebSocket 地址（统一常量，各组件引用此值，勿在组件内单独维护）
+export const WS_URL = 'ws://127.0.0.1:8764'
+
 // 当前登录用户ID（开发阶段默认 u-1001，生产环境由登录态/网关注入）
 // 支持运行时切换身份（演示不同角色视角），持久化到 localStorage
 let currentUserId: string = (() => {
@@ -84,6 +87,7 @@ export interface DashboardBriefRes {
   id: string
   owner_id?: string
   can_edit?: boolean
+  can_delete?: boolean
   source?: 'mine' | 'shared' | 'team'
   owner_name?: string
   team_name?: string
@@ -97,6 +101,7 @@ export interface DashboardRes {
   id: string
   owner_id?: string
   can_edit?: boolean
+  can_delete?: boolean
   source?: 'mine' | 'shared' | 'team'
   title: string
   folder_id: string
@@ -278,6 +283,27 @@ export async function createDashboard(title: string, folderId: string, dashboard
   return request('/api/v1/dashboards/create', {
     method: 'POST',
     body: JSON.stringify({ title, folder_id: folderId, dashboard_json: dashboardJson || {} }),
+  })
+}
+
+/** 下载 JSON 文件（用于仪表板导出） */
+export function downloadJson(data: unknown, filename: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+/** 导入仪表板（参照 Grafana 导入）：传入完整 dashboard_json，可选 title 覆盖 JSON 标题 */
+export async function importDashboard(title: string, folderId: string, dashboardJson: DashboardJSON): Promise<DashboardRes> {
+  return request('/api/v1/dashboards/import', {
+    method: 'POST',
+    body: JSON.stringify({ title, folder_id: folderId, dashboard_json: dashboardJson }),
   })
 }
 
@@ -487,11 +513,12 @@ export async function getVariableValues(id: string, query?: string, datasource_i
 
 // ---- Panels API ----
 
-export async function getPanelData(dashboard_id: string, panel_id: string, from?: string, to?: string, variables?: Record<string, string | string[]>): Promise<PanelDataRes> {
+export async function getPanelData(dashboard_id: string, panel_id: string, from?: string, to?: string, variables?: Record<string, string | string[]>, panel?: any): Promise<PanelDataRes> {
   const body: any = { dashboard_id, panel_id }
   if (from) body.from = from
   if (to) body.to = to
   if (variables && Object.keys(variables).length > 0) body.variables = variables
+  if (panel) body.panel = panel
   return request('/api/v1/panels/data', { method: 'POST', body: JSON.stringify(body) })
 }
 
