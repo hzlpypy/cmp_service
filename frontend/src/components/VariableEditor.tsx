@@ -60,8 +60,8 @@ export default function VariableEditor({ dashboardId }: VariableEditorProps) {
     try {
       const list = await api.listVariables(dashboardId)
       setVariables(list.sort((a, b) => a.sort_order - b.sort_order))
-    } catch (e) {
-      console.error('加载变量失败', e)
+    } catch {
+      // 加载变量失败，静默处理
     } finally {
       setLoading(false)
     }

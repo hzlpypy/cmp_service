@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { message } from 'antd'
+import { message, Button } from 'antd'
+import { WS_URL } from '../api'
 
 /** 报告缓存：按 dashboardId 存储已生成的报告 */
 const reportCache: Map<string, string> = new Map()
@@ -11,9 +12,6 @@ interface ReportModalProps {
   panelsSummary: Array<{ id: string; title: string; type: string; targets?: Array<{ refId: string; rawSql: string }> }>
   onClose: () => void
 }
-
-/** AI Agent WebSocket 地址 */
-const WS_URL = 'ws://127.0.0.1:8765'
 
 export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary, onClose }: ReportModalProps) {
   const [loading, setLoading] = useState(true)
@@ -130,7 +128,7 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
 
       ws.onerror = () => {
         if (!reportRef.current) {
-          setError('WebSocket 连接异常，请确认 AI Agent 已启动 (ws://127.0.0.1:8765)')
+          setError(`WebSocket 连接异常，请确认 AI Agent 已启动 (${WS_URL})`)
         }
         setLoading(false)
       }
@@ -314,14 +312,9 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
         </h2>
         {report && !loading && (
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn-sm btn-primary" onClick={handleDownload}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" style={{ marginRight: 4, verticalAlign: -2 }}>
-                <path d="M7 9L3.5 5.5h2.5V1h2v4.5h2.5L7 9zM1 10v2h12v-2H1z"/>
-              </svg>
-              下载报告 (.md)
-            </button>
-            <button className="btn-sm" onClick={handleCopy}>复制内容</button>
-            <button className="btn-sm" onClick={handleRetry}>重新生成</button>
+            <Button type="primary" size="small" onClick={handleDownload}>下载报告 (.md)</Button>
+            <Button size="small" onClick={handleCopy}>复制内容</Button>
+            <Button size="small" onClick={handleRetry}>重新生成</Button>
           </div>
         )}
       </div>
@@ -331,7 +324,7 @@ export default function ReportModal({ dashboardId, dashboardTitle, panelsSummary
         {error && !report ? (
           <div style={{ textAlign: 'center', padding: 80 }}>
             <div style={{ color: 'var(--danger)', marginBottom: 16 }}>{error}</div>
-            <button className="btn-sm btn-primary" onClick={handleRetry}>重试</button>
+            <Button type="primary" onClick={handleRetry}>重试</Button>
           </div>
         ) : (
           <>

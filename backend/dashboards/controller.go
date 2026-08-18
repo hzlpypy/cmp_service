@@ -55,6 +55,36 @@ func (cont *Controller) CreateDashboardController(ctx *gin.Context) {
 	ctx.JSON(201, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
 }
 
+// ImportDashboardController 导入仪表板（参照 Grafana 导入）。
+// 请求体为完整的仪表板 JSON（dashboard_json），可额外指定 title 覆盖 JSON 中的标题。
+// 未指定 title 时回退使用 dashboard_json.title，再回退为默认名称。
+// POST /api/v1/dashboards/import
+func (cont *Controller) ImportDashboardController(ctx *gin.Context) {
+	var req DashboardReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
+		return
+	}
+	if req.DashboardJSON == nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "dashboard_json 不能为空", "success": false})
+		return
+	}
+	// 标题回退：优先请求体 title，其次 JSON 中的 title，最后默认值
+	if req.Title == "" {
+		if t, ok := req.DashboardJSON["title"].(string); ok && t != "" {
+			req.Title = t
+		} else {
+			req.Title = "导入的仪表板"
+		}
+	}
+	resp, err := cont.CreateDashboard(ctx, &req)
+	if err != nil {
+		ctx.JSON(500, gin.H{"errorCode": "50000", "errorMessage": err.Error(), "success": false})
+		return
+	}
+	ctx.JSON(201, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
+}
+
 // UpdateDashboardController 更新仪表板信息（含 dashboard_json）。
 // POST /api/v1/dashboards/update
 func (cont *Controller) UpdateDashboardController(ctx *gin.Context) {
@@ -217,4 +247,54 @@ func (cont *Controller) DeleteVersionController(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true})
+}
+
+// ============================================================
+// 分享管理控制器
+// ============================================================
+
+// ShareResourceController 添加/更新分享。
+// POST /api/v1/dashboards/share
+func (cont *Controller) ShareResourceController(ctx *gin.Context) {
+	var req ShareReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
+		return
+	}
+	if err := cont.ShareResource(ctx, &req); err != nil {
+		ctx.JSON(403, gin.H{"errorCode": "40300", "errorMessage": err.Error(), "success": false})
+		return
+	}
+	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true})
+}
+
+// UnshareResourceController 取消分享。
+// POST /api/v1/dashboards/share/remove
+func (cont *Controller) UnshareResourceController(ctx *gin.Context) {
+	var req ShareReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
+		return
+	}
+	if err := cont.UnshareResource(ctx, &req); err != nil {
+		ctx.JSON(403, gin.H{"errorCode": "40300", "errorMessage": err.Error(), "success": false})
+		return
+	}
+	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true})
+}
+
+// ListSharesController 获取分享列表。
+// POST /api/v1/dashboards/share/list
+func (cont *Controller) ListSharesController(ctx *gin.Context) {
+	var req ShareListReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(400, gin.H{"errorCode": "40001", "errorMessage": "Invalid request: " + err.Error(), "success": false})
+		return
+	}
+	resp, err := cont.ListShares(ctx, &req)
+	if err != nil {
+		ctx.JSON(500, gin.H{"errorCode": "50000", "errorMessage": err.Error(), "success": false})
+		return
+	}
+	ctx.JSON(200, gin.H{"errorCode": "00000", "errorMessage": "", "success": true, "data": resp})
 }

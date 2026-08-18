@@ -25,6 +25,14 @@ type DashboardReq struct {
 type DashboardRes struct {
 	// ID 仪表板主键ID
 	ID string `json:"id"`
+	// OwnerID 创建者用户ID
+	OwnerID string `json:"owner_id"`
+	// CanEdit 当前用户是否有编辑权限（用于前端只读模式）
+	CanEdit bool `json:"can_edit"`
+	// CanDelete 当前用户是否有删除权限（仅拥有者/admin，分享编辑者不可删除）
+	CanDelete bool `json:"can_delete"`
+	// Source 来源分组：mine(我的) / shared(分享给我的) / team(团队/部门可见)
+	Source string `json:"source"`
 	// Title 仪表板标题
 	Title string `json:"title"`
 	// FolderID 所属文件夹ID
@@ -102,6 +110,8 @@ type PanelDataReq struct {
 	To string `json:"to,omitempty"`
 	// Variables 可选，前端传入的变量值映射
 	Variables map[string]interface{} `json:"variables,omitempty"`
+	// Panel 可选，前端传入的完整面板配置（含 targets）。用于查询尚未保存到数据库的草稿面板。
+	Panel map[string]interface{} `json:"panel,omitempty"`
 }
 
 // QueryInspectReq 查询检查器请求。
@@ -228,6 +238,7 @@ func ToDashboardRes(m *model.Dashboard) *DashboardRes {
 	}
 	return &DashboardRes{
 		ID:            m.ID,
+		OwnerID:       m.OwnerID,
 		Title:         m.Title,
 		FolderID:      m.FolderID,
 		FolderName:    folderName,

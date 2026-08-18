@@ -1,6 +1,7 @@
 package snapshots
 
 import (
+	"cmp_service_backend/identity"
 	"cmp_service_backend/model"
 	"crypto/rand"
 	"encoding/hex"
@@ -14,8 +15,9 @@ import (
 
 // Server holds the snapshot business service.
 type Server struct {
-	db  *gorm.DB
-	log *logrus.Logger
+	db       *gorm.DB
+	log      *logrus.Logger
+	identity *identity.Provider
 }
 
 // Interface defines snapshot business operations.
@@ -28,8 +30,8 @@ type Interface interface {
 }
 
 // NewServer creates a snapshot service instance.
-func NewServer(db *gorm.DB, log *logrus.Logger) Interface {
-	return &Server{db: db, log: log}
+func NewServer(db *gorm.DB, log *logrus.Logger, identityProvider *identity.Provider) Interface {
+	return &Server{db: db, log: log, identity: identityProvider}
 }
 
 // CreateReq snapshot create request.
@@ -52,6 +54,9 @@ type UpdateReq struct {
 // SnapshotRes snapshot response.
 type SnapshotRes struct {
 	ID             string                   `json:"id"`
+	OwnerID        string                   `json:"owner_id"`
+	CanEdit        bool                     `json:"can_edit"`
+	Source         string                   `json:"source"`
 	DashboardID    string                   `json:"dashboard_id"`
 	DashboardTitle string                   `json:"dashboard_title"` // 仪表板标题
 	PanelID        string                   `json:"panel_id"`
@@ -72,8 +77,14 @@ func generateKey() string {
 
 // Create creates a new snapshot.
 func (s *Server) Create(ctx *gin.Context, req *CreateReq) (*SnapshotRes, error) {
+	// 记录创建者
+	ownerID := ""
+	if uc := identity.FromContext(ctx); uc != nil {
+		ownerID = uc.UserID
+	}
 	key := generateKey()
 	snap := model.Snapshot{
+		OwnerID:       ownerID,
 		DashboardID:   req.DashboardID,
 		PanelID:       req.PanelID,
 		Key:           key,
@@ -101,10 +112,11 @@ func (s *Server) Get(ctx *gin.Context, key string) (*SnapshotRes, error) {
 	return toRes(&snap, title), nil
 }
 
-// List returns snapshots for a dashboard or panel.
+// List returns snapshots visible to the current user for a dashboard or panel.
+// 可见范围：自己的 + 分享给我的/我团队的 + 团队/部门成员的（按角色）。
 func (s *Server) List(ctx *gin.Context, dashboardID, panelID string) ([]*SnapshotRes, error) {
 	var snaps []model.Snapshot
-	q := s.db.Where("deleted_at IS NULL")
+	q := s.db.Scopes(s.identity.VisibleScope(ctx, "snapshot")).Where("deleted_at IS NULL")
 	if dashboardID != "" {
 		q = q.Where("dashboard_id = ?", dashboardID)
 	}
@@ -112,7 +124,7 @@ func (s *Server) List(ctx *gin.Context, dashboardID, panelID string) ([]*Snapsho
 		q = q.Where("panel_id = ?", panelID)
 	}
 	// 列表查询不加载 dashboard_json 和 panels_data，避免排序内存溢出
-	if err := q.Select("id, dashboard_id, panel_id, snapshot_key, name, created_at, updated_at, deleted_at").
+	if err := q.Select("id, owner_id, dashboard_id, panel_id, snapshot_key, name, created_at, updated_at, deleted_at").
 		Order("created_at DESC").Find(&snaps).Error; err != nil {
 		return nil, fmt.Errorf("list snapshots failed: %v", err)
 	}
@@ -136,15 +148,45 @@ func (s *Server) List(ctx *gin.Context, dashboardID, panelID string) ([]*Snapsho
 		}
 	}
 
+	// 批量计算权限字段
+	uc := identity.FromContext(ctx)
+	me := ""
+	if uc != nil {
+		me = uc.UserID
+	}
+	editableShared := s.identity.EditableShareIDs(ctx, "snapshot")
+	sharedToMe := s.identity.SharedResourceIDs(ctx, "snapshot")
+
 	res := make([]*SnapshotRes, 0, len(snaps))
 	for i := range snaps {
-		res = append(res, toRes(&snaps[i], titleMap[snaps[i].DashboardID]))
+		r := toRes(&snaps[i], titleMap[snaps[i].DashboardID])
+		r.CanEdit = uc != nil && (uc.IsAdmin() || snaps[i].OwnerID == me || editableShared[snaps[i].ID])
+		// source 分组：mine(我的) / shared(分享给我的) / team(团队/部门可见)
+		switch {
+		case uc != nil && uc.IsAdmin():
+			r.Source = "mine"
+		case snaps[i].OwnerID == me:
+			r.Source = "mine"
+		case sharedToMe[snaps[i].ID]:
+			r.Source = "shared"
+		default:
+			r.Source = "team"
+		}
+		res = append(res, r)
 	}
 	return res, nil
 }
 
 // Delete soft-deletes a snapshot.
+// 权限：仅创建者本人、admin 或分享可编辑者。
 func (s *Server) Delete(ctx *gin.Context, key string) error {
+	var snap model.Snapshot
+	if err := s.db.Where("snapshot_key = ? AND deleted_at IS NULL", key).First(&snap).Error; err != nil {
+		return fmt.Errorf("snapshot not found")
+	}
+	if !s.identity.CanManageResource(ctx, "snapshot", snap.ID, snap.OwnerID) {
+		return fmt.Errorf("无权限删除该快照")
+	}
 	if err := s.db.Where("snapshot_key = ?", key).Delete(&model.Snapshot{}).Error; err != nil {
 		return fmt.Errorf("delete snapshot failed: %v", err)
 	}
@@ -152,10 +194,14 @@ func (s *Server) Delete(ctx *gin.Context, key string) error {
 }
 
 // Update updates a snapshot (mainly for AI insights).
+// 权限：仅创建者本人、admin 或分享可编辑者。
 func (s *Server) Update(ctx *gin.Context, req *UpdateReq) (*SnapshotRes, error) {
 	var snap model.Snapshot
 	if err := s.db.Where("snapshot_key = ? AND deleted_at IS NULL", req.Key).First(&snap).Error; err != nil {
 		return nil, fmt.Errorf("snapshot not found")
+	}
+	if !s.identity.CanManageResource(ctx, "snapshot", snap.ID, snap.OwnerID) {
+		return nil, fmt.Errorf("无权限更新该快照")
 	}
 	// 更新字段
 	if req.Name != "" {
@@ -176,6 +222,7 @@ func (s *Server) Update(ctx *gin.Context, req *UpdateReq) (*SnapshotRes, error) 
 func toRes(m *model.Snapshot, dashboardTitle string) *SnapshotRes {
 	r := &SnapshotRes{
 		ID:             m.ID,
+		OwnerID:        m.OwnerID,
 		DashboardID:    m.DashboardID,
 		DashboardTitle: dashboardTitle,
 		PanelID:        m.PanelID,

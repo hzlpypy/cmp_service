@@ -37,6 +37,18 @@ type FolderRes struct {
 type DashboardBriefRes struct {
 	// ID 仪表板主键ID
 	ID string `json:"id"`
+	// OwnerID 创建者用户ID
+	OwnerID string `json:"owner_id"`
+	// CanEdit 当前用户是否有编辑权限（用于前端只读模式）
+	CanEdit bool `json:"can_edit"`
+	// CanDelete 当前用户是否有删除权限（仅拥有者/admin，分享编辑者不可删除）
+	CanDelete bool `json:"can_delete"`
+	// Source 来源分组：mine(我的) / shared(分享给我的) / team(团队/部门可见)
+	Source string `json:"source"`
+	// OwnerName 创建人姓名（用于团队仪表板分组展示归属）
+	OwnerName string `json:"owner_name,omitempty"`
+	// TeamName 创建人所属团队名（用于部长视角按团队二级分组）
+	TeamName string `json:"team_name,omitempty"`
 	// Title 仪表板标题
 	Title string `json:"title"`
 	// FolderID 所属文件夹ID
@@ -94,6 +106,7 @@ func ToFolderRes(m *model.Folder, dashboards []model.Dashboard) *FolderRes {
 	for _, d := range dashboards {
 		dbList = append(dbList, DashboardBriefRes{
 			ID:        d.ID,
+			OwnerID:   d.OwnerID,
 			Title:     d.Title,
 			FolderID:  d.FolderID,
 			CreatedAt: d.CreatedAt.Format("2006-01-02T15:04:05+08:00"),

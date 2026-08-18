@@ -2,6 +2,7 @@ package snapshotschedules
 
 import (
 	"cmp_service_backend/dashboards"
+	"cmp_service_backend/identity"
 	"cmp_service_backend/model"
 	"cmp_service_backend/snapshots"
 	"fmt"
@@ -26,21 +27,23 @@ type Interface interface {
 
 // Server holds the snapshot schedule service.
 type Server struct {
-	db          *gorm.DB
-	log         *logrus.Logger
+	db           *gorm.DB
+	log          *logrus.Logger
+	identity     *identity.Provider
 	dashboardSvc dashboards.Interface
 	snapshotSvc  snapshots.Interface
-	stopCh      chan struct{}
+	stopCh       chan struct{}
 }
 
 // NewServer creates a snapshot schedule service.
-func NewServer(db *gorm.DB, log *logrus.Logger, dashboardSvc dashboards.Interface, snapshotSvc snapshots.Interface) Interface {
+func NewServer(db *gorm.DB, log *logrus.Logger, idp *identity.Provider, dashboardSvc dashboards.Interface, snapshotSvc snapshots.Interface) Interface {
 	return &Server{
-		db:          db,
-		log:         log,
+		db:           db,
+		log:          log,
+		identity:     idp,
 		dashboardSvc: dashboardSvc,
 		snapshotSvc:  snapshotSvc,
-		stopCh:      make(chan struct{}),
+		stopCh:       make(chan struct{}),
 	}
 }
 
@@ -63,6 +66,8 @@ type SnapshotScheduleRes struct {
 	ID          string     `json:"id"`
 	DashboardID string     `json:"dashboard_id"`
 	Name        string     `json:"name"`
+	OwnerID     string     `json:"owner_id,omitempty"`
+	OwnerName   string     `json:"owner_name,omitempty"`
 	CronExpr    string     `json:"cron_expr"`
 	Enabled     bool       `json:"enabled"`
 	LastRunAt   string     `json:"last_run_at,omitempty"`
@@ -70,14 +75,20 @@ type SnapshotScheduleRes struct {
 	CreatedAt   string     `json:"created_at"`
 }
 
-func toRes(m *model.SnapshotSchedule) *SnapshotScheduleRes {
+func (s *Server) toRes(m *model.SnapshotSchedule) *SnapshotScheduleRes {
 	r := &SnapshotScheduleRes{
 		ID:          m.ID,
 		DashboardID: m.DashboardID,
 		Name:        m.Name,
+		OwnerID:     m.OwnerID,
 		CronExpr:    m.CronExpr,
 		Enabled:     m.Enabled,
 		CreatedAt:   m.CreatedAt.Format("2006-01-02T15:04:05+08:00"),
+	}
+	if m.OwnerID != "" {
+		if uc := s.identity.Resolve(m.OwnerID); uc != nil {
+			r.OwnerName = uc.DisplayName
+		}
 	}
 	if m.LastRunAt != nil {
 		r.LastRunAt = m.LastRunAt.Format("2006-01-02T15:04:05+08:00")
@@ -90,16 +101,29 @@ func toRes(m *model.SnapshotSchedule) *SnapshotScheduleRes {
 
 // Create creates a new snapshot schedule.
 func (s *Server) Create(ctx *gin.Context, req *CreateReq) (*SnapshotScheduleRes, error) {
+	// 权限校验：能查看该仪表板的用户（含只读分享）均可设置定时快照
+	var dashboard model.Dashboard
+	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.DashboardID).First(&dashboard).Error; err != nil {
+		return nil, fmt.Errorf("仪表板不存在")
+	}
+	if !s.identity.CanViewResource(ctx, "dashboard", dashboard.ID, dashboard.OwnerID) {
+		return nil, fmt.Errorf("无权限设置定时快照")
+	}
+
 	// 验证 cron 表达式
 	if _, err := parseCronExpr(req.CronExpr); err != nil {
 		return nil, fmt.Errorf("无效的 cron 表达式: %v", err)
 	}
 
+	uc := identity.FromContext(ctx)
 	schedule := model.SnapshotSchedule{
 		DashboardID: req.DashboardID,
 		Name:        req.Name,
 		CronExpr:    req.CronExpr,
 		Enabled:     true,
+	}
+	if uc != nil {
+		schedule.OwnerID = uc.UserID
 	}
 	schedule.ID = fmt.Sprintf("sched-%d", time.Now().UnixMilli())
 
@@ -110,29 +134,60 @@ func (s *Server) Create(ctx *gin.Context, req *CreateReq) (*SnapshotScheduleRes,
 	if err := s.db.Create(&schedule).Error; err != nil {
 		return nil, fmt.Errorf("create snapshot schedule failed: %v", err)
 	}
-	return toRes(&schedule), nil
+	return s.toRes(&schedule), nil
 }
 
 // List returns snapshot schedules for a dashboard.
 func (s *Server) List(ctx *gin.Context, dashboardID string) ([]*SnapshotScheduleRes, error) {
-	var schedules []model.SnapshotSchedule
-	q := s.db.Where("deleted_at IS NULL")
+	// 权限：只返回当前用户可见仪表板的调度
+	var visIDs []string
+	if err := s.db.Model(&model.Dashboard{}).
+		Scopes(s.identity.VisibleScope(ctx, "dashboard")).
+		Pluck("id", &visIDs).Error; err != nil {
+		return nil, fmt.Errorf("list snapshot schedules failed: %v", err)
+	}
+	q := s.db.Where("deleted_at IS NULL AND dashboard_id IN ?", visIDs)
 	if dashboardID != "" {
 		q = q.Where("dashboard_id = ?", dashboardID)
 	}
+	var schedules []model.SnapshotSchedule
 	if err := q.Order("created_at DESC").Find(&schedules).Error; err != nil {
 		return nil, fmt.Errorf("list snapshot schedules failed: %v", err)
 	}
 
 	res := make([]*SnapshotScheduleRes, 0, len(schedules))
 	for i := range schedules {
-		res = append(res, toRes(&schedules[i]))
+		res = append(res, s.toRes(&schedules[i]))
 	}
 	return res, nil
 }
 
+// canManageSchedule 校验当前用户能否管理该调度：
+// 调度的创建者本人 或 对关联仪表板具备编辑权限者。
+func (s *Server) canManageSchedule(ctx *gin.Context, scheduleID string) error {
+	var schedule model.SnapshotSchedule
+	if err := s.db.Where("id = ? AND deleted_at IS NULL", scheduleID).First(&schedule).Error; err != nil {
+		return fmt.Errorf("schedule not found")
+	}
+	uc := identity.FromContext(ctx)
+	if uc != nil && schedule.OwnerID != "" && schedule.OwnerID == uc.UserID {
+		return nil
+	}
+	var dashboard model.Dashboard
+	if err := s.db.Where("id = ?", schedule.DashboardID).First(&dashboard).Error; err != nil {
+		return fmt.Errorf("dashboard not found")
+	}
+	if !s.identity.CanManageResource(ctx, "dashboard", dashboard.ID, dashboard.OwnerID) {
+		return fmt.Errorf("无权限管理该定时快照")
+	}
+	return nil
+}
+
 // Update updates a snapshot schedule.
 func (s *Server) Update(ctx *gin.Context, req *UpdateReq) (*SnapshotScheduleRes, error) {
+	if err := s.canManageSchedule(ctx, req.ID); err != nil {
+		return nil, err
+	}
 	var schedule model.SnapshotSchedule
 	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&schedule).Error; err != nil {
 		return nil, fmt.Errorf("schedule not found")
@@ -153,11 +208,14 @@ func (s *Server) Update(ctx *gin.Context, req *UpdateReq) (*SnapshotScheduleRes,
 	if err := s.db.Save(&schedule).Error; err != nil {
 		return nil, fmt.Errorf("update snapshot schedule failed: %v", err)
 	}
-	return toRes(&schedule), nil
+	return s.toRes(&schedule), nil
 }
 
 // Delete soft-deletes a snapshot schedule.
 func (s *Server) Delete(ctx *gin.Context, id string) error {
+	if err := s.canManageSchedule(ctx, id); err != nil {
+		return err
+	}
 	if err := s.db.Where("id = ?", id).Delete(&model.SnapshotSchedule{}).Error; err != nil {
 		return fmt.Errorf("delete snapshot schedule failed: %v", err)
 	}
@@ -166,6 +224,9 @@ func (s *Server) Delete(ctx *gin.Context, id string) error {
 
 // Toggle enables or disables a snapshot schedule.
 func (s *Server) Toggle(ctx *gin.Context, id string, enabled bool) (*SnapshotScheduleRes, error) {
+	if err := s.canManageSchedule(ctx, id); err != nil {
+		return nil, err
+	}
 	var schedule model.SnapshotSchedule
 	if err := s.db.Where("id = ? AND deleted_at IS NULL", id).First(&schedule).Error; err != nil {
 		return nil, fmt.Errorf("schedule not found")
@@ -178,7 +239,7 @@ func (s *Server) Toggle(ctx *gin.Context, id string, enabled bool) (*SnapshotSch
 	if err := s.db.Save(&schedule).Error; err != nil {
 		return nil, fmt.Errorf("toggle snapshot schedule failed: %v", err)
 	}
-	return toRes(&schedule), nil
+	return s.toRes(&schedule), nil
 }
 
 // StartScheduler starts the background scheduler that checks and executes schedules.

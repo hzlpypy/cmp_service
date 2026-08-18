@@ -25,6 +25,7 @@ func RegisterDashboardsRouter(e *gin.Engine, c *Controller) {
 		api.POST("/list", c.ListDashboardsController)
 		api.POST("/get", c.GetDashboardController)
 		api.POST("/create", c.CreateDashboardController)
+		api.POST("/import", c.ImportDashboardController)
 		api.POST("/update", c.UpdateDashboardController)
 		api.POST("/delete", c.DeleteDashboardController)
 		api.POST("/data", c.GetDashboardDataController)
@@ -34,6 +35,10 @@ func RegisterDashboardsRouter(e *gin.Engine, c *Controller) {
 		api.POST("/versions/restore", c.RestoreVersionController)
 		api.POST("/versions/compare", c.CompareVersionsController)
 		api.POST("/versions/delete", c.DeleteVersionController)
+		// 分享管理
+		api.POST("/share", c.ShareResourceController)
+		api.POST("/share/remove", c.UnshareResourceController)
+		api.POST("/share/list", c.ListSharesController)
 	}
 	// 面板独立路由：查询单个面板数据
 	e.POST("/api/v1/panels/data", c.GetPanelDataController)

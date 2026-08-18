@@ -162,6 +162,8 @@ func (Folder) TableName() string { return "folders" }
 // 对应数据库表：datasources
 type Datasource struct {
 	Base
+	// OwnerID 创建者用户ID（外部用户权限库用户ID）
+	OwnerID string `gorm:"column:owner_id;type:varchar(64);not null;default:'';index" json:"owner_id"`
 	// Name 数据源名称（用户自定义）
 	Name string `gorm:"type:varchar(128);not null" json:"name"`
 	// Type 数据源类型：mysql 或 http
@@ -192,6 +194,8 @@ func (Datasource) TableName() string { return "datasources" }
 // 对应数据库表：dashboards
 type Dashboard struct {
 	Base
+	// OwnerID 创建者用户ID（外部用户权限库用户ID）
+	OwnerID string `gorm:"column:owner_id;type:varchar(64);not null;default:'';index" json:"owner_id"`
 	// Title 仪表板标题
 	Title string `gorm:"type:varchar(256);not null" json:"title"`
 	// FolderID 所属文件夹ID（外键关联 folders 表）
@@ -240,14 +244,24 @@ func (Panel) TableName() string { return "panels" }
 // Snapshot 快照表，存储仪表板或面板的即时快照，用于共享链接。
 type Snapshot struct {
 	Base
-	DashboardID   string     `gorm:"column:dashboard_id;type:varchar(64);not null" json:"dashboard_id"`
-	PanelID       string     `gorm:"column:panel_id;type:varchar(64);default:''" json:"panel_id"`
-	Key           string     `gorm:"column:snapshot_key;type:varchar(64);uniqueIndex;not null" json:"snapshot_key"`
-	Name          string     `gorm:"type:varchar(256);default:''" json:"name"`
-	DashboardJSON JSONMap    `gorm:"column:dashboard_json;type:json" json:"dashboard_json"`
-	PanelsData    JSONArray  `gorm:"column:panels_data;type:json" json:"panels_data"`
-	AIInsights    JSONMap    `gorm:"column:ai_insights;type:json" json:"ai_insights"` // AI 洞察内容：score, conclusion, risks, evaluation, plan
-	ExpiresAt     *time.Time `gorm:"column:expires_at" json:"expires_at,omitempty"`
+	// OwnerID 创建者用户ID（外部用户权限库用户ID）
+	OwnerID string `gorm:"column:owner_id;type:varchar(64);not null;default:'';index" json:"owner_id"`
+	// DashboardID 所属仪表板ID（快照来源仪表板）
+	DashboardID string `gorm:"column:dashboard_id;type:varchar(64);not null" json:"dashboard_id"`
+	// PanelID 所属面板ID（面板级快照时使用，仪表板级快照为空）
+	PanelID string `gorm:"column:panel_id;type:varchar(64);default:''" json:"panel_id"`
+	// Key 快照分享链接的唯一标识（128位随机hex，凭链接可访问）
+	Key string `gorm:"column:snapshot_key;type:varchar(64);uniqueIndex;not null" json:"snapshot_key"`
+	// Name 快照名称
+	Name string `gorm:"type:varchar(256);default:''" json:"name"`
+	// DashboardJSON 快照时仪表板的完整JSON定义
+	DashboardJSON JSONMap `gorm:"column:dashboard_json;type:json" json:"dashboard_json"`
+	// PanelsData 快照时各面板的查询结果数据
+	PanelsData JSONArray `gorm:"column:panels_data;type:json" json:"panels_data"`
+	// AIInsights AI 洞察内容：score, conclusion, risks, evaluation, plan
+	AIInsights JSONMap `gorm:"column:ai_insights;type:json" json:"ai_insights"`
+	// ExpiresAt 快照过期时间（空表示永不过期）
+	ExpiresAt *time.Time `gorm:"column:expires_at" json:"expires_at,omitempty"`
 }
 
 // TableName 指定快照表名。
@@ -257,7 +271,9 @@ func (Snapshot) TableName() string { return "snapshots" }
 type SnapshotSchedule struct {
 	Base
 	DashboardID string `gorm:"column:dashboard_id;type:varchar(64);not null;index" json:"dashboard_id"`
-	Name        string `gorm:"type:varchar(256);default:''" json:"name"`
+	// OwnerID 创建者用户ID（仅创建者可管理自己创建的调度）
+	OwnerID string `gorm:"column:owner_id;type:varchar(64);default:'';index" json:"owner_id"`
+	Name    string `gorm:"type:varchar(256);default:''" json:"name"`
 	// CronExpr cron 表达式，如 "0 8 * * *" 表示每天 8:00
 	CronExpr string `gorm:"column:cron_expr;type:varchar(128);not null" json:"cron_expr"`
 	// Enabled 是否启用
@@ -336,3 +352,66 @@ type DashboardVersion struct {
 
 // TableName 指定版本表名。
 func (DashboardVersion) TableName() string { return "dashboard_versions" }
+
+// ResourceShare 资源分享表，记录仪表板/快照分享给用户或团队的关系。
+// share_to_id 存储外部用户ID 或 外部团队ID。
+// 对应数据库表：resource_shares
+type ResourceShare struct {
+	// ID 主键（自增）
+	ID uint `gorm:"primary_key;auto_increment" json:"id"`
+	// ResourceType 资源类型：dashboard / snapshot
+	ResourceType string `gorm:"column:resource_type;type:varchar(16);not null" json:"resource_type"`
+	// ResourceID 被分享的资源ID（仪表板ID或快照ID）
+	ResourceID string `gorm:"column:resource_id;type:varchar(64);not null" json:"resource_id"`
+	// ShareToType 分享目标类型：user（用户）/ team（团队）
+	ShareToType string `gorm:"column:share_to_type;type:varchar(8);not null" json:"share_to_type"`
+	// ShareToID 分享目标ID（外部用户ID或外部团队ID）
+	ShareToID string `gorm:"column:share_to_id;type:varchar(64);not null" json:"share_to_id"`
+	// CanEdit 是否可编辑（默认只读）
+	CanEdit bool `gorm:"column:can_edit;type:tinyint(1);default:0" json:"can_edit"`
+	// SharedBy 分享发起人用户ID
+	SharedBy string `gorm:"column:shared_by;type:varchar(64);not null" json:"shared_by"`
+	// CreatedAt 分享创建时间
+	CreatedAt time.Time `gorm:"type:datetime(3)" json:"created_at"`
+	// UpdatedAt 分享记录最后更新时间
+	UpdatedAt time.Time `gorm:"type:datetime(3)" json:"updated_at"`
+	// DeletedAt 软删除标记（取消分享时软删除）
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+}
+
+// TableName 指定分享表名。
+func (ResourceShare) TableName() string { return "resource_shares" }
+
+// UserGroup 用户组表，平台内部维护的分享目标实体（区别于外部团队的 mock 数据）。
+// 用户可创建自己的用户组，将平台用户加入组中，分享资源时可选择分享给整个组。
+// 对应数据库表：user_groups
+type UserGroup struct {
+	Base
+	// OwnerID 创建者用户ID（仅创建者与 admin 可管理该组）
+	OwnerID string `gorm:"column:owner_id;type:varchar(64);not null;default:'';index" json:"owner_id"`
+	// Name 用户组名称
+	Name string `gorm:"type:varchar(128);not null" json:"name"`
+}
+
+// TableName 指定用户组表名。
+func (UserGroup) TableName() string { return "user_groups" }
+
+// UserGroupMember 用户组成员表，记录用户与用户组的从属关系。
+// 对应数据库表：user_group_members
+type UserGroupMember struct {
+	// ID 主键（自增）
+	ID uint `gorm:"primary_key;auto_increment" json:"id"`
+	// GroupID 所属用户组ID
+	GroupID string `gorm:"column:group_id;type:varchar(19);not null;index" json:"group_id"`
+	// UserID 成员用户ID（外部用户权限库用户ID）
+	UserID string `gorm:"column:user_id;type:varchar(64);not null;index" json:"user_id"`
+	// CreatedAt 加入时间
+	CreatedAt time.Time `gorm:"type:datetime(3)" json:"created_at"`
+	// UpdatedAt 记录最后更新时间
+	UpdatedAt time.Time `gorm:"type:datetime(3)" json:"updated_at"`
+	// DeletedAt 软删除标记（移除成员时软删除）
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+}
+
+// TableName 指定用户组成员表名。
+func (UserGroupMember) TableName() string { return "user_group_members" }

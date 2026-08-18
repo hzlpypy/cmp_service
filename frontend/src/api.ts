@@ -2,6 +2,26 @@
 
 const BASE = ''
 
+// AI Agent WebSocket 地址（统一常量，各组件引用此值，勿在组件内单独维护）
+export const WS_URL = 'ws://127.0.0.1:8764'
+
+// 当前登录用户ID（开发阶段默认 u-1001，生产环境由登录态/网关注入）
+// 支持运行时切换身份（演示不同角色视角），持久化到 localStorage
+let currentUserId: string = (() => {
+  try { return localStorage.getItem('cmp_current_user') || 'u-1001' } catch { return 'u-1001' }
+})()
+
+/** 获取当前身份用户ID */
+export function getCurrentUserId(): string {
+  return currentUserId
+}
+
+/** 切换当前身份用户ID（会持久化，页面需刷新以重新加载数据） */
+export function setCurrentUserId(id: string) {
+  currentUserId = id
+  try { localStorage.setItem('cmp_current_user', id) } catch {}
+}
+
 // getSystemVars 根据时间范围计算出系统变量值（Grafana 兼容格式）。
 // __from / __to 为原始 ISO 字符串，后端 ReplaceVariables 自动加引号。
 // __fromUnix / __toUnix / __fromMs / __toMs 不加引号（数字）。
@@ -28,8 +48,12 @@ export function getSystemVars(from?: string, to?: string): Record<string, string
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: {
+      ...(options?.headers || {}),
+      'Content-Type': 'application/json',
+      'X-User-Id': getCurrentUserId(),
+    },
   })
   // 检查响应是否为空
   const text = await res.text()
@@ -61,6 +85,12 @@ export interface FolderRes {
 
 export interface DashboardBriefRes {
   id: string
+  owner_id?: string
+  can_edit?: boolean
+  can_delete?: boolean
+  source?: 'mine' | 'shared' | 'team'
+  owner_name?: string
+  team_name?: string
   title: string
   folder_id: string
   created_at: string
@@ -69,6 +99,10 @@ export interface DashboardBriefRes {
 
 export interface DashboardRes {
   id: string
+  owner_id?: string
+  can_edit?: boolean
+  can_delete?: boolean
+  source?: 'mine' | 'shared' | 'team'
   title: string
   folder_id: string
   folder_name: string
@@ -93,6 +127,7 @@ export interface PanelBriefRes {
 
 export interface DatasourceRes {
   id: string
+  owner_id?: string
   name: string
   type: string
   url: string
@@ -251,6 +286,27 @@ export async function createDashboard(title: string, folderId: string, dashboard
   })
 }
 
+/** 下载 JSON 文件（用于仪表板导出） */
+export function downloadJson(data: unknown, filename: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+/** 导入仪表板（参照 Grafana 导入）：传入完整 dashboard_json，可选 title 覆盖 JSON 标题 */
+export async function importDashboard(title: string, folderId: string, dashboardJson: DashboardJSON): Promise<DashboardRes> {
+  return request('/api/v1/dashboards/import', {
+    method: 'POST',
+    body: JSON.stringify({ title, folder_id: folderId, dashboard_json: dashboardJson }),
+  })
+}
+
 export async function updateDashboard(id: string, title: string, folderId: string, dashboardJson?: DashboardJSON): Promise<DashboardRes> {
   return request('/api/v1/dashboards/update', {
     method: 'POST',
@@ -310,6 +366,9 @@ export async function testDatasource(data: { id?: string; name?: string; type?: 
 
 export interface SnapshotRes {
   id: string
+  owner_id?: string
+  can_edit?: boolean
+  source?: 'mine' | 'shared' | 'team'
   dashboard_id: string
   dashboard_title?: string  // 仪表板标题
   panel_id: string
@@ -346,10 +405,7 @@ export async function updateSnapshot(req: SnapshotUpdateReq): Promise<SnapshotRe
 }
 
 export async function getSnapshot(key: string): Promise<SnapshotRes> {
-  const res = await fetch(`/api/v1/snapshots/${key}`)
-  const json = await res.json()
-  if (!json.success) throw new Error(json.errorMessage || 'Unknown error')
-  return json.data
+  return request(`/api/v1/snapshots/${key}`)
 }
 
 export async function listSnapshots(dashboardId: string, panelId?: string): Promise<SnapshotRes[]> {
@@ -366,6 +422,8 @@ export interface SnapshotScheduleRes {
   id: string
   dashboard_id: string
   name: string
+  owner_id?: string
+  owner_name?: string
   cron_expr: string
   enabled: boolean
   last_run_at?: string
@@ -455,11 +513,12 @@ export async function getVariableValues(id: string, query?: string, datasource_i
 
 // ---- Panels API ----
 
-export async function getPanelData(dashboard_id: string, panel_id: string, from?: string, to?: string, variables?: Record<string, string | string[]>): Promise<PanelDataRes> {
+export async function getPanelData(dashboard_id: string, panel_id: string, from?: string, to?: string, variables?: Record<string, string | string[]>, panel?: any): Promise<PanelDataRes> {
   const body: any = { dashboard_id, panel_id }
   if (from) body.from = from
   if (to) body.to = to
   if (variables && Object.keys(variables).length > 0) body.variables = variables
+  if (panel) body.panel = panel
   return request('/api/v1/panels/data', { method: 'POST', body: JSON.stringify(body) })
 }
 
@@ -611,4 +670,109 @@ export async function compareVersions(dashboardId: string, versionFrom: number, 
 
 export async function deleteVersion(dashboardId: string, version: number): Promise<void> {
   return request('/api/v1/dashboards/versions/delete', { method: 'POST', body: JSON.stringify({ dashboard_id: dashboardId, version }) })
+}
+
+// ---- Share API（仪表板/快照分享）----
+
+export interface ShareRes {
+  id: number
+  resource_type: string
+  resource_id: string
+  share_to_type: 'user' | 'team' | 'group'
+  share_to_id: string
+  can_edit: boolean
+  shared_by: string
+  created_at: string
+}
+
+export async function shareResource(data: {
+  resource_type: 'dashboard' | 'snapshot'
+  resource_id: string
+  share_to_type: 'user' | 'team' | 'group'
+  share_to_id: string
+  can_edit: boolean
+}): Promise<void> {
+  return request('/api/v1/dashboards/share', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export async function unshareResource(data: {
+  resource_type: 'dashboard' | 'snapshot'
+  resource_id: string
+  share_to_type: 'user' | 'team' | 'group'
+  share_to_id: string
+}): Promise<void> {
+  return request('/api/v1/dashboards/share/remove', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export async function listShares(resourceType: 'dashboard' | 'snapshot', resourceId: string): Promise<ShareRes[]> {
+  return request('/api/v1/dashboards/share/list', { method: 'POST', body: JSON.stringify({ resource_type: resourceType, resource_id: resourceId }) })
+}
+
+// ---- Identity API（用户/团队搜索，分享弹窗用；后端转发外部权限服务，当前为 mock）----
+
+export interface UserBrief {
+  user_id: string
+  display_name: string
+  role: string
+  dept_id: string
+}
+
+export interface TeamBrief {
+  id: string
+  name: string
+}
+
+export async function searchUsers(q: string): Promise<UserBrief[]> {
+  const res = await request<{ list: UserBrief[] }>('/api/v1/users/search', { method: 'POST', body: JSON.stringify({ q }) })
+  return res.list
+}
+
+export async function listTeams(): Promise<TeamBrief[]> {
+  const res = await request<{ list: TeamBrief[] }>('/api/v1/teams/list', { method: 'POST', body: JSON.stringify({}) })
+  return res.list
+}
+
+// ---- UserGroup API（平台内部用户组：创建/成员管理/分享目标）----
+
+export interface UserGroupBrief {
+  id: string
+  name: string
+  owner_id?: string
+  owner_name?: string
+  member_count: number
+}
+
+export interface GroupMemberBrief {
+  user_id: string
+  display_name: string
+}
+
+export async function listGroups(): Promise<UserGroupBrief[]> {
+  const res = await request<{ list: UserGroupBrief[] }>('/api/v1/groups/list', { method: 'POST', body: JSON.stringify({}) })
+  return res.list
+}
+
+export async function createGroup(name: string): Promise<UserGroupBrief> {
+  return request('/api/v1/groups/create', { method: 'POST', body: JSON.stringify({ name }) })
+}
+
+export async function updateGroup(id: string, name: string): Promise<void> {
+  return request('/api/v1/groups/update', { method: 'POST', body: JSON.stringify({ id, name }) })
+}
+
+export async function deleteGroup(id: string): Promise<void> {
+  return request('/api/v1/groups/delete', { method: 'POST', body: JSON.stringify({ id }) })
+}
+
+export async function listGroupMembers(groupId: string): Promise<GroupMemberBrief[]> {
+  const res = await request<{ list: GroupMemberBrief[] }>('/api/v1/groups/members', { method: 'POST', body: JSON.stringify({ group_id: groupId }) })
+  return res.list
+}
+
+export async function addGroupMember(groupId: string, userIds: string[]): Promise<void> {
+  return request('/api/v1/groups/members/add', { method: 'POST', body: JSON.stringify({ group_id: groupId, user_ids: userIds }) })
+}
+
+export async function removeGroupMember(groupId: string, userId: string): Promise<void> {
+  return request('/api/v1/groups/members/remove', { method: 'POST', body: JSON.stringify({ group_id: groupId, user_id: userId }) })
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { useSearchParams, useNavigate, useParams, Link } from 'react-router-dom'
+import { useSearchParams, useNavigate, useParams,  Link } from 'react-router-dom'
 import { Modal, message, Breadcrumb } from 'antd'
 import { HomeOutlined, FolderOutlined, DashboardOutlined } from '@ant-design/icons'
 import html2canvas from 'html2canvas'
@@ -13,6 +13,61 @@ import ReportModal from './ReportModal'
 import SnapshotScheduleModal from './SnapshotScheduleModal'
 import * as api from '../api'
 import type { DashboardRes, DashboardDataRes, DashboardJSON, MetricRow, PanelDef, PanelDataRes, DatasourceRes, VariableRes } from '../api'
+import { recordRecentDashboard } from '../recentDashboards'
+
+// BeforeUnloadEvent 类型定义
+type BeforeEvent = BeforeUnloadEvent & {
+  returnValue: string
+}
+
+// 自定义导航确认对话框
+function NavigationPrompt({ when, onConfirm, onCancel }: { when: boolean; onConfirm: () => void; onCancel: () => void }) {
+  useEffect(() => {
+    if (when) {
+      const handleBeforeUnload = (e: BeforeEvent) => {
+        e.preventDefault()
+        e.returnValue = '仪表板有未保存的变更，确定要离开吗？'
+        return e.returnValue
+      }
+      window.addEventListener('beforeunload', handleBeforeUnload)
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload)
+      }
+    }
+  }, [when])
+
+  useEffect(() => {
+    if (when) {
+      const handlePopState = (e: PopStateEvent) => {
+        e.preventDefault()
+        Modal.confirm({
+          title: '未保存的变更',
+          content: '仪表板有未保存的变更，确定要离开吗？离开后变更将丢失。',
+          okText: '离开',
+          okType: 'danger',
+          cancelText: '取消',
+          onOk: () => {
+            window.removeEventListener('popstate', handlePopState)
+            onConfirm()
+          },
+          onCancel: () => {
+            onCancel()
+          },
+        })
+        // 阻止默认的返回行为
+        window.history.pushState(null, '', window.location.href)
+      }
+      window.addEventListener('popstate', handlePopState)
+      // 添加一个历史记录项，这样用户点击返回时会触发 popstate 事件
+      window.history.pushState(null, '', window.location.href)
+      return () => {
+        window.removeEventListener('popstate', handlePopState)
+      }
+    }
+  }, [when, onConfirm, onCancel])
+
+  return null
+}
 
 interface DashboardViewProps {
   dashboardId: string
@@ -86,8 +141,13 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   const { slug } = useParams<{ uid: string; slug?: string }>()
 
   const [dashboard, setDashboard] = useState<DashboardRes | null>(null)
+  // 是否有编辑权限（分享只读时禁止编辑/保存）
+  const [canEdit, setCanEdit] = useState(true)
+  // 编辑模式：仅开启后面板支持拖拽/调整大小（"更多 > 编辑"进入）
+  const [editMode, setEditMode] = useState(false)
   const [dataRes, setDataRes] = useState<DashboardDataRes | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false) // 刷新按钮的加载状态
   const [error, setError] = useState<string | null>(null)
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [showJson, setShowJson] = useState(false)
@@ -126,7 +186,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   const [snapshots, setSnapshots] = useState<api.SnapshotRes[]>([])
   const [snapLoading, setSnapLoading] = useState(false)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
-  const shareLink = `${window.location.origin}/snapshot/`
+  const shareLink = `${window.location.origin}/capacity_mgt_platform/snapshot/`
 
   const loadSnapshots = async () => {
     setSnapLoading(true)
@@ -245,6 +305,18 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       if (viewRoot) viewRoot.style.overflow = origRootOverflow
       setExporting(false)
     }
+  }
+
+  /** 导出仪表板 JSON 文件（参照 Grafana 导出，下载 .json） */
+  const handleExportJson = () => {
+    const json = savedJson || draftJson || dashboard?.dashboard_json
+    if (!json) {
+      message.warning('暂无可导出的仪表板数据')
+      return
+    }
+    const title = (json.title || displayTitle || 'dashboard') as string
+    api.downloadJson(json, `${title}.json`)
+    message.success('已导出 JSON 文件')
   }
 
   /** AI 通过 onDraftUpdate 回调传入修改后的 dashboard_json，立即生效 */
@@ -374,6 +446,43 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [moreMenuOpen])
+
+  // 返回按钮：检查未保存变更
+  const handleBack = () => {
+    if (hasUnsaved) {
+      Modal.confirm({
+        title: '未保存的变更',
+        content: '仪表板有未保存的变更，确定要离开吗？离开后变更将丢失。',
+        okText: '离开',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: () => {
+          onBack()
+        },
+      })
+    } else {
+      onBack()
+    }
+  }
+
+  // 面包屑导航：检查未保存变更
+  const handleBreadcrumbClick = (e: React.MouseEvent, path: string) => {
+    e.preventDefault()
+    if (hasUnsaved) {
+      Modal.confirm({
+        title: '未保存的变更',
+        content: '仪表板有未保存的变更，确定要离开吗？离开后变更将丢失。',
+        okText: '离开',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: () => {
+          navigate(path)
+        },
+      })
+    } else {
+      navigate(path)
+    }
+  }
 
   /** 更新 URL 参数（时间范围和变量） */
   const updateUrlParams = useCallback((newPreset?: TimePreset, newFrom?: string, _newTo?: string, newVars?: Record<string, string>) => {
@@ -593,16 +702,18 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       // 合并系统内置变量（$__from, $__to 等）
       if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
 
-      const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
       setDashboard(db)
-      setDataRes(dbData)
+      setCanEdit(db.can_edit !== false)
       setDatasources(dsList)
       setVariables(varList)
+      // 记录最近访问（首页展示）
+      recordRecentDashboard(dashboardId, db.title || '仪表板')
       // 重置手动选择跟踪（仪表板重新加载时）
       setManuallyTouchedVarIds(new Set())
       // 初始化本地草稿为当前 dashboard_json 的深拷贝
       const dj = JSON.parse(JSON.stringify(db.dashboard_json || {}))
       setDraftJson(dj)
+      setSavedJson(dj)
 
       // 更新 URL slug（如果当前 URL 没有 slug 或 slug 不匹配）
       const title = db.title || '仪表板'
@@ -610,7 +721,29 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       if (!slug || slug !== expectedSlug) {
         navigate(`/capacity_mgt_platform/d/${dashboardId}/${expectedSlug}${window.location.search}`, { replace: true })
       }
-      setSavedJson(dj)
+
+      // 并行获取每个面板的数据
+      const panels = (dj.panels || []) as any[]
+      if (panels.length > 0) {
+        const panelDataPromises = panels.map(async (panel) => {
+          try {
+            const panelData = await api.getPanelData(dashboardId, panel.id, tr?.from, tr?.to, varMap)
+            return panelData
+          } catch {
+            return null
+          }
+        })
+
+        const panelDataResults = await Promise.all(panelDataPromises)
+
+        // 合并所有面板数据
+        const dbData: api.DashboardDataRes = {
+          dashboard_id: dashboardId,
+          dashboard_json: dj,
+          panels_data: panelDataResults.filter((data): data is api.PanelDataRes => data !== null)
+        }
+        setDataRes(dbData)
+      }
     } catch (e: any) {
       setError(e.message || '加载失败')
     } finally {
@@ -618,14 +751,54 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     }
   }
 
-  // 刷新数据：保留草稿，只重新查询数据
+  // 刷新数据：保留草稿，只重新查询数据（不触发全局 loading，避免页面闪烁）
   const handleRefresh = async () => {
-    // 如果有未保存的草稿，使用草稿重新加载数据
-    if (draftJson && savedJson && JSON.stringify(draftJson) !== JSON.stringify(savedJson)) {
-      await reloadDataWithDraft(draftJson)
-    } else {
-      // 没有草稿或草稿已保存，重新加载仪表板
-      await loadData()
+    setRefreshing(true)
+    try {
+      const tr = getTimeRange()
+      // 构建变量值映射（用户变量 + 系统变量）
+      const varMap: Record<string, string | string[]> = {}
+      variables.forEach((v) => {
+        if (v.current && (v.current as any).value) {
+          varMap[v.name] = (v.current as any).value
+        } else if (v.default) {
+          varMap[v.name] = v.default
+        }
+      })
+      if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
+
+      // 使用草稿或已保存的 JSON 重新查询面板数据
+      const currentJson = (draftJson && savedJson && JSON.stringify(draftJson) !== JSON.stringify(savedJson))
+        ? draftJson
+        : savedJson || draftJson
+
+      if (currentJson) {
+        const panels = (currentJson.panels || []) as any[]
+        if (panels.length > 0) {
+          const panelDataPromises = panels.map(async (panel) => {
+            try {
+              const panelData = await api.getPanelData(dashboardId, panel.id, tr?.from, tr?.to, varMap, panel)
+              return panelData
+            } catch {
+              return null
+            }
+          })
+
+          const panelDataResults = await Promise.all(panelDataPromises)
+
+          // 更新面板数据（不触发全局 loading，避免页面闪烁）
+          const dbData: api.DashboardDataRes = {
+            dashboard_id: dashboardId,
+            dashboard_json: currentJson,
+            panels_data: panelDataResults.filter((data): data is api.PanelDataRes => data !== null)
+          }
+          setDataRes(dbData)
+        }
+      }
+    } catch (e: any) {
+      message.error('刷新失败: ' + (e.message || '未知错误'))
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -644,10 +817,30 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         }
       })
       if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
-      const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, draft as DashboardJSON, varMap)
-      setDataRes(dbData)
+
+      // 并行获取每个面板的数据
+      const panels = (draft.panels || []) as any[]
+      if (panels.length > 0) {
+        const panelDataPromises = panels.map(async (panel) => {
+          try {
+            const panelData = await api.getPanelData(dashboardId, panel.id, tr?.from, tr?.to, varMap, panel)
+            return panelData
+          } catch {
+            return null
+          }
+        })
+
+        const panelDataResults = await Promise.all(panelDataPromises)
+
+        // 合并所有面板数据
+        const dbData: api.DashboardDataRes = {
+          dashboard_id: dashboardId,
+          dashboard_json: draft,
+          panels_data: panelDataResults.filter((data): data is api.PanelDataRes => data !== null)
+        }
+        setDataRes(dbData)
+      }
     } catch (e: any) {
-      console.error('reloadDataWithDraft failed:', e)
       // 静默失败，不影响草稿编辑
     }
   }
@@ -727,6 +920,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         columns={columnMap.get(panel.id)}
         dataLinks={panel.dataLinks}
         menuOpen={openMenuId === panel.id}
+        showMenu={canEdit}
         onToggleMenu={() => toggleMenu(panel.id)}
         onEdit={() => handleEditPanel(panel.id)}
         onRemove={() => handleRemovePanel(panel.id)}
@@ -752,20 +946,6 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       if (title !== dashboard.title) {
         setDashboard({ ...dashboard, title, dashboard_json: saved })
       }
-      // 不重新加载变量，保留用户当前选择的变量值
-      // 只重新加载仪表板数据（使用当前变量和时间范围）
-      const tr = getTimeRange()
-      const varMap: Record<string, string | string[]> = {}
-      variables.forEach((v) => {
-        if (v.current && (v.current as any).value) {
-          varMap[v.name] = (v.current as any).value
-        } else if (v.default) {
-          varMap[v.name] = v.default
-        }
-      })
-      if (tr) Object.assign(varMap, api.getSystemVars(tr.from, tr.to))
-      const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, varMap)
-      setDataRes(dbData)
       // 保存成功提示
       message.success('仪表板保存成功')
     } catch (e: any) {
@@ -777,6 +957,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
   // ---- 单面板编辑：导航到全屏编辑页面 ----
   const handleEditPanel = (panelId: string) => {
+    if (!canEdit) return // 只读：禁止编辑面板
     setOpenMenuId(null)
     const panels: any[] = draftJson?.panels || []
     const panel = panels.find((p: any) => p.id === panelId)
@@ -817,6 +998,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
   // ---- 添加面板（仅修改本地草稿） ----
   const handleAddPanel = () => {
+    if (!canEdit) return // 只读：禁止添加面板
     setShowNewPanel(false)
     const panels: any[] = [...(draftJson?.panels || [])]
     const ds = datasources[0]
@@ -839,6 +1021,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
   // ---- 删除面板（仅修改本地草稿） ----
   const handleRemovePanel = (panelId: string) => {
+    if (!canEdit) return // 只读：禁止删除面板
     const newPanels = (draftJson?.panels || []).filter((p: any) => p.id !== panelId)
     setDraftJson({ ...draftJson, panels: newPanels })
     setOpenMenuId(null)
@@ -846,6 +1029,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
 
   // ---- 处理布局变化（拖拽/调整大小） ----
   const handleLayoutChange = (updatedPanels: any[]) => {
+    if (!canEdit || !editMode) return // 未开启编辑模式：禁止拖拽/调整面板布局
     setDraftJson({ ...draftJson, panels: updatedPanels })
   }
 
@@ -930,16 +1114,27 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
         const dbData = await api.getDashboardData(dashboardId, tr?.from, tr?.to, undefined, mergedVars)
         setDataRes(dbData)
       } catch (e: any) {
-        console.error('重新加载数据失败:', e)
+        // 静默失败
       }
     }, 200)
   }
+
+  // 导航确认：拦截所有离开当前页面的操作
+  const confirmNavigationRef = useRef(false)
+  const handleConfirmNavigation = useCallback(() => {
+    confirmNavigationRef.current = true
+    // 返回到上一页
+    window.history.back()
+  }, [])
+  const handleCancelNavigation = useCallback(() => {
+    // 用户取消，不做任何操作
+  }, [])
 
   if (loading) {
     return (
       <div className="dashboard-view">
         <div className="dashboard-toolbar">
-          <div className="toolbar-left"><button className="btn-sm" onClick={onBack}>&lt; 返回</button></div>
+          <div className="toolbar-left"><button className="btn-sm" onClick={handleBack}>&lt; 返回</button></div>
         </div>
         <div className="empty-state">加载中...</div>
       </div>
@@ -950,7 +1145,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
     return (
       <div className="dashboard-view">
         <div className="dashboard-toolbar">
-          <div className="toolbar-left"><button className="btn-sm" onClick={onBack}>&lt; 返回</button></div>
+          <div className="toolbar-left"><button className="btn-sm" onClick={handleBack}>&lt; 返回</button></div>
         </div>
         <div className="empty-state" style={{ color: 'var(--red)' }}>{error || '仪表板不存在'}</div>
       </div>
@@ -958,22 +1153,31 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
   }
 
   return (
-    <div className="dashboard-view">
+    <>
+      {/* 导航确认组件：拦截所有离开当前页面的操作 */}
+      <NavigationPrompt
+        when={hasUnsaved}
+        onConfirm={handleConfirmNavigation}
+        onCancel={handleCancelNavigation}
+      />
+      <div className="dashboard-view">
       {/* 面包屑导航 */}
       <div style={{ padding: '12px 24px', background: '#fff', borderBottom: '1px solid #f0f0f0' }}>
         <Breadcrumb>
           <Breadcrumb.Item>
-            <Link to="/capacity_mgt_platform/">
+            <Link
+              to="/capacity_mgt_platform/"
+              onClick={(e) => handleBreadcrumbClick(e, '/capacity_mgt_platform/')}
+            >
               <HomeOutlined /> 仪表板
             </Link>
           </Breadcrumb.Item>
           {dashboard?.folder_name && (
             <Breadcrumb.Item>
-              <Link to="/" onClick={(e) => {
-                e.preventDefault()
-                // TODO: 跳转到该文件夹
-                navigate('/capacity_mgt_platform/')
-              }}>
+              <Link
+                to="/capacity_mgt_platform/"
+                onClick={(e) => handleBreadcrumbClick(e, '/capacity_mgt_platform/')}
+              >
                 <FolderOutlined /> {dashboard.folder_name}
               </Link>
             </Breadcrumb.Item>
@@ -986,7 +1190,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
       {/* ---- Toolbar ---- */}
       <div className="dashboard-toolbar">
         <div className="toolbar-left">
-          <button className="btn-sm" onClick={onBack}>&lt; 返回</button>
+          <button className="btn-sm" onClick={handleBack}>&lt; 返回</button>
           <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)' }}>{displayTitle}</span>
           <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: '1px' }}>{panels.length} 个面板</span>
           {hasUnsaved && (
@@ -1162,21 +1366,57 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
             )}
           </div>
 
-          {/* 常用按钮 */}
-          <button className="btn-sm add-panel" onClick={() => setShowNewPanel(true)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '-3px' }}>
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            添加面板
-          </button>
-          <button className="btn-sm" onClick={handleRefresh} title="刷新数据">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {/* 常用按钮（只读时隐藏添加面板） */}
+          {canEdit && (
+            <button className="btn-sm add-panel" onClick={() => setShowNewPanel(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '-3px' }}>
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              添加面板
+            </button>
+          )}
+          {/* 编辑模式按钮（常用，放外面） */}
+          {canEdit && (
+            <button
+              className="btn-sm"
+              onClick={() => setEditMode(!editMode)}
+              style={editMode ? { borderColor: 'var(--accent)', color: 'var(--accent)', background: 'rgba(64,158,255,0.1)' } : undefined}
+              title="开启后面板支持拖拽和调整大小"
+            >
+              {!editMode && (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              )}
+              {editMode ? '退出编辑' : '编辑'}
+            </button>
+          )}
+          <button
+            className="btn-sm"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="刷新数据"
+          >
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{
+                animation: refreshing ? 'spin 1s linear infinite' : 'none',
+              }}
+            >
               <polyline points="23 4 23 10 17 10" />
               <polyline points="1 20 1 14 7 14" />
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
             </svg>
-            刷新
+            {refreshing ? '刷新中...' : '刷新'}
           </button>
 
           {/* 更多操作下拉菜单 */}
@@ -1208,16 +1448,30 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                   gap: 4,
                 }}
               >
+                {canEdit && (
+                  <button
+                    className="btn-sm"
+                    onClick={() => { setShowEditor(true); setMoreMenuOpen(false) }}
+                    style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="3" />
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                    </svg>
+                    设置
+                  </button>
+                )}
                 <button
                   className="btn-sm"
-                  onClick={() => { setShowEditor(true); setMoreMenuOpen(false) }}
+                  onClick={() => { handleExportJson(); setMoreMenuOpen(false) }}
                   style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
-                  编辑仪表板
+                  导出 JSON
                 </button>
                 <button
                   className="btn-sm"
@@ -1254,6 +1508,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                   </svg>
                   创建快照
                 </button>
+                {/* 定时快照：所有可见用户（含只读分享）均可创建自己的定时快照 */}
                 <button
                   className="btn-sm"
                   onClick={() => { setShowSchedule(true); setMoreMenuOpen(false) }}
@@ -1267,17 +1522,20 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                   </svg>
                   定时快照
                 </button>
-                <button
-                  className="btn-sm"
-                  onClick={() => { setShowVersionHistory(true); setMoreMenuOpen(false) }}
-                  style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <polyline points="12 6 12 12 16 14" />
-                  </svg>
-                  版本历史
-                </button>
+                {/* 版本历史：只读分享下不可见 */}
+                {canEdit && (
+                  <button
+                    className="btn-sm"
+                    onClick={() => { setShowVersionHistory(true); setMoreMenuOpen(false) }}
+                    style={{ width: '100%', textAlign: 'left', justifyContent: 'flex-start' }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                    版本历史
+                  </button>
+                )}
                 <button
                   className="btn-sm"
                   onClick={() => { setShowReport(true); setMoreMenuOpen(false) }}
@@ -1294,32 +1552,36 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
             )}
           </div>
 
-          {/* 保存按钮：有未保存变更时高亮 */}
-          <button
-            className="btn-sm save-btn"
-            onClick={handleSaveDashboard}
-            disabled={saving}
-            title="保存仪表板（将所有面板变更持久化）"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-              <polyline points="17 21 17 13 7 13 7 21" />
-              <polyline points="7 3 7 8 15 8" />
-            </svg>
-            {saving ? '保存中...' : '保存仪表板'}
-          </button>
+          {/* 保存按钮：有未保存变更时高亮（只读时隐藏） */}
+          {canEdit && (
+            <button
+              className="btn-sm save-btn"
+              onClick={handleSaveDashboard}
+              disabled={saving}
+              title="保存仪表板（将所有面板变更持久化）"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                <polyline points="17 21 17 13 7 13 7 21" />
+                <polyline points="7 3 7 8 15 8" />
+              </svg>
+              {saving ? '保存中...' : '保存仪表板'}
+            </button>
+          )}
 
-          {/* AI 助手按钮 */}
-          <button
-            className={`btn-sm ${chatOpen ? 'primary' : ''}`}
-            onClick={() => setChatOpen(!chatOpen)}
-            title={chatOpen ? '关闭AI助手' : '打开AI助手'}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            {chatOpen ? '关闭AI' : 'AI 助手'}
-          </button>
+          {/* AI 助手按钮：只读分享下不可见 */}
+          {canEdit && (
+            <button
+              className={`btn-sm ${chatOpen ? 'primary' : ''}`}
+              onClick={() => setChatOpen(!chatOpen)}
+              title={chatOpen ? '关闭AI助手' : '打开AI助手'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              {chatOpen ? '关闭AI' : 'AI 助手'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1401,11 +1663,13 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                           style={{ fontSize: 11, whiteSpace: 'nowrap', padding: '4px 10px' }}>
                           {copiedKey === snap.snapshot_key ? '已复制' : '复制链接'}
                         </button>
-                        <button className="btn-sm"
-                          onClick={() => handleDeleteSnapshot(snap.snapshot_key)}
-                          style={{ fontSize: 11, color: 'var(--red)', borderColor: 'transparent', padding: '4px 8px' }}>
-                          删除
-                        </button>
+                        {snap.can_edit && (
+                          <button className="btn-sm"
+                            onClick={() => handleDeleteSnapshot(snap.snapshot_key)}
+                            style={{ fontSize: 11, color: 'var(--red)', borderColor: 'transparent', padding: '4px 8px' }}>
+                            删除
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1485,7 +1749,7 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
             <div className="modal-header">
               <h2>仪表板JSON定义（当前草稿）</h2>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn-sm primary" onClick={() => navigator.clipboard.writeText(JSON.stringify(dj, null, 2))}>复制</button>
+                <button className="btn-sm primary" onClick={() => { navigator.clipboard.writeText(JSON.stringify(dj, null, 2)); message.success('已复制到剪贴板') }}>复制</button>
                 <button className="modal-close" onClick={() => setShowJson(false)}>&times;</button>
               </div>
             </div>
@@ -1553,14 +1817,16 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
                 rowHeight={30}
                 cols={24}
                 gap={8}
-                editable={true}
+                editable={canEdit && editMode}
               >
                 {renderPanelContent}
               </GridLayout>
             )
           ) : (
             <div className="add-panel-zone">
-              <span style={{ color: 'var(--text-muted)' }}>此仪表板暂无面板，点击"+ 添加面板"开始创建</span>
+              <span style={{ color: 'var(--text-muted)' }}>
+                {canEdit ? '此仪表板暂无面板，点击"+ 添加面板"开始创建' : '此仪表板暂无面板'}
+              </span>
             </div>
           )}
         </div>
@@ -1627,5 +1893,6 @@ export default function DashboardView({ dashboardId, onBack, onEditPanel }: Dash
           </div>
       </div>
     </div>
+    </>
   )
 }

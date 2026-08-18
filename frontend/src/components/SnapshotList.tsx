@@ -312,15 +312,17 @@ export default function SnapshotList() {
                         onClick={() => handleCopy(snap.snapshot_key)}
                       />
                     </Tooltip>
-                    <Tooltip title="删除">
-                      <Button
-                        type="text"
-                        size="small"
-                        danger
-                        icon={<DeleteOutlined />}
-                        onClick={() => handleDelete(snap.snapshot_key)}
-                      />
-                    </Tooltip>
+                    {snap.can_edit && (
+                      <Tooltip title="删除">
+                        <Button
+                          type="text"
+                          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                          onClick={() => handleDelete(snap.snapshot_key)}
+                        />
+                      </Tooltip>
+                    )}
                   </div>
                 </div>
               )
