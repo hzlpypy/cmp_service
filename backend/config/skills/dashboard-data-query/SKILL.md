@@ -40,7 +40,7 @@ description: "告知智能体如何获取仪表盘相关数据。包括查询面
 **POST /api/v1/panels/data**
 
 ```bash
-curl -s http://cmp-service-svc:3011/api/v1/panels/data \
+curl -s http://127.0.0.1:3011/api/v1/panels/data \
   -H 'Content-Type: application/json' \
   -d '{
     "dashboard_id": "仪表盘ID",
@@ -68,6 +68,7 @@ curl -s http://cmp-service-svc:3011/api/v1/panels/data \
     "panel_title": "交易日历",
     "panel_type": "line",
     "datasource_id": "ds-1",
+    "columns": ["date", "market", "volume"],
     "target": [
       [{"date": "2024-01-01", "market": "sha", "volume": 12345}, {"date": "2024-01-02", "market": "sha", "volume": 12890}]
     ]
@@ -75,7 +76,7 @@ curl -s http://cmp-service-svc:3011/api/v1/panels/data \
 }
 ```
 
-`target` 是二维数组，第一维对应面板的每个 target（refId A/B/C），第二维是数据行。
+`target` 是二维数组，第一维对应面板的每个 target（refId A/B/C），第二维是数据行。`columns` 为数据列名顺序。
 
 ### 2.1.1 直接 SQL 查询 API（Query Inspector）
 
@@ -84,7 +85,7 @@ curl -s http://cmp-service-svc:3011/api/v1/panels/data \
 **POST /api/v1/panels/inspect**
 
 ```bash
-curl -s http://cmp-service-svc:3011/api/v1/panels/inspect \
+curl -s http://127.0.0.1:3011/api/v1/panels/inspect \
   -H 'Content-Type: application/json' \
   -d '{
     "datasource_id": "ds-1",
@@ -172,9 +173,12 @@ curl -s http://cmp-service-svc:3011/api/v1/panels/inspect \
 
 ## 3. 数据源 ID 参考
 
+> 数据源以数据库实际数据为准，可通过数据源列表 API 获取完整列表。以下为常见数据源示例：
+
 | 数据源 ID | 名称 |
 |-----------|------|
-| `ds-1` | 网络指标API |
+| `ds-1` | 网络指标数据库（MySQL） |
+| `ds-http-1` | 监控API（HTTP） |
 
 ---
 
@@ -186,7 +190,7 @@ curl -s http://cmp-service-svc:3011/api/v1/panels/inspect \
 
 **配置字段**：
 - `type`: `"mysql"`
-- `url`: 数据库连接地址（如 `cmp-service-svc:3306`）
+- `url`: 数据库连接地址（如 `127.0.0.1:3306`）
 - `name`: 数据源名称
 - `config`: 无特殊配置
 
@@ -398,7 +402,7 @@ interface VariableRes {
 
 **创建自定义变量**：
 ```bash
-curl -s http://cmp-service-svc:3011/api/v1/variables/create \
+curl -s http://127.0.0.1:3011/api/v1/variables/create \
   -H 'Content-Type: application/json' \
   -d '{
     "dashboard_id": "db-1",
@@ -416,7 +420,7 @@ curl -s http://cmp-service-svc:3011/api/v1/variables/create \
 
 **创建查询变量**：
 ```bash
-curl -s http://cmp-service-svc:3011/api/v1/variables/create \
+curl -s http://127.0.0.1:3011/api/v1/variables/create \
   -H 'Content-Type: application/json' \
   -d '{
     "dashboard_id": "db-1",
@@ -464,7 +468,7 @@ curl -s http://cmp-service-svc:3011/api/v1/variables/create \
 文件保存在后端运行目录下的 `./client_files/` 文件夹中。
 
 ```bash
-curl -X POST http://cmp-service-svc:3011/api/v1/file/upload \
+curl -X POST http://127.0.0.1:3011/api/v1/file/upload \
   -F "file=@/path/to/document.pdf"
 ```
 
@@ -472,12 +476,10 @@ curl -X POST http://cmp-service-svc:3011/api/v1/file/upload \
 
 ## 7. 数据源列表 API
 
-用于获取系统中所有可用的数据源。
+用于获取系统中所有可用的数据源。**注意：该接口为 GET 方法，无请求体。**
 
 ```bash
-curl -s http://cmp-service-svc:3011/api/v1/datasources/list \
-  -H 'Content-Type: application/json' \
-  -d '{}'
+curl -s http://127.0.0.1:3011/api/v1/datasources/list
 ```
 
 ---

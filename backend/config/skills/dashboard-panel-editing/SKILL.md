@@ -118,7 +118,7 @@ description: "告知智能体如何通过返回结构化 JSON 指令与前端交
   "action": "select_datasource",
   "datasources": [
     {"id": "ds-http-1", "name": "监控API", "type": "http", "url": "http://localhost:9999"},
-    {"id": "ds-1", "name": "网络指标数据库", "type": "mysql", "url": "cmp-service-svc:3306"}
+    {"id": "ds-1", "name": "网络指标数据库", "type": "mysql", "url": "127.0.0.1:3306"}
   ],
   "message": "创建报表需要先确定数据源。请从以下数据源中选择一个："
 }
@@ -126,9 +126,9 @@ description: "告知智能体如何通过返回结构化 JSON 指令与前端交
 
 ### 数据源列表 API
 
-**仅在无 @ 指定时调用**：
+**仅在无 @ 指定时调用**（注意：该接口为 GET 方法，无请求体）：
 ```bash
-curl -s http://cmp-service-svc:3011/api/v1/datasources/list -H 'Content-Type: application/json' -d '{}'
+curl -s http://127.0.0.1:3011/api/v1/datasources/list
 ```
 
 ### 禁止行为
@@ -262,7 +262,7 @@ curl -s http://cmp-service-svc:3011/api/v1/datasources/list -H 'Content-Type: ap
 |------|------|------|------|
 | `id` | string | **修改时必填** | 面板唯一 ID，修改已有面板时填写原 ID |
 | `title` | string | 是 | 面板标题 |
-| `type` | string | 是 | 图表类型：`line`、`bar`、`pie`、`gauge`、`table` |
+| `type` | string | 是 | 图表类型：`line`、`bar`、`pie`、`gauge`、`table`、`timeseries` |
 | `gridPos` | object | 否 | 布局 `{x,y,w,h}`，不填时前端自动计算 |
 | `datasource_id` | string | 否 | 数据源 ID |
 | `targets` | array | 是 | 查询配置数组 |
