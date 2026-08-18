@@ -97,20 +97,26 @@ function mergePanels(draftJson: any, newPanels: any[]) {
 
     if (idx >= 0) {
       // 已存在 → 合并更新
-      // targets 按 refId 深度合并：AI 只需传要改的字段，保留原有其他字段
-      // 空数组不覆盖（AI 只想改类型时不传 targets）
+      // targets 按 refId 深度合并：AI 只需传要改的 target 和字段，未提及的 target 保留原值
+      // 空数组/未传不覆盖（AI 只想改类型时不传 targets）
       let mergedTargets = existingPanels[idx].targets || []
       if (np.targets && Array.isArray(np.targets) && np.targets.length > 0) {
-        mergedTargets = np.targets.map((newT: any) => {
-          const existingT = (existingPanels[idx].targets || []).find(
-            (t: any) => t.refId === newT.refId
-          )
-          if (existingT) {
+        const existingTargets = existingPanels[idx].targets || []
+        // 遍历原有 targets：被 AI 提及的按 refId 合并，未提及的保留原值
+        mergedTargets = existingTargets.map((existingT: any) => {
+          const newT = np.targets.find((t: any) => t.refId === existingT.refId)
+          if (newT) {
             // 按 refId 合并：保留原有字段，只覆盖 AI 传的字段
             return { ...existingT, ...newT }
           }
-          return newT
+          return existingT
         })
+        // AI 新增的 target（原面板不存在的 refId）追加到末尾
+        for (const newT of np.targets) {
+          if (!existingTargets.some((t: any) => t.refId === newT.refId)) {
+            mergedTargets.push(newT)
+          }
+        }
       }
 
       existingPanels[idx] = {

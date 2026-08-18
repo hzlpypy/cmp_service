@@ -3,7 +3,7 @@
 const BASE = ''
 
 // AI Agent WebSocket 地址（统一常量，各组件引用此值，勿在组件内单独维护）
-export const WS_URL = 'ws://127.0.0.1:8764'
+export const WS_URL = 'ws://127.0.0.1:8765'
 
 // 当前登录用户ID（开发阶段默认 u-1001，生产环境由登录态/网关注入）
 // 支持运行时切换身份（演示不同角色视角），持久化到 localStorage
