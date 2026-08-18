@@ -863,7 +863,6 @@ export default memo(function ChartPanel({ type, title, data, targets, menuOpen, 
         chartInstancesRef.current = new Map()
       }
     } catch (err: any) {
-      console.error('ChartPanel init error:', err)
       setChartError(err.message || '图表初始化失败')
       try {
         if (chartInstanceRef.current) { chartInstanceRef.current.dispose(); chartInstanceRef.current = null }

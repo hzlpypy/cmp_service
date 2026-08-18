@@ -54,6 +54,7 @@ func (s *Server) fillDashboardAccess(ctx *gin.Context, res *FolderRes) {
 	for i := range res.Dashboards {
 		d := &res.Dashboards[i]
 		d.CanEdit = uc != nil && (uc.IsAdmin() || d.OwnerID == me || editableShared[d.ID])
+		d.CanDelete = uc != nil && (uc.IsAdmin() || d.OwnerID == me)
 		// source 分组：mine(我的) / shared(分享给我的) / team(团队/部门可见)
 		switch {
 		case uc != nil && uc.IsAdmin():

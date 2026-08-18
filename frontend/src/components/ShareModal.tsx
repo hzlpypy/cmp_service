@@ -190,7 +190,7 @@ export default function ShareModal({ open, resourceType, resourceIds, resourceNa
       onCancel={onClose}
       footer={null}
       width={640}
-      destroyOnClose
+      destroyOnHidden
     >
       <Tabs
         items={[

@@ -285,6 +285,16 @@ func (p *Provider) CanManageResource(c *gin.Context, resType, resID, ownerID str
 	return cnt > 0
 }
 
+// CanDeleteResource 判断当前用户是否可删除某资源。
+// 删除权限比编辑更严格：仅 admin 或资源拥有者可删除，分享（即使可编辑）不可删除。
+func (p *Provider) CanDeleteResource(c *gin.Context, resType, resID, ownerID string) bool {
+	uc := FromContext(c)
+	if uc == nil {
+		return false
+	}
+	return uc.IsAdmin() || ownerID == uc.UserID
+}
+
 // isSharedToMe 判断资源是否分享给当前用户、其团队或其用户组。
 func (p *Provider) isSharedToMe(uc *UserContext, resType, resID string) bool {
 	cond, args := p.shareCondSQL(uc, false)

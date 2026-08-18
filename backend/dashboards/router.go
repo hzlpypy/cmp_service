@@ -25,6 +25,7 @@ func RegisterDashboardsRouter(e *gin.Engine, c *Controller) {
 		api.POST("/list", c.ListDashboardsController)
 		api.POST("/get", c.GetDashboardController)
 		api.POST("/create", c.CreateDashboardController)
+		api.POST("/import", c.ImportDashboardController)
 		api.POST("/update", c.UpdateDashboardController)
 		api.POST("/delete", c.DeleteDashboardController)
 		api.POST("/data", c.GetDashboardDataController)

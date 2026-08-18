@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-
-const WS_URL = `ws://${window.location.host}/ws/cmp_llm`
+import { WS_URL } from '../api'
 
 interface AIInsightsProps {
   dashboardId: string
@@ -466,21 +465,32 @@ export function AIInsightsPanel({ dashboardTitle, panelsData, panelsConfig, trig
 
   const generateSingle = (prompt: string): Promise<string> => new Promise((resolve) => {
     let buffer = ''
+    let settled = false
+    let ws: WebSocket | null = null
+    const done = (result: string) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try { ws?.close() } catch {}
+      resolve(result)
+    }
+    // 10s 超时兜底，避免连接挂起导致 Promise 永久 pending 且 ws 泄漏
+    const timer = setTimeout(() => done(buffer), 10000)
     try {
-      const ws = new WebSocket(WS_URL)
-      ws.onopen = () => ws.send(JSON.stringify({ type: 'chat', message: prompt }))
+      ws = new WebSocket(WS_URL)
+      ws.onopen = () => ws!.send(JSON.stringify({ type: 'chat', message: prompt }))
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
           if (data.type === 'heartbeat') return
-          if (data.type === 'end') { ws.close(); resolve(buffer); return }
+          if (data.type === 'end') { done(buffer); return }
           const chunk = data.message || ''
           if (data.msg_category === 'model' && chunk) buffer += chunk
         } catch {}
       }
-      ws.onerror = () => resolve('')
-      ws.onclose = () => resolve('')
-    } catch { resolve('') }
+      ws.onerror = () => done('')
+      ws.onclose = () => done('')
+    } catch { done('') }
   })
 
   return (

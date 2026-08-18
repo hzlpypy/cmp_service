@@ -201,6 +201,7 @@ func (s *Server) ListDashboards(ctx *gin.Context, folderID string) ([]*Dashboard
 	for _, r := range records {
 		res := ToDashboardRes(r)
 		res.CanEdit = uc != nil && (uc.IsAdmin() || r.OwnerID == me || editableShared[r.ID])
+		res.CanDelete = uc != nil && (uc.IsAdmin() || r.OwnerID == me)
 		res.Source = computeSource(uc, me, r.OwnerID, sharedToMe[r.ID])
 		result = append(result, res)
 	}
@@ -242,6 +243,7 @@ func (s *Server) GetDashboard(ctx *gin.Context, req *DashboardReq) (*DashboardRe
 	}
 	res := ToDashboardRes(&record)
 	res.CanEdit = s.identity.CanManageResource(ctx, "dashboard", record.ID, record.OwnerID)
+	res.CanDelete = s.identity.CanDeleteResource(ctx, "dashboard", record.ID, record.OwnerID)
 	res.Source = computeSource(uc, me, record.OwnerID, s.identity.IsSharedToMe(ctx, "dashboard", record.ID))
 	return res, nil
 }
@@ -328,13 +330,13 @@ func (s *Server) UpdateDashboard(ctx *gin.Context, req *DashboardReq) (*Dashboar
 	return ToDashboardRes(&record), nil
 }
 
-// DeleteDashboard 软删除仪表板（仅拥有者或管理员可删除）。
+// DeleteDashboard 软删除仪表板（仅拥有者或管理员可删除，分享编辑者不可删除）。
 func (s *Server) DeleteDashboard(ctx *gin.Context, req *DashboardReq) error {
 	var current model.Dashboard
 	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.ID).First(&current).Error; err != nil {
 		return err
 	}
-	if !s.identity.CanManageResource(ctx, "dashboard", current.ID, current.OwnerID) {
+	if !s.identity.CanDeleteResource(ctx, "dashboard", current.ID, current.OwnerID) {
 		return fmt.Errorf("无权限删除该仪表板")
 	}
 	return s.db.Where("id = ?", req.ID).Delete(&model.Dashboard{}).Error
@@ -516,14 +518,20 @@ func (s *Server) GetDashboardData(ctx *gin.Context, req *DashboardDataReq) (*Das
 //  3. 遍历 panels 找到匹配 panel_id 的面板
 //  4. 只查询该面板的 targets，返回结果
 func (s *Server) GetPanelData(ctx *gin.Context, req *PanelDataReq) (*PanelData, error) {
+	// 获取变量值
+	varValues := s.getVariableValues(req.DashboardID, req.Variables)
+
+	// 优先使用前端传入的面板配置（用于查询尚未保存的草稿面板）
+	if req.Panel != nil && len(req.Panel) > 0 {
+		panelData := s.queryPanelDataWithVars(req.Panel, req.From, req.To, varValues)
+		return &panelData, nil
+	}
+
 	// 从数据库加载仪表板
 	var dashboard model.Dashboard
 	if err := s.db.Where("id = ? AND deleted_at IS NULL", req.DashboardID).First(&dashboard).Error; err != nil {
 		return nil, fmt.Errorf("仪表板不存在: %v", err)
 	}
-
-	// 获取变量值
-	varValues := s.getVariableValues(req.DashboardID, req.Variables)
 
 	// 解析 dashboard_json 中的 panels
 	dashJSON := dashboard.DashboardJSON

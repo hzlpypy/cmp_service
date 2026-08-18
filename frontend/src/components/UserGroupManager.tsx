@@ -167,7 +167,7 @@ export default function UserGroupManager({ open, onClose }: UserGroupManagerProp
   ]
 
   return (
-    <Modal title="用户组管理" open={open} onCancel={onClose} footer={null} width={880} destroyOnClose>
+    <Modal title="用户组管理" open={open} onCancel={onClose} footer={null} width={880} destroyOnHidden>
       <div style={{ display: 'flex', gap: 16, minHeight: 420 }}>
         {/* 左侧：组列表 */}
         <div style={{ width: 320, flexShrink: 0, borderRight: '1px solid #f0f0f0', paddingRight: 16 }}>

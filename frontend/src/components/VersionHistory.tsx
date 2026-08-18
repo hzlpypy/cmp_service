@@ -116,8 +116,8 @@ export default function VersionHistory({ dashboardId, onClose, onRestore }: Vers
     try {
       const list = await api.listVersions(dashboardId)
       setVersions(list)
-    } catch (e) {
-      console.error('加载版本列表失败', e)
+    } catch {
+      // 加载版本列表失败，静默处理
     } finally {
       setLoading(false)
     }
